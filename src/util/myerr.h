@@ -65,4 +65,4 @@ __END_DECLS
 
 #undef attribute_printf
 #endif
-// vim: ft=c
+// vim: ft=cpp
