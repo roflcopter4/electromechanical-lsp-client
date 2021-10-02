@@ -12,16 +12,16 @@
 #endif
 
 #if defined HAVE_MKDTEMP
-constexpr static void my_mkdtemp(char *templ) { mkdtemp(templ); }
+#  define MKDTEMP(x) mkdtemp(x)
 #else
 #  include <glib.h>
-constexpr static void my_mkdtemp(char *templ) { g_mkdtemp(templ); }
+#  define MKDTEMP(x) g_mkdtemp(x)
 #endif
 
 #ifdef _MSC_VER
-#  define __function__ __FUNCTION__
+#  define FUNCTION __FUNCTION__
 #else
-#  define __function__ __extension__ __PRETTY_FUNCTION__
+#  define FUNCTION __extension__ __PRETTY_FUNCTION__
 #endif
 
 #ifdef DOSISH
@@ -46,9 +46,9 @@ void cleanup_sighandler(int signum);
 static class cleanup_c
 {
     private:
-      path              tmp_path_{};
-      std::mutex        mut_{};
-      std::vector<path> delete_list_;
+      path tmp_path_{};
+      std::vector<path>    delete_list_;
+      std::recursive_mutex mut_{};
 
     public:
       void push(path const &Path)
@@ -74,9 +74,9 @@ static class cleanup_c
             mut_.lock();
             try {
                   for (auto const &Path : delete_list_) {
-                        if (std::filesystem::exists(Path)) {
-                              fprintf(stderr, "Removing path '%s'\n", Path.c_str());
-                              std::filesystem::remove_all(Path);
+                        if (exists(Path)) {
+                              fprintf(stderr, "Removing path '%s'\n", Path.string().c_str());
+                              remove_all(Path);
                         }
                   }
             } catch (std::exception &e) {
@@ -111,7 +111,9 @@ static class cleanup_c
 
       ~cleanup_c()
       {
-            do_cleanup();
+            try {
+                  do_cleanup();
+            } catch (...) {}
       }
 
       DELETE_COPY_CTORS(cleanup_c);
@@ -141,19 +143,22 @@ cleanup_sighandler(int const signum)
 path
 get_temporary_directory(char const *prefix)
 {
-      char buf[PATH_MAX + 1];
-      auto sys_dir = std::filesystem::temp_directory_path();
+      char       buf[PATH_MAX + 1];
+      auto const sys_dir = std::filesystem::temp_directory_path();
 
 #if defined HAVE_MKDTEMP || defined __G_LIB_H__
+      /* NOTE: The following _must_ use path.string().c_str() rather than just
+       * path.c_str() because the latter, on Windows, returns a wide character string. */
       if (prefix) {
-            snprintf(buf, sizeof(buf), "%s" FILESEP_STR "%sXXXXXX", sys_dir.c_str(), prefix);
+            snprintf(buf, sizeof(buf), "%s" FILESEP_STR "%sXXXXXX",
+                     sys_dir.string().c_str(), prefix);
       } else {
-            auto str = sys_dir.string();
+            auto const str = sys_dir.string();
             memcpy(buf, str.data(), str.size()); //NOLINT(bugprone-not-null-terminated-result)
             memcpy(buf + str.size(), FILESEP_STR "XXXXXX", 8);
       }
 
-      my_mkdtemp(buf);
+      MKDTEMP(buf);
       path ret(buf);
 #else
       even_dumber_tempname(buf, sys_dir.c_str(), prefix, nullptr);
@@ -176,9 +181,9 @@ get_temporary_directory(char const *prefix)
 path
 get_temporary_filename(char const *prefix, char const *suffix)
 {
-      char       buf[PATH_MAX + 1];
-      auto const tmp_dir = cleanup.get_path();
-      even_dumber_tempname(buf, tmp_dir.c_str(), prefix, suffix);
+      char        buf[PATH_MAX + 1];
+      auto const &tmp_dir = cleanup.get_path();
+      even_dumber_tempname(buf, tmp_dir.string().c_str(), prefix, suffix);
 
       return {buf};
 }
@@ -195,10 +200,12 @@ open_new_socket(char const *const path)
       addr.sun_family = AF_UNIX;
 
       auto const connection_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#ifdef DOSISH
+      if (auto const e = GetLastError(); e != 0)
+            FATAL_ERROR("socket");
+#else
       if (connection_sock == (-1))
            FATAL_ERROR("socket");
-
-#ifndef DOSISH
       int tmp = fcntl(connection_sock, F_GETFL);
       fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
@@ -219,10 +226,12 @@ connect_to_socket(char const *const path)
       addr.sun_family = AF_UNIX;
 
       auto const data_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-      if (data_sock == (-1))
+#ifdef DOSISH
+      if (auto const e = GetLastError(); e != 0)
             FATAL_ERROR("socket");
-
-#ifndef DOSISH
+#else
+      if (data_sock == (-1))
+           FATAL_ERROR("socket");
       int tmp = fcntl(data_sock, F_GETFL);
       fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
@@ -245,6 +254,7 @@ cxx_random_device_get_random_val(void)
 }
 
 #ifdef DOSISH
+#include <strsafe.h>
 namespace win32
 {
 
@@ -252,30 +262,29 @@ void
 error_exit(wchar_t const *lpsz_function)
 {
       // Retrieve the system error message for the last-error code
-      LPVOID lpMsgBuf;
-      DWORD  dw = GetLastError();
+      DWORD const dw      = WSAGetLastError();
+      LPVOID      msg_buf = nullptr;
 
-      FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                        FORMAT_MESSAGE_IGNORE_INSERTS,
-                    nullptr, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                    reinterpret_cast<LPTSTR>(&lpMsgBuf), 0, nullptr);
+      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                     nullptr, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                     reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
 
-      // Display the error message and exit the process
-      LPVOID const lpDisplayBuf = LocalAlloc(
-          LMEM_ZEROINIT, (lstrlen(static_cast<LPCTSTR>(lpMsgBuf)) +
-                          lstrlenW(lpsz_function) + 40) * sizeof(TCHAR)
-      );
-      StringCchPrintf(static_cast<LPTSTR>(lpDisplayBuf),
-                      LocalSize(lpDisplayBuf) / sizeof(TCHAR),
-                      TEXT("%s failed with error %d: %s"), lpsz_function, dw, lpMsgBuf);
-      MessageBox(nullptr, static_cast<LPCTSTR>(lpDisplayBuf), TEXT("Error"), MB_OK);
+      LPVOID lp_display_buf =
+          LocalAlloc(LMEM_ZEROINIT,
+                     (static_cast<size_t>(lstrlenW(lpsz_function)) +
+                      static_cast<size_t>(lstrlenW(static_cast<LPWSTR>(msg_buf))) + SIZE_C(40)) * sizeof(WCHAR));
+      assert(lp_display_buf != nullptr);
+      StringCchPrintfW(static_cast<STRSAFE_LPWSTR>(lp_display_buf),
+                       LocalSize(lp_display_buf) / sizeof(WCHAR), L"%s failed with error %d: %s",
+                       lpsz_function, dw, static_cast<LPWSTR>(msg_buf));
+      MessageBoxW(nullptr, static_cast<LPCWSTR>(lp_display_buf), L"Error", MB_OK);
 
-      LocalFree(lpMsgBuf);
-      LocalFree(lpDisplayBuf);
+      LocalFree(msg_buf);
+      LocalFree(lp_display_buf);
       ExitProcess(dw);
 }
 
-} //namespace win32
+} // namespace win32
 #endif
 
 } // namespace emlsp::util

@@ -1,11 +1,11 @@
+// ReSharper disable CppInconsistentNaming
 #include "Common.hh"
 #include "rapid.hh"
+#include "util/myerr.h"
 
-#include <fmt/core.h>
 #include <glib.h>
 #include <nlohmann/json.hpp>
 #include <stack>
-#include "util/myerr.h"
 
 #ifdef true
 #  warning "true was a macro!"
@@ -16,14 +16,27 @@
 #  undef false
 #endif
 
-#define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT) __VA_OPT__(,) __VA_ARGS__)
-#define FORMAT(FMT, ...) fmt::format(FMT_COMPILE(FMT) __VA_OPT__(,) __VA_ARGS__)
+#define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT),  ##__VA_ARGS__)
+#define FORMAT(FMT, ...) fmt::format(FMT_COMPILE(FMT), ##__VA_ARGS__)
 
 namespace emlsp::rpc::json
 {
+struct socket_info {
+      std::string path;
+      socket_t    main_sock;
+      socket_t    connected_sock;
+      socket_t    accepted_sock;
 
-static int attempt_clangd_pipe(int *writefd, int *readfd);
-static void test_read(GPid pid, int writefd, int readfd);
+      PROCESS_INFORMATION procinfo;
+};
+
+UNUSED static socket_info *attempt_clangd_sock();
+UNUSED static void         test_recv(socket_t readfd);
+
+static GPid attempt_clangd_pipe(int *writefd, int *readfd);
+static void test_read(int readfd);
+
+/****************************************************************************************/
 
 __attribute__((__noinline__))
 void test2()
@@ -54,13 +67,17 @@ void test2()
             std::stringstream ss;
             ss << obj;
             std::string msg = ss.str();
-            std::string header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
-            fmt::print(FMT_COMPILE("Writing string:\n{}\n"), msg);
-            write(writefd, msg.data(), msg.length());
+            std::string header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
+            PRINT("Writing string:\n{}\n", msg);
+            (void)write(writefd, msg.data(), msg.length());
       }
 
-      test_read(pid, writefd, readfd);
+      test_read(readfd);
+      close(readfd);
+      close(writefd);
 }
+
+/****************************************************************************************/
 
 template <typename Allocator> class Document;
 template <typename Allocator> class Object;
@@ -76,10 +93,10 @@ class Object : public rapidjson::Value
           : rapidjson::Value(rapidjson::Type::kObjectType), allocator_(alloc)
       {}
 
-      ND inline Allocator &get_allocator() { return allocator_; }
+      ND Allocator &get_allocator() { return allocator_; }
 
       template <typename T>
-      inline void addmember(StringRefType name, T &&value)
+      void addmember(StringRefType name, T &&value)
       {
             (void)AddMember((name), (value), allocator_);
       }
@@ -95,14 +112,16 @@ class Document : public rapidjson::Document
 
       explicit Document(rapidjson::Type const ty) : rapidjson::Document(ty), allocator_(GetAllocator()) { }
 
-      ND inline Allocator &get_allocator() { return allocator_; }
+      ND Allocator &get_allocator() { return allocator_; }
 
       template <typename T>
-      inline void addmember(StringRefType &&name, T &&value)
+      void addmember(StringRefType &&name, T &&value)
       {
             (void)AddMember(std::move(name), std::move(value), allocator_);
       }
 };
+
+/*--------------------------------------------------------------------------------------*/
 
 template <typename ValueType>
 class Wrapper
@@ -120,17 +139,15 @@ class Wrapper
           : allocator_(allocator), obj_(std::move(obj))
       {}
 
-      ND inline Allocator &get_allocator() { return allocator_; }
-      ND inline ValueType &&yield() { return std::move(obj_); }
-      ND inline ValueType &get()    { return obj_; }
-      ND inline ValueType &operator() () { return obj_; }
+      ND Allocator & get_allocator() const { return allocator_; }
+      ND ValueType &&yield() { return std::move(obj_); }
+      ND ValueType & get()   { return obj_; }
+      ND ValueType & operator() () { return obj_; }
 
       template <typename T>
       __attribute__((__always_inline__))
-      inline void addmember(rapidjson::GenericStringRef<rapidjson::UTF8<>::Ch> name, T &&value)
+      void addmember(rapidjson::GenericStringRef<rapidjson::UTF8<>::Ch> name, T &&value)
       {
-            // rapidjson::Value n(std::move(name));
-            // rapidjson::Value v(std::forward<T &>(value));
             (void)obj_.AddMember(std::move(name), std::move(value), allocator_);
       }
 };
@@ -141,6 +158,8 @@ wrap_new_object(rapidjson::MemoryPoolAllocator<> &allocator)
 {
       return {allocator, rapidjson::Value(rapidjson::Type::kObjectType)};
 }
+
+/*--------------------------------------------------------------------------------------*/
 
 __attribute__((__noinline__))
 void test1()
@@ -200,7 +219,7 @@ void test1()
 
             doc->addmember("params", std::move(obj.yield()));
       }
-      
+
       rapidjson::StringBuffer ss;
       rapidjson::Writer       writer(ss);
       // doc->get().Accept(writer);
@@ -208,23 +227,26 @@ void test1()
 
       {
             std::string msg    = ss.GetString();
-            std::string header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
-            fmt::print(FMT_COMPILE("Writing string:\n{}{}\n"), header, msg);
+            std::string header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
+            PRINT("Writing string:\n{}{}\n", header, msg);
 
-            write(writefd, header.data(), header.length());
-            write(writefd, msg.data(), msg.length());
+            (void)write(writefd, header.data(), header.length());
+            (void)write(writefd, msg.data(), msg.length());
       }
 
-      test_read(pid, writefd, readfd);
+      test_read(readfd);
+      close(readfd);
+      close(writefd);
       delete doc;
 }
+
+/****************************************************************************************/
 
 namespace
 {
 
 class Wrapper
 {
-    private:
       using Document  = rapidjson::Document;
       using Value     = rapidjson::Value;
       using Type      = rapidjson::Type;
@@ -240,18 +262,18 @@ class Wrapper
       ~Wrapper() = default;
 
       template <typename T>
-      inline void add_member(StringRef name, T &&value)
+      void add_member(StringRef name, T &&value)
       {
             (void)cur_->AddMember(std::move(name), std::move(value), doc_.GetAllocator());
       }
 
       template <typename T>
-      inline void add_value(T &&value)
+      void add_value(T &&value)
       {
-            (void)cur_->PushBack(std::move(value));
+            (void)cur_->PushBack(std::move(value), doc_.GetAllocator());
       }
 
-      void push(Type const ty = Type::kObjectType)
+      UNUSED void push(Type const ty = Type::kObjectType)
       {
             cur_->PushBack(rapidjson::Value(ty), doc_.GetAllocator());
             stack_.push(cur_);
@@ -265,23 +287,30 @@ class Wrapper
             cur_ = &cur_->FindMember(std::forward<StringRef &>(name))->value;
       }
 
-      void pop() 
+      void pop(int const n = 1)
       {
+            for (int i = 0; i < (n - 1); ++i)
+                  stack_.pop();
             assert(!stack_.empty());
             cur_ = stack_.top();
             stack_.pop();
       }
 
-      Document &doc()        { return doc_; }
-      Value    *get()        { return cur_; }
-      Value    *operator()() { return cur_; }
+      Document &doc() { return doc_; }
+      Value    *operator()() const { return cur_; }
 
-    private:
-      DELETE_COPY_CTORS(Wrapper);
+      UNUSED ND Value *get() const { return cur_; }
+
+      Wrapper(Wrapper const &)                = delete;
+      Wrapper(Wrapper &&) noexcept            = delete;
+      Wrapper &operator=(Wrapper const &)     = delete;
+      Wrapper &operator=(Wrapper &&) noexcept = delete;
 };
 
+/*--------------------------------------------------------------------------------------*/
+
 __attribute__((__always_inline__))
-void test3_()
+__forceinline void test3_()
 {
       auto *wrp = new Wrapper();
       wrp->add_member("jsonrpc", "2.0");
@@ -296,27 +325,51 @@ void test3_()
       wrp->push_member("clientInfo");
       wrp->add_member("name", "retard");
       wrp->add_member("version", "0.0.1");
-      wrp->pop();
-      wrp->pop();
+      wrp->push_member("WHORE", rapidjson::Type::kArrayType);
+      wrp->add_value("niggerfaggot");
+      wrp->pop(3);
 
 
       rapidjson::StringBuffer ss;
       rapidjson::Writer       writer(ss);
       wrp->doc().Accept(writer);
 
-      std::string msg    = ss.GetString();
-      std::string header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
-      fmt::print(FMT_COMPILE("({}) Writing string:\n{}{}\n"), __PRETTY_FUNCTION__, header, msg);
+      std::string const &msg   = ss.GetString();
+      std::string const header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
+      PRINT("({}) Writing string:\n{}{}\n", __FUNCTION__, header, msg);
 
       {
+#if 0
+            socket_info const *info = attempt_clangd_sock();
+
+            (void)send(info->accepted_sock, header.data(), (int)header.length(), 0);
+            (void)send(info->accepted_sock, msg.data(), (int)msg.length(), 0);
+
+            test_recv(info->accepted_sock);
+
+            closesocket(info->accepted_sock);
+            closesocket(info->connected_sock);
+            closesocket(info->main_sock);
+            CloseHandle(info->procinfo.hThread);
+            CloseHandle(info->procinfo.hProcess);
+            delete info;
+#endif
+
             int    writefd = -1;
             int    readfd  = -1;
             GPid   pid     = attempt_clangd_pipe(&writefd, &readfd);
-            write(writefd, header.data(), header.length());
-            write(writefd, msg.data(), msg.length());
-            test_read(pid, writefd, readfd);
+            (void)write(writefd, header.data(), header.length());
+            (void)write(writefd, msg.data(), msg.length());
+            test_read(readfd);
+
             close(writefd);
+            close(readfd);
+
+#ifdef _WIN32
+            g_spawn_close_pid(pid);
+#else
             waitpid(pid, nullptr, 0);
+#endif
       }
 
       delete wrp;
@@ -326,26 +379,27 @@ void test3_()
 
 
 __attribute__((__noinline__))
-void test3()
+void test3() [[noinline]]
 {
       test3_();
 }
 
+/****************************************************************************************/
 
 static void
-test_read(GPid const pid, int const writefd, int const readfd)
+test_read(int const readfd)
 {
       size_t msglen;
       {
             char ch;
             char buf[128];
             char *ptr = buf;
-            read(readfd, buf, 16); // Discard
-            read(readfd, &ch, 1);  // Read 1st potential digit
+            (void)read(readfd, buf, 16); // Discard
+            (void)read(readfd, &ch, 1);  // Read 1st potential digit
 
             while (isdigit(ch)) {
                   *ptr++ = ch;
-                  read(readfd, &ch, 1);
+                  (void)read(readfd, &ch, 1);
             }
 
             if (ptr == buf)
@@ -353,11 +407,11 @@ test_read(GPid const pid, int const writefd, int const readfd)
 
             *ptr = '\0';
             msglen = strtoull(buf, nullptr, 10);
-            read(readfd, buf, 3);
+            (void)read(readfd, buf, 3);
       }
 
-      char *msg = new char[msglen + 1];
-      read(readfd, msg, msglen);
+      auto *msg = new char[msglen + 1];
+      (void)read(readfd, msg, msglen);
       msg[msglen] = '\0';
       {
             auto obj = rapidjson::Document();
@@ -371,21 +425,104 @@ test_read(GPid const pid, int const writefd, int const readfd)
       }
 
       delete[] msg;
-      close(writefd);
-      close(readfd);
-      waitpid(pid, nullptr, 0);
 }
 
-static int
-attempt_clangd_pipe(int *writefd, int *readfd)
+static void
+test_recv(socket_t const readfd)
 {
-      GError *gerr = nullptr;
-      GPid pid     = -1;
+      size_t msglen;
+      {
+            char ch;
+            char buf[128];
+            char *ptr = buf;
+            (void)recv(readfd, buf, 16, MSG_WAITALL); // Discard
+            (void)recv(readfd, &ch, 1, MSG_WAITALL);  // Read 1st potential digit
 
-      static constexpr char const *const argv[] = { 
-            "clangd", "--log=verbose", "--pch-storage=memory", "--pretty", nullptr
-      };
+            while (isdigit(ch)) {
+                  *ptr++ = ch;
+                  (void)recv(readfd, &ch, 1, MSG_WAITALL);
+            }
 
+            if (ptr == buf)
+                  throw std::runtime_error("No message length specified in jsonrpc header.");
+
+            *ptr = '\0';
+            msglen = strtoull(buf, nullptr, 10);
+            (void)recv(readfd, buf, 3, MSG_WAITALL);
+      }
+
+      auto *msg = new char[msglen + 1];
+      (void)recv(readfd, msg, msglen, MSG_WAITALL);
+      msg[msglen] = '\0';
+      {
+            auto obj = rapidjson::Document();
+            obj.ParseInsitu<rapidjson::kParseInsituFlag>(msg);
+
+            rapidjson::StringBuffer ss;
+            rapidjson::PrettyWriter writer(ss);
+            obj.Accept(writer);
+
+            std::cout << "\n\n----- Object (rapidjson):\n" << ss.GetString() << std::endl;
+      }
+
+      delete[] msg;
+}
+
+/*--------------------------------------------------------------------------------------*/
+
+NORETURN static int
+process_startup_thread(void *varg)
+{
+      auto *info = static_cast<socket_info *>(varg);
+
+      try {
+            info->connected_sock = util::rpc::connect_to_socket(info->path.c_str());
+      } catch (std::exception &e) {
+            std::cerr << "Caught exception \"" << e.what()
+                      << "\" while attempting to connect to socket at "
+                      << info->path << std::endl;
+            thrd_exit(WSAGetLastError());
+      }
+
+      char cmdline[256];
+      strcpy_s(cmdline, "clangd --pch-storage=memory --log=verbose --pretty");
+
+      STARTUPINFOA startinfo;
+      memset(&startinfo, 0, sizeof(startinfo));
+      startinfo.dwFlags    = STARTF_USESTDHANDLES;
+      startinfo.hStdInput  = reinterpret_cast<HANDLE>(info->connected_sock); //NOLINT
+      startinfo.hStdOutput = reinterpret_cast<HANDLE>(info->connected_sock); //NOLINT
+
+      bool b = CreateProcessA(nullptr, cmdline, nullptr, nullptr, true,
+                              CREATE_NEW_CONSOLE, nullptr, nullptr,
+                              &startinfo, &info->procinfo);
+      auto const error = GetLastError();
+      thrd_exit(static_cast<int>(b ? 0LU : error));
+}
+
+static socket_info *
+attempt_clangd_sock()
+{
+      auto const tmppath = util::get_temporary_filename();
+      auto const sock    = util::rpc::open_new_socket(tmppath.string().c_str());
+      auto      *info    = new socket_info{tmppath.string(), sock, {}, {}, {}};
+
+      std::cerr << FORMAT("(Socket bound to \"{}\" with raw value ({}).\n", tmppath.string(), sock);
+
+      thrd_t start_thread{};
+      thrd_create(&start_thread, process_startup_thread, info);
+
+      auto const connected_sock = accept(sock, nullptr, nullptr);
+
+      int e;
+      thrd_join(start_thread, &e);
+      if (e != 0)
+            err(e, "Process creation failed.");
+
+      info->accepted_sock = connected_sock;
+      return info;
+
+#if 0
       auto tmppath = util::get_temporary_filename();
       socket_t sock = util::rpc::open_new_socket(tmppath.c_str());
 
@@ -402,8 +539,19 @@ attempt_clangd_pipe(int *writefd, int *readfd)
             err(1, "accept");
 
       *writefd = *readfd = data;
-      
-#if 0
+#endif
+}
+
+static GPid
+attempt_clangd_pipe(int *writefd, int *readfd)
+{
+      static constexpr char const *const argv[] = {
+            "clangd", "--log=verbose", "--pch-storage=memory", "--pretty", nullptr
+      };
+
+      GError *gerr = nullptr;
+      GPid pid;
+
       g_spawn_async_with_pipes(
              nullptr,
              const_cast<char **>(argv),
@@ -417,7 +565,6 @@ attempt_clangd_pipe(int *writefd, int *readfd)
              nullptr,
              &gerr
       );
-#endif
 
       if (gerr != nullptr)
             throw std::runtime_error(FORMAT("glib error: {}", gerr->message));

@@ -16,6 +16,8 @@ char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,pr
 
 #pragma GCC diagnostic ignored "-Wattributes"
 
+/****************************************************************************************/
+
 namespace emlsp::rpc::json {
 DEFINITELY_DONT_INLINE(void test1());
 DEFINITELY_DONT_INLINE(void test2());
@@ -34,19 +36,28 @@ namespace emlsp::rpc::event {
 DEFINITELY_DONT_INLINE(void test1());
 } // namespace emlsp::rpc::event
 
+static void init_wsa()
+{
+      constexpr WORD w_version_requested = MAKEWORD(2, 2);
+      WSADATA        wsa_data;
+
+      if (auto const err1 = WSAStartup(w_version_requested, &wsa_data) != 0) {
+            std::cerr << "WSAStartup failed with error: " <<  err1 << '\n';
+            throw std::runtime_error("Bad winsock dll");
+      }
+
+      if (LOBYTE(wsa_data.wVersion) != 2 || HIBYTE(wsa_data.wVersion) != 2) {
+            std::cerr << "Could not find a usable version of Winsock.dll\n";
+            WSACleanup();
+            throw std::runtime_error("Bad winsock dll");
+      }
+}
 
 /****************************************************************************************/
 
-#include "util/myerr.h"
-// NO--LINT
-// NO--LINTNEXTLINE(altera-struct-pack-align)
-
-// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define TRY_FUNC(fn) try_func((fn), #fn)
-
-using int128   = __int128;
-using uint128  = unsigned __int128;
-using float128 = __float128;
+#define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT), ##__VA_ARGS__)
+#define FATAL_ERROR(msg) emlsp::util::win32::error_exit(L ## msg)
 
 __attribute__((__nonnull__)) static void
 try_func(_Notnull_ void (*fn)(), _Notnull_ char const *const repr) noexcept
@@ -64,11 +75,11 @@ try_func(_Notnull_ void (*fn)(), _Notnull_ char const *const repr) noexcept
       }
 }
 
-#define PRINT(FMT, ...) fmt::print(FMT_COMPILE(FMT) __VA_OPT__(,) __VA_ARGS__)
-
 int
 main(UNUSED int argc, UNUSED char *argv[])
 {
+      init_wsa();
+
       try {
 #if 0
             TRY_FUNC(emlsp::rpc::json::nloh::test1);
@@ -83,17 +94,18 @@ main(UNUSED int argc, UNUSED char *argv[])
       } catch (...) {
       }
 
-      try {
-            errno = ENOMEM;
-            err(1, "foo. bar. baz. %d", 3);
-      } catch (std::exception &e) {
-            try {
-                  PRINT("Caught exception in {}: {}\n", __PRETTY_FUNCTION__, e.what());
-            } catch (...) {}
-      }
+      //try {
+      //      errno = ENOMEM;
+      //      err(1, "foo. bar. baz. %d", 3);
+      //} catch (std::exception &e) {
+      //      try {
+      //            PRINT("Caught exception in {}: {}\n", __func__, e.what());
+      //      } catch (...) {}
+      //}
 
       fflush(stdout);
       fflush(stderr);
 
+      WSACleanup();
       return 0;
 }

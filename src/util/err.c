@@ -22,12 +22,12 @@
 #  define SHOW_STACKTRACE(...)
 #endif
 
-extern pthread_mutex_t util_c_error_write_mutex;
-pthread_mutex_t util_c_error_write_mutex;
+extern mtx_t util_c_error_write_mutex;
+mtx_t util_c_error_write_mutex;
 
-INITIALIZER_HACK(init)
+INITIALIZER_HACK(mutex_init)
 {
-      pthread_mutex_init(&util_c_error_write_mutex, NULL);
+      mtx_init(&util_c_error_write_mutex, mtx_plain);
 }
 
 void
@@ -36,16 +36,16 @@ my_err_(int  const           status,
         char const *restrict file,
         int  const           line,
         char const *restrict func,
-        char const *restrict fmt,
+        char const *restrict format,
         ...)
 {
       va_list   ap;
       int const e = errno;
-      pthread_mutex_lock(&util_c_error_write_mutex);
+      mtx_lock(&util_c_error_write_mutex);
 
       fprintf(stderr, "%s: (%s %d - %s): ", MAIN_PROJECT_NAME, file, line, func);
-      va_start(ap, fmt);
-      vfprintf(stderr, fmt, ap);
+      va_start(ap, format);
+      vfprintf(stderr, format, ap);
       va_end(ap);
 
       if (print_err)
@@ -56,7 +56,7 @@ my_err_(int  const           status,
       fflush(stderr);
       SHOW_STACKTRACE();
 
-      pthread_mutex_unlock(&util_c_error_write_mutex);
+      mtx_unlock(&util_c_error_write_mutex);
       exit(status);
 }
 
@@ -66,7 +66,7 @@ my_warn_(bool const           print_err,
          char const *restrict file,
          int  const           line,
          char const *restrict func,
-         char const *restrict fmt,
+         char const *restrict format,
          ...)
 {
       if (!DEBUG && !force)
@@ -74,11 +74,11 @@ my_warn_(bool const           print_err,
 
       va_list   ap;
       int const e = errno;
-      pthread_mutex_lock(&util_c_error_write_mutex);
+      mtx_lock(&util_c_error_write_mutex);
 
       fprintf(stderr, "%s: (%s %d - %s): ", MAIN_PROJECT_NAME, file, line, func);
-      va_start(ap, fmt);
-      vfprintf(stderr, fmt, ap);
+      va_start(ap, format);
+      vfprintf(stderr, format, ap);
       va_end(ap);
 
       if (print_err)
@@ -87,5 +87,5 @@ my_warn_(bool const           print_err,
             fputc('\n', stderr);
 
       fflush(stderr);
-      pthread_mutex_unlock(&util_c_error_write_mutex);
+      mtx_unlock(&util_c_error_write_mutex);
 }

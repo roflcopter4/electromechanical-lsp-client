@@ -2,6 +2,8 @@
 #ifndef HGUARD__PCH_HH_
 #define HGUARD__PCH_HH_
 
+#include "util/macros.h"
+
 #if 0
 #include <algorithm>
 #include <filesystem>

@@ -20,12 +20,12 @@ add_executable(lsp-thing
     util/util.cc
 )
 
-if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    target_precompile_headers(lsp-thing
-        PRIVATE
-        $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
-    )
-endif()
+#if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+#    target_precompile_headers(lsp-thing
+#        PRIVATE
+#        $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
+#    )
+#endif()
 
 set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
              "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -33,20 +33,36 @@ set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
 )
 
 # set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
-#         -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch 
+#         -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
 # )
 
 ################################################################################
 # Libraries
 
+if (WIN32)
+    if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/debug/lib")
+		target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_DEBUG})
+    else()
+        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/lib")
+		target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_RELEASE})
+    endif()
+endif()
+
 target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
-    # fmt::fmt
-    # rapidjson
-    # nlohmann_json
+    fmt::fmt
+    rapidjson
+    nlohmann_json
     ${GLib_LIBRARY}
 )
 
 if (USE_JEMALLOC STREQUAL "YES")
     target_link_libraries(x4c ${JEMALLOC_LIBRARY})
+endif()
+
+if (WIN32)
+    target_link_libraries(lsp-thing
+        ws2_32.lib
+    )
 endif()

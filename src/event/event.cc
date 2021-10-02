@@ -1,7 +1,7 @@
 #include "Common.hh"
 #include "rapid.hh"
 
-#include <asio.hpp>
+//#include <asio.hpp>
 #include <glib.h>
 
 #undef unix
@@ -97,7 +97,7 @@ test_read(GPid const pid, int const writefd, int const readfd)
       delete[] msg;
       close(writefd);
       close(readfd);
-      waitpid(pid, nullptr, 0);
+      //waitpid(pid, nullptr, 0);
 }
 
 } // namespace emlsp::rpc::event

@@ -13,6 +13,7 @@ include (CheckFunctionExists)
 include (CheckSymbolExists)
 include (CheckIncludeFile)
 
+
 ###############################################################################
 # Options
 
@@ -59,6 +60,16 @@ set (CMAKE_CXX_STANDARD_REQUIRED TRUE)
 list(APPEND CMAKE_MODULE_PATH
      "${CMAKE_SOURCE_DIR}/cmake"
      "${CMAKE_SOURCE_DIR}/cmake/gnome-cmake/modules")
+
+if (WIN32)
+    if (NOT VCPKG_ROOT)
+        message(FATAL_ERROR "Must provide a definition for VCPKG_ROOT (ie the directory with vcpkg.exe")
+    endif()
+    message( "INSTALLED DIR IS \"${VCPKG_ROOT}\"" )
+    list(APPEND CMAKE_MODULE_PATH "${VCPKG_ROOT}/scripts/buildsystems")
+    include (vcpkg)
+endif()
+
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
@@ -67,6 +78,8 @@ find_package (fmt REQUIRED)
 find_package (RapidJSON REQUIRED)
 find_package (nlohmann_json REQUIRED)
 find_package (GLib REQUIRED)
+
+include_directories(fmt_INCLUDE_DIRECTORIES)
 
 if (USE_JEMALLOC)
     find_package (Jemalloc REQUIRED)
@@ -105,6 +118,14 @@ CHECK_INCLUDE_FILE ("threads.h"     HAVE_THREADS_H)
 CHECK_INCLUDE_FILE ("unistd.h"      HAVE_UNISTD_H)
 CHECK_INCLUDE_FILE ("x86intrin.h"   HAVE_X86_INTRIN_H)
 
+if (NOT HAVE_THREADS_H)
+    if (WIN32)
+        find_package (tinycthread REQUIRED)
+    else()
+        message(FATAL_ERROR "C11 threads library is required.")
+    endif()
+endif()
+
 ###############################################################################
 # General flags
 
@@ -114,7 +135,7 @@ set (WARNS
         -Werror=invalid-pch
 )
 
-if (NOT BUILD_DIST) 
+if (NOT BUILD_DIST)
     set (MARCH_SETTING -march=native)
 endif()
 
@@ -157,7 +178,7 @@ endif()
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     set (WARNS ${WARNS}
-         -Wno-gnu -Wno-gnu-zero-variadic-macro-arguments 
+         -Wno-gnu -Wno-gnu-zero-variadic-macro-arguments
          -Wno-gnu-statement-expression -Werror=return-type
          -Wno-sign-compare
     )
@@ -213,18 +234,18 @@ else()
     list(APPEND CMAKE_C_FLAGS_RELWITHDEBINFO ${CMAKE_C_FLAGS_RELWITHDEBINFO}
          ${CFLAGS_RELWITHDEBINFO_COMMON} ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS}
          ${__EXTRA_C_CXX_RELEASE_FLAGS})
-    
+
     string(JOIN " " CMAKE_CXX_FLAGS "-std=gnu++${CMAKE_CXX_STANDARD}" "${CMAKE_CXX_FLAGS}")
-        
+
     set(CMAKE_CXX_FLAGS_DEBUG          ${CMAKE_C_FLAGS_DEBUG}          ${CMAKE_CXX_FLAGS})
     set(CMAKE_CXX_FLAGS_RELEASE        ${CMAKE_C_FLAGS_RELEASE}        ${CMAKE_CXX_FLAGS})
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO ${CMAKE_C_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS})
     set(CMAKE_CXX_FLAGS_MINSIZEREL     ${CMAKE_C_FLAGS_MINSIZEREL}     ${CMAKE_CXX_FLAGS})
-    
+
     string(TOUPPER ${CMAKE_BUILD_TYPE} _upper_CMAKE_BUILD_TYPE)
     set (ALL_THE_C_FLAGS   ${CMAKE_C_FLAGS_${_upper_CMAKE_BUILD_TYPE}})
     set (ALL_THE_CXX_FLAGS ${CMAKE_CXX_FLAGS_${_upper_CMAKE_BUILD_TYPE}})
-    
+
     list(JOIN CMAKE_C_FLAGS_DEBUG            " " CMAKE_C_FLAGS_DEBUG            )
     list(JOIN CMAKE_C_FLAGS_RELEASE          " " CMAKE_C_FLAGS_RELEASE          )
     list(JOIN CMAKE_C_FLAGS_RELWITHDEBINFO   " " CMAKE_C_FLAGS_RELWITHDEBINFO   )

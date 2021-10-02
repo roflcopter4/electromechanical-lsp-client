@@ -6,16 +6,17 @@
  *   1. Process ID (integer)
  *   2. Root project directory
  */
-static constexpr char const initial_msg[] = 
+[[maybe_unused]] static constexpr
+char const initial_msg[] =
 R"({
       "jsonrpc": "2.0",
       "id": 1,
       "method": "initialize",
       "params": {
             "processId": %d,
-            "rootUri": "%s",
-            "trace": "off",
-            "locale": "en_US.UTF8",
+            "rootUri":   "%s",
+            "trace":     "off",
+            "locale":    "en_US.UTF8",
             "clientInfo": {
                   "name": ")" MAIN_PROJECT_NAME R"(",
                   "version: ")" MAIN_PROJECT_VERSION_STRING R"("
@@ -33,4 +34,4 @@ client::new_message()
       return std::make_unique<message>(this);
 }
 
-} // namespace emlsp::lsp::protocol 
+} // namespace emlsp::lsp::protocol

@@ -14,8 +14,6 @@
 #ifdef __cplusplus
 
 # include "pch.hh"
-# include "util/types.h"
-# include "util/util.hh"
 
 #else // not C++
 
@@ -54,12 +52,23 @@
 #  include <unistd.h>
 # endif
 
-# include "util/types.h"
-# include "util/myerr.h"
-
 #endif // defined __cplusplus
 
 /*--------------------------------------------------------------------------------------*/
+
+#ifdef HAVE_THREADS_H
+# include <threads.h>
+#else
+# include <tinycthread.h>
+#endif
+
+#include "util/types.h"
+
+#ifdef __cplusplus
+# include "util/util.hh"
+#else
+# include "util/myerr.h"
+#endif
 
 #include "util/initializer_hack.h"
 

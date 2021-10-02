@@ -14,6 +14,9 @@
 # define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
 # define _CRT_SECURE_NO_WARNINGS 1
 # define _USE_DECLSPECS_FOR_SAL 1
+# ifndef __cplusplus
+#  define restrict __restrict
+# endif
 #else
 # define _Notnull_ //NOLINT
 #endif
@@ -66,24 +69,10 @@
 # endif
 
 # ifndef static_assert
-#  if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || defined _MSC_VER
 #   define static_assert(...) _Static_assert(__VA_ARGS__)
 #  else
-#   define 
 #   define static_assert(COND ((char [(COND) ? 1 : -1]){})
-#  endif
-# endif
-
-# define NORETURN noreturn
-# ifndef noreturn
-#  if defined(_MSC_VER)
-#   define noreturn __declspec(noreturn)
-#  elif defined(__GNUC__)
-#   define noreturn __attribute__((__noreturn__))
-#  elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#   define noreturn _Noreturn
-#  else
-#   define noreturn
 #  endif
 # endif
 

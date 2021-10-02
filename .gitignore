@@ -32,5 +32,9 @@
 *.app
 
 # Etc
+*~
 compile_commands.json
-build
+build/
+MSVC/
+out/
+.vs/
