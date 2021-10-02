@@ -1,0 +1,36 @@
+#cmakedefine DEBUG
+#cmakedefine USE_JEMALLOC
+
+#cmakedefine HAVE_ARC4RANDOM
+#cmakedefine HAVE_ASPRINTF
+#cmakedefine HAVE_CLOCK_GETTIME
+#cmakedefine HAVE_DPRINTF
+#cmakedefine HAVE_ERR
+#cmakedefine HAVE_FORK
+#cmakedefine HAVE_MKDTEMP
+#cmakedefine HAVE_MKOSTEMPS
+#cmakedefine HAVE_NANOSLEEP
+#cmakedefine HAVE_PAUSE
+#cmakedefine HAVE_PIPE2
+#cmakedefine HAVE_POSIX_SPAWNP
+#cmakedefine HAVE_STRCASECMP
+#cmakedefine HAVE_STRICMP
+#cmakedefine HAVE_STRLCAT
+#cmakedefine HAVE_STRLCPY
+#cmakedefine HAVE_STRSEP
+#cmakedefine HAVE_TIMESPEC_GET
+
+#cmakedefine HAVE_EXECINFO_H
+#cmakedefine HAVE_INTRIN_H
+#cmakedefine HAVE_STDATOMIC_H
+#cmakedefine HAVE_STDNORETURN_H
+#cmakedefine HAVE_SYS_AUXV_H
+#cmakedefine HAVE_THREADS_H
+#cmakedefine HAVE_UNISTD_H
+#cmakedefine HAVE_X86_INTRIN_H
+
+#define MAIN_PROJECT_NAME    "@CMAKE_PROJECT_NAME@"
+#define MAIN_PROJECT_VERSION_STRING "@CMAKE_PROJECT_VERSION@"
+#define MAIN_PROJECT_VERSION_MAJOR @CMAKE_PROJECT_VERSION_MAJOR@
+#define MAIN_PROJECT_VERSION_MINOR @CMAKE_PROJECT_VERSION_MINOR@
+#define MAIN_PROJECT_VERSION_PATCH @CMAKE_PROJECT_VERSION_PATCH@

@@ -1,0 +1,3 @@
+[submodule "cmake/gnome-cmake"]
+	path = cmake/gnome-cmake
+	url = https://github.com/nemequ/gnome-cmake
