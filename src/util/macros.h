@@ -14,7 +14,11 @@
 # define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
 # define _CRT_SECURE_NO_WARNINGS 1
 # define _USE_DECLSPECS_FOR_SAL 1
-# ifndef __cplusplus
+# ifdef __cplusplus
+#  ifdef _MSVC_LANG
+#   define CXX_LANG_VER _MSVC_LANG
+#  endif
+# else
 #  define restrict __restrict
 # endif
 #else
@@ -35,24 +39,28 @@
 /*--------------------------------------------------------------------------------------*/
 #ifdef __cplusplus
 
-# if __cplusplus >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
+# ifndef CXX_LANG_VER
+#  define CXX_LANG_VER __cplusplus
+# endif
+# if CXX_LANG_VER >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
 #  define UNUSED   [[maybe_unused]]
 #  define ND       [[nodiscard]]
+#  define NORETURN [[noreturn]]
 # elif defined _MSC_VER
-#  define UNUSED __pragma(warning(suppress : 4100 4101))
-#  define ND     _Check_return_
+#  define UNUSED   __pragma(warning(suppress : 4100 4101))
+#  define ND       _Check_return_
+#  define NORETURN __declspec(noreturn)
 # else
-#  define UNUSED __attribute__((__unused__))
-#  define ND     __attribute__((__warn_unused_result__))
+#  define UNUSED   __attribute__((__unused__))
+#  define ND       __attribute__((__warn_unused_result__))
+#  define NORETURN __attribute__((__noreturn__))
 # endif
 
-# define DELETE_COPY_CTORS(t)                \
+# define DELETE_COPY_CTORS(t)               \
       t(t const &)                = delete; \
       t(t &&) noexcept            = delete; \
       t &operator=(t const &)     = delete; \
       t &operator=(t &&) noexcept = delete
-
-# define NORETURN [[noreturn]]
 
 #else // defined __cplusplus
 
@@ -94,7 +102,6 @@
 #define P00_HELPER_PASTE_2(a1, a2) a1 ## a2                          //NOLINT(cppcoreguidelines-macro-usage)
 #define P99_PASTE_2(a1, a2)     P00_HELPER_PASTE_2(a1, a2)           //NOLINT(cppcoreguidelines-macro-usage)
 #define P99_PASTE_3(a1, a2, a3) P99_PASTE_2(P99_PASTE_2(a1, a2), a3) //NOLINT(cppcoreguidelines-macro-usage)
-#define P99_DELAY_UNPACK(...)   __VA_ARGS__                          //NOLINT(cppcoreguidelines-macro-usage)
 
 #if !defined __BEGIN_DECLS || !defined __END_DECLS
 # ifdef __cplusplus

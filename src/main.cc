@@ -1,4 +1,5 @@
 #include "Common.hh"
+#include "util/myerr.h"
 #include "util/util.hh"
 
 #include <boost/format.hpp>
@@ -86,13 +87,15 @@ main(UNUSED int argc, UNUSED char *argv[])
             TRY_FUNC(emlsp::rpc::json::nloh::test2);
             TRY_FUNC(emlsp::rpc::json::rapid::test1);
             TRY_FUNC(emlsp::rpc::json::rapid::test2);
+            TRY_FUNC(emlsp::rpc::json::test1);
+            TRY_FUNC(emlsp::rpc::json::test2);
+            TRY_FUNC(emlsp::rpc::event::test1);
 #endif
-            //TRY_FUNC(emlsp::rpc::json::test1);
-            //TRY_FUNC(emlsp::rpc::json::test2);
             TRY_FUNC(emlsp::rpc::json::test3);
-            // TRY_FUNC(emlsp::rpc::event::test1);
       } catch (...) {
       }
+
+      errx(1, "FUCKING MORON IDIOT HEAD! %lld\n", 3);
 
       //try {
       //      errno = ENOMEM;

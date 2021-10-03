@@ -18,12 +18,6 @@
 #  define MKDTEMP(x) g_mkdtemp(x)
 #endif
 
-#ifdef _MSC_VER
-#  define FUNCTION __FUNCTION__
-#else
-#  define FUNCTION __extension__ __PRETTY_FUNCTION__
-#endif
-
 #ifdef DOSISH
 #  define FATAL_ERROR(msg) win32::error_exit(L ## msg)
 #  define FILESEP_STR  "\\"
