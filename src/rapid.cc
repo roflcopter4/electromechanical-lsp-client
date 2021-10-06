@@ -1,4 +1,4 @@
-﻿// ReSharper disable CppDeclarationHidesLocal
+// ReSharper disable CppDeclarationHidesLocal
 #include "Common.hh"
 
 #include "rapid.hh"
@@ -28,10 +28,6 @@ test1()
 #define ADDMEMBER(a, b) AddMember((a), (b), allocator)
 #define PUSH(x) PushBack((x), allocator)
 
-      doc->ADDMEMBER("hello", "world");
-      doc->ADDMEMBER("you", "suck");
-      doc->ADDMEMBER("fucking", "idiot");
-      doc->ADDMEMBER("shitstains", 72);
       doc->ADDMEMBER("PI", constant_pi);
       doc->ADDMEMBER("method", "initialize");
       doc->ADDMEMBER("dumbarray", Value{Type::kArrayType});
@@ -57,8 +53,6 @@ test1()
       try {
             auto *obj = &doc->FindMember("dumbarray")->value;
             obj->PUSH(5);
-            obj->PUSH("you stink");
-            obj->PUSH("oooh you thinks you's tough?");
             obj->PUSH(~INT64_C(0));
             obj->PUSH(~UINT32_C(0));
             obj->PUSH(~INT32_C(0));
@@ -66,11 +60,7 @@ test1()
 
             auto o2 = Value{Type::kObjectType};
             if (o2.IsArray())
-                  throw std::runtime_error("Yeah, it's a fucking array.");
-
-            o2.ADDMEMBER("orly?", "yarly!");
-            o2.ADDMEMBER("srs?", "ye");
-            o2.ADDMEMBER("?????", true);
+                  throw std::runtime_error("Yeah, it's an array.");
 
             obj->PUSH(o2);
 
@@ -89,25 +79,6 @@ test1()
       putc('\n', stdout);
 
       delete doc;
-}
-
-__attribute__((noinline))
-void
-test2()
-{
-      static constexpr char const json_string[] =
-          R"({"hello":"world","you":"suck","fucking":"idiot","shitstains":72,"PI":3.141592653589793,"method":"initialize",)"
-          R"("dumbarray":[5,"you stink","oooh you thinks you's tough?",18446744073709551615,4294967295,-1,55340232221128658000.0,)"
-          R"({"orly?""yarly!","srs?":"ye","?????":true}],"params":{"capabilities":{"depression":true,"failure":true,"confidence":false},"version":"0"}})";
-
-      Document doc;
-      doc.Parse(json_string, sizeof(json_string));
-
-      rapidjson::MemoryBuffer ss;
-      rapidjson::PrettyWriter writer(ss);
-      doc.Accept(writer);
-
-      fwrite(ss.GetBuffer(), 1, ss.GetSize(), stdout);
 }
 
 } // namespace emlsp::rpc::json::rapid

@@ -42,7 +42,7 @@
 # ifndef CXX_LANG_VER
 #  define CXX_LANG_VER __cplusplus
 # endif
-# if CXX_LANG_VER >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
+# if __cplusplus >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
 #  define UNUSED   [[maybe_unused]]
 #  define ND       [[nodiscard]]
 #  define NORETURN [[noreturn]]
@@ -58,9 +58,19 @@
 
 # define DELETE_COPY_CTORS(t)               \
       t(t const &)                = delete; \
+      t &operator=(t const &)     = delete
+
+#define DELETE_MOVE_CTORS(t)                \
       t(t &&) noexcept            = delete; \
-      t &operator=(t const &)     = delete; \
       t &operator=(t &&) noexcept = delete
+
+# define DEFAULT_COPY_CTORS(t)               \
+      t(t const &)                = default; \
+      t &operator=(t const &)     = default
+
+# define DEFAULT_MOVE_CTORS(t)               \
+      t(t &&) noexcept            = default; \
+      t &operator=(t &&) noexcept = default
 
 #else // defined __cplusplus
 
@@ -82,6 +92,14 @@
 #  else
 #   define static_assert(COND ((char [(COND) ? 1 : -1]){})
 #  endif
+# endif
+
+# if defined __GNUC__
+#  define NORETURN __attribute__((__noreturn__))
+# elif defined _MSC_VER
+#  define NORETURN __declspec(noreturn)
+# else
+#  define NORETURN
 # endif
 
 #endif // defined __cplusplus

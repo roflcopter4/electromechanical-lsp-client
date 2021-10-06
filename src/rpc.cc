@@ -7,6 +7,10 @@
 #include <nlohmann/json.hpp>
 #include <stack>
 
+#ifdef HAVE_THREADS_H
+#  include <threads.h>
+#endif
+
 #ifdef true
 #  warning "true was a macro!"
 #  undef true
@@ -27,8 +31,14 @@ struct socket_info {
       socket_t    connected_sock;
       socket_t    accepted_sock;
 
-      PROCESS_INFORMATION procinfo;
+#ifdef _WIN32
+      PROCESS_INFORMATION pid;
+#else
+      pid_t pid;
+#endif
 };
+
+#undef MSG_WAITALL
 
 UNUSED static socket_info *attempt_clangd_sock();
 UNUSED static void         test_recv(socket_t readfd);
@@ -46,7 +56,7 @@ void test2()
       int writefd = -1;
       int readfd  = -1;
       GPid pid    = attempt_clangd_pipe(&writefd, &readfd);
-      auto obj    = json::object({
+      auto obj    = json::object( {
             {"jsonrpc", "2.0"},
             {"id", 1},
             {"method", "initialize"},
@@ -61,7 +71,7 @@ void test2()
                         {"confidence", false}
                   }}
             }}
-      });
+      } );
 
       {
             std::stringstream ss;
@@ -139,10 +149,10 @@ class Wrapper
           : allocator_(allocator), obj_(std::move(obj))
       {}
 
-      ND Allocator & get_allocator() const { return allocator_; }
-      ND ValueType &&yield() { return std::move(obj_); }
-      ND ValueType & get()   { return obj_; }
-      ND ValueType & operator() () { return obj_; }
+      ND Allocator  &get_allocator() const { return allocator_; }
+      ND ValueType &&yield()      { return std::move(obj_); }
+      ND ValueType  &get()        { return obj_; }
+      ND ValueType  &operator()() { return obj_; }
 
       template <typename T>
       __attribute__((__always_inline__))
@@ -221,7 +231,7 @@ void test1()
       }
 
       rapidjson::StringBuffer ss;
-      rapidjson::Writer       writer(ss);
+      rapidjson::Writer       writer{ss};
       // doc->get().Accept(writer);
       doc->get().Accept(writer);
 
@@ -257,8 +267,7 @@ class Wrapper
       std::stack<Value *> stack_{};
 
     public:
-      explicit Wrapper(Type const ty = Type::kObjectType) : doc_(ty), cur_(&doc_)
-      {}
+      explicit Wrapper(Type const ty = Type::kObjectType) : doc_(ty), cur_(&doc_) {}
       ~Wrapper() = default;
 
       template <typename T>
@@ -310,7 +319,7 @@ class Wrapper
 /*--------------------------------------------------------------------------------------*/
 
 __attribute__((__always_inline__))
-__forceinline void test3_()
+void test3_()
 {
       auto *wrp = new Wrapper();
       wrp->add_member("jsonrpc", "2.0");
@@ -325,8 +334,8 @@ __forceinline void test3_()
       wrp->push_member("clientInfo");
       wrp->add_member("name", "retard");
       wrp->add_member("version", "0.0.1");
-      wrp->push_member("WHORE", rapidjson::Type::kArrayType);
-      wrp->add_value("niggerfaggot");
+      wrp->push_member("test", rapidjson::Type::kArrayType);
+      wrp->add_value("test");
       wrp->pop(3);
 
 
@@ -350,8 +359,8 @@ __forceinline void test3_()
             closesocket(info->accepted_sock);
             closesocket(info->connected_sock);
             closesocket(info->main_sock);
-            CloseHandle(info->procinfo.hThread);
-            CloseHandle(info->procinfo.hProcess);
+            CloseHandle(info->pid.hThread);
+            CloseHandle(info->pid.hProcess);
             delete info;
 #endif
 
@@ -379,7 +388,7 @@ __forceinline void test3_()
 
 
 __attribute__((__noinline__))
-void test3() [[noinline]]
+void test3()
 {
       test3_();
 }
@@ -470,6 +479,7 @@ test_recv(socket_t const readfd)
 
 /*--------------------------------------------------------------------------------------*/
 
+#ifdef _WIN32
 NORETURN static int
 process_startup_thread(void *varg)
 {
@@ -495,10 +505,11 @@ process_startup_thread(void *varg)
 
       bool b = CreateProcessA(nullptr, cmdline, nullptr, nullptr, true,
                               CREATE_NEW_CONSOLE, nullptr, nullptr,
-                              &startinfo, &info->procinfo);
+                              &startinfo, &info->pid);
       auto const error = GetLastError();
       thrd_exit(static_cast<int>(b ? 0LU : error));
 }
+#endif
 
 static socket_info *
 attempt_clangd_sock()
@@ -509,6 +520,7 @@ attempt_clangd_sock()
 
       std::cerr << FORMAT("(Socket bound to \"{}\" with raw value ({}).\n", tmppath.string(), sock);
 
+#ifdef _WIN32
       thrd_t start_thread{};
       thrd_create(&start_thread, process_startup_thread, info);
 
@@ -519,14 +531,12 @@ attempt_clangd_sock()
       if (e != 0)
             err(e, "Process creation failed.");
 
-      info->accepted_sock = connected_sock;
-      return info;
+#else
+      static constexpr char const *const argv[] = {
+            "clangd", "--log=verbose", "--pch-storage=memory", "--pretty", nullptr
+      };
 
-#if 0
-      auto tmppath = util::get_temporary_filename();
-      socket_t sock = util::rpc::open_new_socket(tmppath.c_str());
-
-      if ((pid = fork()) == 0) {
+      if ((info->pid = fork()) == 0) {
             socket_t dsock = util::rpc::connect_to_socket(tmppath.c_str());
             dup2(dsock, 0);
             dup2(dsock, 1);
@@ -534,12 +544,11 @@ attempt_clangd_sock()
             execvpe("clangd", const_cast<char **>(argv), environ);
       }
 
-      socket_t data = accept(sock, nullptr, nullptr);
-      if (data == (-1))
-            err(1, "accept");
-
-      *writefd = *readfd = data;
+      auto const connected_sock = accept(sock, nullptr, nullptr);
 #endif
+
+      info->accepted_sock = connected_sock;
+      return info;
 }
 
 static GPid

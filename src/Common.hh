@@ -66,11 +66,13 @@
 
 #ifdef __cplusplus
 # include "util/util.hh"
+# define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT),  ##__VA_ARGS__)
+# define FORMAT(FMT, ...) fmt::format(FMT_COMPILE(FMT), ##__VA_ARGS__)
 #else
-# include "util/myerr.h"
 #endif
 
 #include "util/initializer_hack.h"
+#include "util/myerr.h"
 
 /****************************************************************************************/
 #endif // Common.hh

@@ -162,9 +162,9 @@ set (BASE ${WARNS} ${MARCH_SETTING} ${SANIT}
 # set (CFLAGS_DEBUG_COMMON          -Og -g3 -Wextra -Wpedantic -Wformat)
 # set (CFLAGS_RELWITHDEBINFO_COMMON -O2 -g  -Wextra -ftree-vectorize -Wextra)
 # set (CFLAGS_RELEASE_COMMON        -Ofast -g0 -DNDEBUG -U_FORTIFY_SOURCE)
-set (CFLAGS_DEBUG_COMMON          -O0 -g3 -Wextra -Wpedantic -Wformat -D_FORTIFY_SOURCE=2 -fstack-protector)
-set (CFLAGS_RELWITHDEBINFO_COMMON -O2 -g3 -D_FORTIFY_SOURCE=2 -Wextra -ftree-vectorize -Wextra)
-set (CFLAGS_RELEASE_COMMON        -Ofast -ftree-vectorize -g0 -DNDEBUG -U_FORTIFY_SOURCE -fno-strict-aliasing)
+set (CFLAGS_DEBUG_COMMON          -Og -g3 -Wextra -Wpedantic -Wformat -D_FORTIFY_SOURCE=2 -fstack-protector)
+set (CFLAGS_RELWITHDEBINFO_COMMON -O3 -g3 -D_FORTIFY_SOURCE=2 -Wextra -ftree-vectorize -Wextra)
+set (CFLAGS_RELEASE_COMMON        -Ofast -ftree-vectorize -g -DNDEBUG -U_FORTIFY_SOURCE)
 
 if (NOT MSVC)
     if (SANITIZE)
@@ -184,18 +184,19 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     )
     set (CLANG_STDLIB -stdlib=libc++)
     set (BASE ${BASE} ${WARNS}
-        ${CLANG_STDLIB} -g3 -gdwarf-4 -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager
+        ${CLANG_STDLIB} -g3 -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager
     )
-    set (LTO_STR -flto=full -fwhole-program-vtables -fvirtual-function-elimination)
+    set (LTO_STR -flto=full -fwhole-program-vtables)
 
     string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
             # -fuse-ld=gold -stdlib=libstdc++ -rtlib=compiler-rt --unwindlib=libgcc
-            -fuse-ld=lld -rtlib=compiler-rt ${CLANG_STDLIB} --unwindlib=libgcc
-            -Wl,--lto-O3 -Wl,--lto-whole-program-visibility -fPIC -fpie ${LTO_STR}
+            -fuse-ld=lld -rtlib=compiler-rt ${CLANG_STDLIB} --unwindlib=libunwind
+            -Wl,--lto-O3 -Wl,--lto-whole-program-visibility ${LTO_STR}
     )
 
     set (__EXTRA_C_CXX_RELEASE_FLAGS -fvectorize -fslp-vectorize
-         -fwhole-program-vtables -fvirtual-function-elimination)
+         -fwhole-program-vtables
+        )
 
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 
@@ -229,11 +230,12 @@ if (MSVC)
 else()
     list(APPEND CMAKE_C_FLAGS_DEBUG ${CFLAGS_DEBUG_COMMON} ${BASE} ${CMAKE_C_FLAGS})
     list(APPEND CMAKE_C_FLAGS_MINSIZEREL ${CFLAGS_RELEASE_COMMON} ${BASE} -Os -s ${CMAKE_C_FLAGS})
-    list(APPEND CMAKE_C_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} ${CFLAGS_RELEASE_COMMON}
-         ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
-    list(APPEND CMAKE_C_FLAGS_RELWITHDEBINFO ${CMAKE_C_FLAGS_RELWITHDEBINFO}
-         ${CFLAGS_RELWITHDEBINFO_COMMON} ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS}
-         ${__EXTRA_C_CXX_RELEASE_FLAGS})
+    list(APPEND CMAKE_C_FLAGS_RELEASE
+        ${CMAKE_C_FLAGS_RELEASE} ${CFLAGS_RELEASE_COMMON}
+        ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
+    list(APPEND CMAKE_C_FLAGS_RELWITHDEBINFO
+        ${CMAKE_C_FLAGS_RELWITHDEBINFO} ${CFLAGS_RELWITHDEBINFO_COMMON}
+        ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
 
     string(JOIN " " CMAKE_CXX_FLAGS "-std=gnu++${CMAKE_CXX_STANDARD}" "${CMAKE_CXX_FLAGS}")
 

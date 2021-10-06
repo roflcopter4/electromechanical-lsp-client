@@ -5,35 +5,56 @@
 
 #include "Common.hh"
 #include "client.hh"
-#include <nlohmann/json.hpp>
+//#include <nlohmann/json.hpp>
 
 
-namespace emlsp::lsp::protocol {
+namespace emlsp::rpc::lsp {
 
-namespace detail {} // namespace detail
+namespace detail {
 
-class client;
-class message;
-using message_ptr = std::unique_ptr<message>;
+struct pipe_connection;
+struct unix_socket_connection;
 
+} // namespace detail
+
+
+#if 0
 class client : public emlsp::client
 {
+      friend class message;
+
     public:
-      client() : emlsp::client(Type::LSP) {}
+      client() : emlsp::client(client_type::LSP) {}
+      ~client() = default;
 
-      message_ptr new_message();
+      template <typename... Types>
+      int spawn_connection(connection_type contype, Types &&...args)
+      {
+            char const *unpack[] = {args...};
+            set_connection_type(contype);
+            return spawn_connection(sizeof(unpack)/sizeof(unpack[0]), const_cast<char **>(unpack));
+      }
+
+      template <typename... Types>
+      int spawn_connection(Types &&...args)
+      {
+            char const *unpack[] = {args...};
+            return spawn_connection(sizeof(unpack)/sizeof(unpack[0]), const_cast<char **>(unpack));
+      }
+
+      int spawn_connection(size_t argc, char **argv) override __attribute__((nonnull));
 };
+#endif
 
-class message
+class pipe_connection : public emlsp::rpc::pipe_connection
 {
-      client const *client_;
-
-    public:
-      explicit message(client const *cl) : client_(cl) {}
+      void foo() {
+            argv_ = nullptr;
+      }
 };
 
 
-} // namespace emlsp::lsp::protocol
+} // namespace emlsp::rpc::lsp
 
 
 /****************************************************************************************/

@@ -69,7 +69,7 @@ static class cleanup_c
             try {
                   for (auto const &Path : delete_list_) {
                         if (exists(Path)) {
-                              fprintf(stderr, "Removing path '%s'\n", Path.string().c_str());
+                              fprintf(stderr, "\nRemoving path '%s'\n", Path.string().c_str());
                               remove_all(Path);
                         }
                   }
@@ -107,10 +107,14 @@ static class cleanup_c
       {
             try {
                   do_cleanup();
-            } catch (...) {}
+            } catch (std::exception &e) {
+                  std::cerr << fmt::format(FMT_COMPILE("Caught:\n{}\nwhen cleaning temporary files.\n"), e.what());
+                  std::cerr.flush();
+            }
       }
 
       DELETE_COPY_CTORS(cleanup_c);
+      DELETE_MOVE_CTORS(cleanup_c);
 } cleanup;
 
 
@@ -121,7 +125,7 @@ cleanup_sighandler(int const signum)
 
 #ifdef DOSISH
       signal(signum, SIG_DFL);
-#elif 0
+#else
       struct sigaction act {};
       act.sa_handler = SIG_DFL;
       sigaction(signum, &act, nullptr);
@@ -140,7 +144,6 @@ get_temporary_directory(char const *prefix)
       char       buf[PATH_MAX + 1];
       auto const sys_dir = std::filesystem::temp_directory_path();
 
-#if defined HAVE_MKDTEMP || defined __G_LIB_H__
       /* NOTE: The following _must_ use path.string().c_str() rather than just
        * path.c_str() because the latter, on Windows, returns a wide character string. */
       if (prefix) {
@@ -154,19 +157,13 @@ get_temporary_directory(char const *prefix)
 
       MKDTEMP(buf);
       path ret(buf);
-#else
-      even_dumber_tempname(buf, sys_dir.c_str(), prefix, nullptr);
 
-      path ret(buf);
+      /* Paranoia. Justified paranoia: on Windows g_mkdtemp doesn't set any permissions
+       * at all. */
       std::error_code code{};
-
-      if (!std::filesystem::create_directory(ret, code) || code.value() != 0)
-            errx(1, "std::filesystem::create_directory");
-
       std::filesystem::permissions(ret, std::filesystem::perms::owner_all, code);
       if (code.value() != 0)
             errx(1, "std::filesystem::permissions");
-#endif
 
       cleanup.push(ret);
       return ret;

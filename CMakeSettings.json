@@ -1,0 +1,33 @@
+{
+  "configurations": [
+    {
+      "name": "x64-Debug",
+      "generator": "Visual Studio 16 2019 Win64",
+      "configurationType": "Debug",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DCMAKE_EXPORT_COMPILE_COMMANDS=YES -DVCPKG_CRT_LINKAGE=dynamic -DCMAKE_BUILD_TYPE=Debug -DVCPKG_ROOT=\"D:/VCPKG\"",
+      "buildCommandArgs": "-nologo",
+      "ctestCommandArgs": "",
+      "cmakeToolchain": "D:\\VCPKG\\scripts\\toolchains\\windows.cmake",
+      "variables": [
+        {
+          "name": "CMAKE_C_FLAGS",
+          "value": "/DWIN32 /D_WINDOWS -Zc:preprocessor /ARCH:AVX512 /std:c17 /MP",
+          "type": "STRING"
+        },
+        {
+          "name": "CMAKE_VERBOSE_MAKEFILE",
+          "value": "True",
+          "type": "BOOL"
+        },
+        {
+          "name": "CMAKE_CXX_FLAGS",
+          "value": "/DWIN32 /D_WINDOWS /EHsc -Zc:preprocessor -Zc:__cplusplus /mt /std:c++20 /MP",
+          "type": "STRING"
+        }
+      ]
+    }
+  ]
+}

@@ -23,7 +23,7 @@ namespace rpc {
 extern socket_t open_new_socket(char const *path);
 extern socket_t connect_to_socket(char const *path);
 
-} // namespace sock
+} // namespace rpc
 
 namespace win32 {
 

@@ -19,7 +19,7 @@
 #  define PRINTF_SAL _Printf_format_string_
 # else
 #  define FUNCTION_ __func__
-#  define PRINTF_SAL _Printf_format_string_
+#  define PRINTF_SAL
 # endif
 #endif
 

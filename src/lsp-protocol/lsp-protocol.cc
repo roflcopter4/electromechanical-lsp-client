@@ -1,5 +1,6 @@
 #include "Common.hh"
 #include "lsp-protocol/lsp-protocol.hh"
+#include "util/exceptions.hh"
 
 /*
  * Required format arguments:
@@ -26,12 +27,70 @@ R"({
       }
 })";
 
-namespace emlsp::lsp::protocol {
+/****************************************************************************************/
 
-std::unique_ptr<message>
-client::new_message()
+namespace emlsp::rpc::lsp {
+
+/*--------------------------------------------------------------------------------------*/
+
+
+/*--------------------------------------------------------------------------------------*/
+
+#if 0
+int
+client::spawn_connection(connection_type const contype, char const *prog, ...)
 {
-      return std::make_unique<message>(this);
+      va_list  ap;
+      va_start(ap, prog);
+      auto ret = spawn_connection(contype, prog, ap);
+      va_end(ap);
+      return ret;
+}
+#endif
+
+#if 0
+template <typename... Types>
+int client::spawn_connection(_Notnull_ char const *prog, Types &&...args)
+{
+      char const *unpack[] = {args...};
+      return spawn_connection(get_connection_type(), prog, const_cast<char **>(unpack));
 }
 
-} // namespace emlsp::lsp::protocol
+template <typename... Types>
+int client::spawn_connection(connection_type       contype,
+                             _Notnull_ char const *prog,
+                             Types &&...args)
+{
+      char const *unpack[] = {args...};
+      return spawn_connection(contype, prog, const_cast<char **>(unpack));
+}
+#endif
+
+#if 0
+int
+client::spawn_connection(connection_type const contype, char const *prog, va_list ap)
+{
+      unsigned nargs = 0;
+      {
+            va_list cp;
+            va_copy(cp, ap);
+            while (va_arg(cp, char *))
+                  ++nargs;
+            va_end(cp);
+      }
+      
+      char **argv = new char *[nargs + 1];
+      char **ptr = argv;
+      char *cur;
+      *ptr++ = const_cast<char *>(prog);
+
+      while ((cur = va_arg(ap, char *)))
+            *ptr++ = cur;
+
+      auto ret = spawn_connection(contype, prog, argv);
+      delete[] argv;
+      return ret;
+}
+#endif
+
+} // namespace emlsp::rpc::lsp

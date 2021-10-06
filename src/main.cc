@@ -10,6 +10,8 @@
 #include <fmt/compile.h>
 #include <fmt/printf.h>
 
+#include "lsp-protocol/lsp-protocol.hh"
+
 char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,prof_leak:true";
 
 #define DEFINITELY_DONT_INLINE(...) \
@@ -19,24 +21,26 @@ char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,pr
 
 /****************************************************************************************/
 
-namespace emlsp::rpc::json {
+namespace emlsp::rpc {
+namespace json {
 DEFINITELY_DONT_INLINE(void test1());
 DEFINITELY_DONT_INLINE(void test2());
 DEFINITELY_DONT_INLINE(void test3());
-namespace nloh {
-DEFINITELY_DONT_INLINE(void test1());
-DEFINITELY_DONT_INLINE(void test2());
-} // namespace nloh
-namespace rapid {
-DEFINITELY_DONT_INLINE(void test1());
-DEFINITELY_DONT_INLINE(void test2());
-} // namespace rapid
-} // namespace emlsp::rpc::json
+namespace nloh  { DEFINITELY_DONT_INLINE(void test1()); }
+namespace rapid { DEFINITELY_DONT_INLINE(void test1()); }
+} // namespace json
 
-namespace emlsp::rpc::event {
+namespace event {
 DEFINITELY_DONT_INLINE(void test1());
-} // namespace emlsp::rpc::event
+} // namespace event
 
+namespace test {
+DEFINITELY_DONT_INLINE(void test01());
+DEFINITELY_DONT_INLINE(void test02());
+} // namespace test
+} // namespace emlsp::rpc
+
+#ifdef _WIN32
 static void init_wsa()
 {
       constexpr WORD w_version_requested = MAKEWORD(2, 2);
@@ -53,6 +57,7 @@ static void init_wsa()
             throw std::runtime_error("Bad winsock dll");
       }
 }
+#endif
 
 /****************************************************************************************/
 
@@ -60,26 +65,111 @@ static void init_wsa()
 #define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT), ##__VA_ARGS__)
 #define FATAL_ERROR(msg) emlsp::util::win32::error_exit(L ## msg)
 
-__attribute__((__nonnull__)) static void
-try_func(_Notnull_ void (*fn)(), _Notnull_ char const *const repr) noexcept
+[[maybe_unused]] __attribute__((__nonnull__)) static void
+try_func(_Notnull_ void (*fn)(), _Notnull_ char const *repr) noexcept;
+
+static void
+try_func(void (*const fn)(), char const *const repr) noexcept
 {
       try {
             fn();
+            std::cout << '\n';
+            std::cout.flush();
       } catch (std::exception &e) {
             std::cerr << "Caught exception running function \"" << repr << "\":\n\t"
                       << e.what() << std::endl;
       }
-      try {
-            std::cout << "\n-------------------------------------------------------------"
-                         "-------------------\n\n";
-      } catch (...) {
-      }
 }
+
+#if 0
+template <size_t Nstr>
+void templ_test1(UNUSED int unused_, char const *(&argv)[Nstr])
+{
+      fmt::print(FMT_COMPILE("Got {} strings...\n"), Nstr);
+      for (unsigned i = 0; i < Nstr; ++i)
+            fmt::print(FMT_COMPILE("String {}: \"{}\"\n"), i, argv[i]);
+}
+
+template <size_t Nstr>
+void templ_test1(UNUSED int unused_, char const *(&&argv)[Nstr])
+{
+      fmt::print(FMT_COMPILE("Got {} strings...\n"), Nstr);
+      for (unsigned i = 0; i < Nstr; ++i)
+            fmt::print(FMT_COMPILE("String {}: \"{}\"\n"), i, argv[i]);
+}
+
+template <typename... Types>
+void templ_test2(UNUSED int unused_, Types &&...args)
+{
+      int          arr[] = {args...};
+      size_t const nelem = sizeof(arr) / sizeof(*arr);
+
+      for (unsigned i = 0; i < nelem; ++i)
+            std::cerr << "Have:\t" << arr[i] << '\n';
+}
+
+template <typename... Types>
+void templ_test3(UNUSED int unused_, Types &&...args)
+{
+      char   const  *arr[] = {args...};
+      size_t const   nelem = sizeof(arr) / sizeof(*arr);
+
+      for (unsigned i = 0; i < nelem; ++i)
+            std::cerr << "Have:\t" << arr[i] << '\n';
+}
+#endif
+
+static constexpr
+char const initial_msg[] =
+R"({
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+            "trace":     "on",
+            "locale":    "en_US.UTF8",
+            "clientInfo": {
+                  "name": ")" MAIN_PROJECT_NAME R"(",
+                  "version": ")" MAIN_PROJECT_VERSION_STRING R"("
+            },
+            "capabilities": {
+            }
+      }
+})";
+
 
 int
 main(UNUSED int argc, UNUSED char *argv[])
 {
+#ifdef _WIN32
       init_wsa();
+#endif
+
+#if 0
+      std::map<std::string, std::any> thing;
+      thing.insert_or_assign( {"hello"}, std::string{"hello"});
+      thing.insert_or_assign( {"fak"}, 3 );
+      std::cout << std::any_cast<std::string>(thing["hello"]) << std::endl;;
+      std::cout << std::any_cast<int>(thing["fak"]) << std::endl;;
+#endif
+
+      {
+            using emlsp::rpc::unix_socket_connection;
+            using emlsp::rpc::pipe_connection;
+            using client_type = emlsp::client::client_type;
+
+            std::vector<char const *> foo = {"clangd", "--pretty", "--pch-storage=memory", "--log=verbose", nullptr};
+            pipe_connection myclient{client_type::LSP};
+            myclient.spawn_connection_l("gopls", "-vv", "serve", "-rpc.trace");
+            std::cerr.flush();
+
+            std::string const header = "Content-Length: " + std::to_string(sizeof(initial_msg) - 1) + "\r\n\r\n" ;
+            myclient.write(header.data(), header.size());
+            myclient.write(initial_msg, sizeof(initial_msg) - 1);
+
+            char buf[8192];
+            myclient.read(buf, 3);
+      }
 
       try {
 #if 0
@@ -90,25 +180,15 @@ main(UNUSED int argc, UNUSED char *argv[])
             TRY_FUNC(emlsp::rpc::json::test1);
             TRY_FUNC(emlsp::rpc::json::test2);
             TRY_FUNC(emlsp::rpc::event::test1);
-#endif
             TRY_FUNC(emlsp::rpc::json::test3);
+            TRY_FUNC(emlsp::rpc::test::test01);
+#endif
       } catch (...) {
       }
 
-      errx(1, "FUCKING MORON IDIOT HEAD! %lld\n", 3);
-
-      //try {
-      //      errno = ENOMEM;
-      //      err(1, "foo. bar. baz. %d", 3);
-      //} catch (std::exception &e) {
-      //      try {
-      //            PRINT("Caught exception in {}: {}\n", __func__, e.what());
-      //      } catch (...) {}
-      //}
-
-      fflush(stdout);
-      fflush(stderr);
-
+#ifdef _WIN32
       WSACleanup();
+#endif
+
       return 0;
 }

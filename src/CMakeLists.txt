@@ -12,6 +12,7 @@ add_executable(lsp-thing
     rpc.cc
     client.cc
 
+    rpc/object.cc
     event/event.cc
     lsp-protocol/lsp-protocol.cc
 
@@ -51,7 +52,7 @@ endif()
 
 target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
-    fmt::fmt
+    #fmt::fmt
     rapidjson
     nlohmann_json
     ${GLib_LIBRARY}

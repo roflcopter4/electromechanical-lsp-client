@@ -76,6 +76,7 @@
 #include <fmt/compile.h>
 #include <fmt/format-inl.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 
 /****************************************************************************************/
 #endif

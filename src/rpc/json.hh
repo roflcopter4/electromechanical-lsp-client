@@ -8,12 +8,14 @@
 
 #include <stack>
 
+namespace emlsp::rpc::json {
+
 class object
 {
       using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
 
       rapidjson::Document doc_;
-      rapidjson::Value   *cur_;
+      rapidjson::Value    *cur_;
       std::stack<rapidjson::Value *> stack_{};
 
     public:
@@ -28,7 +30,8 @@ class object
             return cur_->PushBack(std::move(value), doc_.GetAllocator());
       }
 
-      rapidjson::Value *push_value(rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      rapidjson::Value *
+      push_value(rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->PushBack(rapidjson::Value(ty), doc_.GetAllocator());
             stack_.push(cur_);
@@ -38,11 +41,13 @@ class object
       template <typename T>
       rapidjson::Value &add_member(StringRef name, T &&value)
       {
-            return cur_->AddMember(std::move(name), std::move(value), doc_.GetAllocator());
+            return cur_->AddMember(std::move(name), std::move(value),
+                                   doc_.GetAllocator());
       }
 
-      rapidjson::Value *push_member(StringRef &&          name,
-                                    rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      rapidjson::Value *
+      push_member(StringRef           &&name,
+                  rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(name, rapidjson::Value(ty), doc_.GetAllocator());
             stack_.push(cur_);
@@ -58,12 +63,15 @@ class object
             stack_.pop();
       }
 
-      ND rapidjson::Document &doc()              { return doc_; }
-      ND rapidjson::Value    *get()        const { return cur_; }
+      ND rapidjson::Document &doc() { return doc_; }
+      ND rapidjson::Value    *get() const { return cur_; }
       ND rapidjson::Value    *operator()() const { return cur_; }
 
       DELETE_COPY_CTORS(object);
+      DELETE_MOVE_CTORS(object);
 };
+
+} // namespace emlsp::rpc::json 
 
 /****************************************************************************************/
 #endif // rpc/json.hh
