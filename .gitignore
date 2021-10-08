@@ -38,3 +38,4 @@ build/
 MSVC/
 out/
 .vs/
+.cache/

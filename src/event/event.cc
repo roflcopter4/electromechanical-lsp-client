@@ -2,16 +2,14 @@
 #include "rapid.hh"
 
 //#include <asio.hpp>
-#include <glib.h>
-
-#undef unix
+// #include <glib.h>
 
 namespace emlsp::rpc::event
 {
 
+#if 0
 void test1()
 {
-#if 0
       auto buf = asio::streambuf();
       std::ostream os(&buf);
       os << "HELLO, IDIOT!\n";
@@ -33,28 +31,21 @@ void test1()
       } while (n > 0);
 
       fsync(desc.native_handle());
-#endif
 
-
-#if 0
       asio::posix::stream_descriptor desc((asio::any_io_executor()));
       desc.assign(1);
       asio::write(desc, foo);
       fsync(1);
-#endif
 
-#if 0
       asio::local::stream_protocol proto{};
       auto sock = asio::basic_seq_packet_socket<asio::generic::seq_packet_protocol>(asio::any_io_executor());
-#endif
-
-#if 0
       auto sock = asio::basic_seq_packet_socket<asio::generic::seq_packet_protocol>(asio::any_io_executor());
       auto proto = asio::generic::seq_packet_protocol(AF_UNIX, AF_UNIX);
       sock.open(proto);
-#endif
 }
+#endif
 
+#if 0
 static void
 test_read(GPid const pid, int const writefd, int const readfd)
 {
@@ -99,5 +90,6 @@ test_read(GPid const pid, int const writefd, int const readfd)
       close(readfd);
       //waitpid(pid, nullptr, 0);
 }
+#endif
 
 } // namespace emlsp::rpc::event

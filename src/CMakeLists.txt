@@ -12,9 +12,9 @@ add_executable(lsp-thing
     rpc.cc
     client.cc
 
+    event/loop.cc
     rpc/object.cc
     event/event.cc
-    lsp-protocol/lsp-protocol.cc
 
     util/err.c
     util/tmpfile.c
@@ -56,6 +56,7 @@ target_link_libraries(lsp-thing
     rapidjson
     nlohmann_json
     ${GLib_LIBRARY}
+    -luv
 )
 
 if (USE_JEMALLOC STREQUAL "YES")

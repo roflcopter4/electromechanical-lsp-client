@@ -4,7 +4,9 @@
 
 #include <glib.h>
 
-namespace emlsp::rpc {
+namespace emlsp {
+namespace rpc {
+namespace detail {
 /****************************************************************************************/
 
 #ifdef _WIN32
@@ -53,59 +55,7 @@ win32_start_process_with_pipe(char const *exe, char *argv,
         pipefds[READ_FD]  = _open_osfhandle(handles[1][READ_FD], 0);
         return 0;
 }
-#endif
 
-int
-pipe_connection::spawn_connection(UNUSED size_t const argc, char **argv)
-{
-      GError *gerr = nullptr;
-      GPid    pid;
-
-      ::g_spawn_async_with_pipes(
-             nullptr,
-             const_cast<char **>(argv),
-             environ,
-             GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
-             nullptr,
-             nullptr,
-             &pid,
-             &connection.fd.write,
-             &connection.fd.read,
-             nullptr,
-             &gerr
-      );
-
-      if (gerr != nullptr)
-            throw std::runtime_error(fmt::format(FMT_COMPILE("glib error: {}"), gerr->message));
-
-      set_connection_type(connection_type::PIPES);
-      pid_ = pid;
-      return 0;
-}
-
-ssize_t pipe_connection::read(void *buf, size_t nbytes)
-{
-      return ::read(connection.fd.read, buf, nbytes);
-}
-
-ssize_t pipe_connection::read(void *buf, size_t nbytes, UNUSED int flags)
-{
-      return read(buf, nbytes);
-}
-
-ssize_t pipe_connection::write(void const *buf, size_t nbytes)
-{
-      return ::write(connection.fd.write, buf, nbytes);
-}
-
-ssize_t pipe_connection::write(void const *buf, size_t nbytes, UNUSED int flags)
-{
-      return write(buf, nbytes);
-}
-
-/****************************************************************************************/
-
-#ifdef _WIN32
 struct socket_info {
       std::string path;
       std::string cmdline;
@@ -240,15 +190,15 @@ process_startup_thread(void *varg)
 #endif
 #include <cassert>
 
-int
-unix_socket_connection::spawn_connection(UNUSED size_t const argc, char **argv)
+procinfo_t
+unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
-      auto const tmppath = util::get_temporary_filename();
-      // auto const sock = util::rpc::open_new_socket(tmppath.string().c_str());
-      auto const sock = open_new_socket(connection.addr, tmppath.string().c_str());
+      procinfo_t pid;
+      path_ = util::get_temporary_filename().string();
+      root_ = open_new_socket();
 
       std::cerr << fmt::format(FMT_COMPILE("(Socket bound to \"{}\" with raw value ({}).\n"),
-                               tmppath.string(), sock);
+                               path_, root_);
 
 #ifdef _WIN32
       auto info = socket_info{tmppath.string(), win32_protect_argv(argc, argv)
@@ -263,16 +213,15 @@ unix_socket_connection::spawn_connection(UNUSED size_t const argc, char **argv)
       if (e != 0)
             err(e, "Process creation failed.");
 
-      pid_ = info.pid;
-      connection.sock.connected = info.connected_sock;
+      pid = info.pid;
+      connected_ = info.connected_sock;
 #else
       std::cerr << "Going to fork-exec with argv of size " << argc << '\n';
       for (char **s = argv; *s; ++s)
             std::cerr << *s << '\n';
 
-      if ((pid_ = fork()) == 0) {
-            // socket_t dsock = util::rpc::connect_to_socket(tmppath.string().c_str());
-            socket_t dsock = connect_to_socket(connection.addr);
+      if ((pid = fork()) == 0) {
+            socket_t dsock = connect_to_socket();
             ::dup2(dsock, 0);
             ::dup2(dsock, 1);
             ::close(dsock);
@@ -285,50 +234,25 @@ unix_socket_connection::spawn_connection(UNUSED size_t const argc, char **argv)
       {
             sockaddr_un con_addr{};
             socklen_t len = sizeof(con_addr);
-            connected_sock = ::accept(sock, reinterpret_cast<sockaddr *>(&con_addr), &len);
+            connected_sock = ::accept(root_, reinterpret_cast<sockaddr *>(&con_addr), &len);
             if (connected_sock == (-1))
                   err(1, "accept");
       }
 #endif
 
-      connection.sock.accepted = connected_sock;
-      set_connection_type(connection_type::PIPES);
-      return 0;
+      accepted_ = connected_sock;
+      return pid;
 }
-
-/*--------------------------------------------------------------------------------------*/
-
-ssize_t unix_socket_connection::read(void *buf, size_t nbytes) 
-{
-      return read(buf, nbytes, 0);
-}
-
-ssize_t unix_socket_connection::read(void *buf, size_t nbytes, int flags) 
-{
-      return ::recv(connection(), buf, nbytes, flags);
-}
-
-ssize_t unix_socket_connection::write(void const *buf, size_t nbytes) 
-{
-      return write(buf, nbytes, 0);
-}
-
-ssize_t unix_socket_connection::write(void const *buf, size_t nbytes, int flags) 
-{
-      return ::send(connection(), buf, nbytes, flags);
-}
-
-/*--------------------------------------------------------------------------------------*/
 
 socket_t
-unix_socket_connection::open_new_socket(sockaddr_un &addr, char const *const path)
+unix_socket_connection_impl::open_new_socket()
 {
-      ::strcpy(addr.sun_path, path);
-      addr.sun_family = AF_UNIX;
+      ::memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
+      addr_.sun_family = AF_UNIX;
 
       socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
-#ifdef DOSISH
+#ifdef _WIN32
       if (auto const e = ::GetLastError(); e != 0)
            err(1, "socket");
 #else
@@ -338,7 +262,9 @@ unix_socket_connection::open_new_socket(sockaddr_un &addr, char const *const pat
       ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      if (::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == (-1))
+      auto const ret =
+          ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+      if (ret == (-1))
            err(1, "bind");
       if (::listen(connection_sock, 0) == (-1))
            err(1, "listen");
@@ -347,11 +273,11 @@ unix_socket_connection::open_new_socket(sockaddr_un &addr, char const *const pat
 }
 
 socket_t
-unix_socket_connection::connect_to_socket(sockaddr_un const &addr)
+unix_socket_connection_impl::connect_to_socket()
 {
       socket_t const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
-#ifdef DOSISH
+#ifdef _WIN32
       if (auto const e = ::GetLastError(); e != 0)
             err(1, "socket");
 #else
@@ -361,80 +287,44 @@ unix_socket_connection::connect_to_socket(sockaddr_un const &addr)
       ::fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      if (::connect(data_sock, reinterpret_cast<sockaddr const *>(&addr), sizeof(addr)) == (-1))
+      auto const ret =
+          ::connect(data_sock, reinterpret_cast<sockaddr const *>(&addr_), sizeof(addr_));
+      if (ret == (-1))
             err(1, "connect");
 
       return data_sock;
 }
 
-/****************************************************************************************/
-
-int pipe_connection::spawn_connection(size_t argc, char const **argv)
-{
-      return spawn_connection(argc, const_cast<char **>(argv));
-}
-
-int pipe_connection::spawn_connection(char **const argv)
-{
-      size_t n = 0;
-      char **p = argv;
-      while (*p)
-            ++p, ++n;
-      return spawn_connection(n, argv);
-}
-
-int pipe_connection::spawn_connection(char const **const argv)
-{
-      return spawn_connection(const_cast<char **>(argv));
-}
-
-int pipe_connection::spawn_connection(std::vector<char *> &vec)
-{
-      if (vec[vec.size() - 1] != nullptr)
-            vec.emplace_back(nullptr);
-      return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
-}
-
-int pipe_connection::spawn_connection(std::vector<char const *> &vec)
-{
-      if (vec[vec.size() - 1] != nullptr)
-            vec.emplace_back(nullptr);
-      return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
-}
-
 /*--------------------------------------------------------------------------------------*/
 
-int unix_socket_connection::spawn_connection(size_t argc, char const **argv)
+procinfo_t
+pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
-      return spawn_connection(argc, const_cast<char **>(argv));
+      GError *gerr = nullptr;
+      GPid    pid;
+
+      ::g_spawn_async_with_pipes(
+             nullptr,
+             const_cast<char **>(argv),
+             environ,
+             GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
+             nullptr,
+             nullptr,
+             &pid,
+             &write_,
+             &read_,
+             nullptr,
+             &gerr
+      );
+
+      if (gerr != nullptr)
+            throw std::runtime_error(fmt::format(FMT_COMPILE("glib error: {}"), gerr->message));
+
+      return pid;
 }
 
-int unix_socket_connection::spawn_connection(char **argv)
-{
-      char **p = argv;
-      while (*p++)
-            ;
-      return spawn_connection(p - argv, argv);
-}
-
-int unix_socket_connection::spawn_connection(char const **const argv)
-{
-      return spawn_connection(const_cast<char **>(argv));
-}
-
-int unix_socket_connection::spawn_connection(std::vector<char *> &vec)
-{
-      if (vec[vec.size() - 1] != nullptr)
-            vec.emplace_back(nullptr);
-      return spawn_connection(vec.size(), vec.data());
-}
-
-int unix_socket_connection::spawn_connection(std::vector<char const *> &vec)
-{
-      if (vec[vec.size() - 1] != nullptr)
-            vec.emplace_back(nullptr);
-      return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
-}
 
 /****************************************************************************************/
-} // namespace emlsp::rpc
+} // namespace detail
+} // namespace rpc
+} // namespace emlsp

@@ -50,6 +50,7 @@ endif()
 
 add_definitions(-DHAVE_CONFIG_H)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
+include_directories("${PROJECT_SOURCE_DIR}/include")
 include_directories("${PROJECT_SOURCE_DIR}/src")
 
 set (CMAKE_CXX_STANDARD 20)
@@ -163,7 +164,7 @@ set (BASE ${WARNS} ${MARCH_SETTING} ${SANIT}
 # set (CFLAGS_RELWITHDEBINFO_COMMON -O2 -g  -Wextra -ftree-vectorize -Wextra)
 # set (CFLAGS_RELEASE_COMMON        -Ofast -g0 -DNDEBUG -U_FORTIFY_SOURCE)
 set (CFLAGS_DEBUG_COMMON          -Og -g3 -Wextra -Wpedantic -Wformat -D_FORTIFY_SOURCE=2 -fstack-protector)
-set (CFLAGS_RELWITHDEBINFO_COMMON -O3 -g3 -D_FORTIFY_SOURCE=2 -Wextra -ftree-vectorize -Wextra)
+set (CFLAGS_RELWITHDEBINFO_COMMON -Og -g3 -D_FORTIFY_SOURCE=2 -Wextra -ftree-vectorize -Wextra)
 set (CFLAGS_RELEASE_COMMON        -Ofast -ftree-vectorize -g -DNDEBUG -U_FORTIFY_SOURCE)
 
 if (NOT MSVC)

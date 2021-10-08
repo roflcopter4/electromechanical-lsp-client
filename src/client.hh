@@ -10,14 +10,12 @@
 namespace emlsp
 {
 
-namespace rpc { class base_connection; }
-
 /**
  * TODO: Documentation of some kind...
  *
  * Main class for the client. Ideally this should be more like a struct than a class.
  */
-class client
+class base_client
 {
     public:
       /* Only gcc insists that this have an initializer. Neither clang nor MSVC care. */
@@ -37,203 +35,260 @@ class client
       client_type type_;
 
     public:
-      explicit client(client_type ty) : type_(ty) {}
-      virtual ~client() = default;
+      explicit base_client(client_type ty) : type_(ty) {}
+      virtual ~base_client() = default;
 
       ND client_type get_client_type() const { return type_; }
 
-      DEFAULT_COPY_CTORS(client);
-      DEFAULT_MOVE_CTORS(client);
+      DEFAULT_COPY_CTORS(base_client);
+      DEFAULT_MOVE_CTORS(base_client);
 };
 
 namespace rpc {
 
-class pipe_connection;
-class unix_socket_connection;
+/****************************************************************************************/
 
-namespace lsp {
-class pipe_connection;
-class unix_socket_connection;
-} // namespace lsp
-
-
-/**
- * Base class for connections. Obviously.
- */
-class base_connection : public emlsp::client
-{
-      friend class lsp::pipe_connection;
-      friend class lsp::unix_socket_connection;
-
-    public:
-      enum class connection_type {
-            UNINITIALIZED = 0,
-            PIPES,
-            FIFO,
-            UNIX_SOCKET,
-      };
+namespace detail {
 
 #ifdef _WIN32
-      static int close_socket(socket_t sock) { return closesocket(sock); }
-      using procinfo_t = PROCESS_INFORMATION;
+using procinfo_t = PROCESS_INFORMATION;
 #else
-      static int close_socket(socket_t sock) { return close(sock); }
-      using procinfo_t = pid_t;
+using procinfo_t = pid_t;
 #endif
 
-    private:
-      connection_type con_type_ = connection_type::UNINITIALIZED;
 
-    protected:
-      char const **argv_ = nullptr; //NOLINT
-      procinfo_t   pid_{};          //NOLINT
-
+class base_connection_interface
+{
     public:
-      explicit base_connection(client_type ty) : client(ty) {}
-      explicit base_connection(emlsp::client const &other) : client(other) {}
-      ~base_connection() override = default;
+      base_connection_interface()  = default;
+      virtual ~base_connection_interface() = default;
 
-      ND connection_type   get_connection_type() const   { return con_type_; }
-      ND procinfo_t const &get_procinfo()        const   { return pid_; }
-      void set_connection_type(connection_type const ty) { con_type_ = ty; }
-
-      virtual int spawn_connection(size_t argc, char **argv)           = 0;
-      virtual int spawn_connection(char **argv)                        = 0;
-      virtual int spawn_connection(char const **argv)                  = 0;
-      virtual int spawn_connection(size_t argc, char const **argv)     = 0;
-      virtual int spawn_connection(std::vector<char *> &vec)           = 0;
-      virtual int spawn_connection(std::vector<char const *> &vec)     = 0;
+      virtual procinfo_t do_spawn_connection(size_t argc, char **argv) = 0;
       virtual ssize_t read(void *buf, size_t nbytes)                   = 0;
       virtual ssize_t read(void *buf, size_t nbytes, int flags)        = 0;
       virtual ssize_t write(void const *buf, size_t nbytes)            = 0;
       virtual ssize_t write(void const *buf, size_t nbytes, int flags) = 0;
 
-      DELETE_COPY_CTORS(base_connection);
-      DEFAULT_MOVE_CTORS(base_connection);
+      DEFAULT_MOVE_CTORS(base_connection_interface);
+      DEFAULT_COPY_CTORS(base_connection_interface);
+};
+
+/*--------------------------------------------------------------------------------------*/
+
+template <typename AddrType>
+class socket_connection_base_impl : public base_connection_interface
+{
+#ifdef _WIN32
+      static int close_socket(socket_t sock) { return closesocket(sock); }
+#else
+      static int close_socket(socket_t sock) { return close(sock); }
+#endif
 
     protected:
-      struct base_socket_connection_s {
-            class socket_container_c
-            {
-                public:
-                  socket_t root      = (-1);
-                  socket_t accepted  = (-1);
-                  socket_t connected = (-1);
+      socket_t root_      = (-1);
+      socket_t accepted_  = (-1);
+      socket_t connected_ = (-1);
+      AddrType addr_      = {};
 
-                  socket_container_c() = default;
-                  ~socket_container_c()
-                  {
-                        if (connected != (-1))
-                              close_socket(connected);
-                        if (accepted != (-1))
-                              close_socket(accepted);
-                        if (root != (-1))
-                              close_socket(root);
-                  }
-                  ND socket_t &operator()() { return accepted; }
+      virtual socket_t open_new_socket()   = 0;
+      virtual socket_t connect_to_socket() = 0;
 
-                  DELETE_COPY_CTORS(socket_container_c);
-                  DEFAULT_MOVE_CTORS(socket_container_c);
-            } sock;
-      };
+    public:
+      socket_connection_base_impl() = default;
+      ~socket_connection_base_impl() override
+      {
+            if (connected_ != (-1))
+                  close_socket(connected_);
+            if (accepted_ != (-1))
+                  close_socket(accepted_);
+            if (root_ != (-1))
+                  close_socket(root_);
+      }
 
-      struct unix_socket_connection_s : public base_socket_connection_s {
-            std::string path;
-            sockaddr_un addr;
-            ND socket_t &operator()() { return sock.accepted; }
-      };
+      ssize_t read (void       *buf, size_t nbytes) final { return read(buf, nbytes, MSG_WAITALL); }
+      ssize_t write(void const *buf, size_t nbytes) final { return write(buf, nbytes, MSG_WAITALL); }
 
-      struct some_other_socket_connection_s : public base_socket_connection_s {
-            /* ... */
-      };
+      ssize_t read(void *buf, size_t nbytes, int flags) final
+      {
+            return ::recv(accepted_, buf, nbytes, flags);
+      }
+      ssize_t write(void const *buf, size_t nbytes, int flags) final
+      {
+            return ::send(accepted_, buf, nbytes, flags);
+      }
 
-      struct pipe_connection_s {
-            struct fd_container_s {
-                  int read;
-                  int write;
-            } fd;
-      };
+      ND socket_t const &operator()() const { return accepted_; }
+
+      DELETE_COPY_CTORS(socket_connection_base_impl);
+      DEFAULT_MOVE_CTORS(socket_connection_base_impl);
 };
+
+class unix_socket_connection_impl final : public socket_connection_base_impl<sockaddr_un>
+{
+      std::string path_;
+
+    protected:
+      socket_t open_new_socket()   final;
+      socket_t connect_to_socket() final;
+
+    public:
+      unix_socket_connection_impl() = default;
+      ~unix_socket_connection_impl() override = default;
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) final;
+
+      DELETE_COPY_CTORS(unix_socket_connection_impl);
+      DEFAULT_MOVE_CTORS(unix_socket_connection_impl);
+};
+
+/*--------------------------------------------------------------------------------------*/
+
+class pipe_connection_impl final : public base_connection_interface
+{
+    private:
+      int read_  = (-1);
+      int write_ = (-1);
+
+    public:
+      pipe_connection_impl()  = default;
+      ~pipe_connection_impl() override
+      {
+            if (read_ != (-1))
+                  close(read_);
+            if (write_ != (-1))
+                  close(write_);
+      }
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) final;
+
+      ssize_t read (void       *buf, size_t const nbytes) final { return read(buf, nbytes, 0); }
+      ssize_t write(void const *buf, size_t const nbytes) final { return write(buf, nbytes, 0); }
+
+      ssize_t read(void *buf, size_t const nbytes, UNUSED int flags) final
+      {
+            size_t total = 0, n;
+            do n = ::read(read_, static_cast<char *>(buf) + total, nbytes - total);
+            while (n != SIZE_C(-1) && (total += n) < nbytes);
+            return static_cast<ssize_t>(total);
+      }
+      ssize_t write(void const *buf, size_t const nbytes, UNUSED int flags) final
+      {
+            size_t total = 0, n;
+            do n = ::write(write_, static_cast<char const *>(buf) + total, nbytes - total);
+            while (n != SIZE_C(-1) && (total += n) < nbytes);
+            return static_cast<ssize_t>(total);
+      }
+
+      DELETE_COPY_CTORS(pipe_connection_impl);
+      DEFAULT_MOVE_CTORS(pipe_connection_impl);
+};
+
+} // namespace detail
+
 
 /**
- * Details for actual connection classes have to be deferred to sub-classes for each RPC
- * protocol. Not much can fit here.
+ * TODO: Documentation of some kind...
  */
-class pipe_connection : public base_connection
+template <typename ConnectionType>
+class base_connection
 {
-    protected:
-      pipe_connection_s connection{};  //NOLINT
+      using procinfo_t = detail::procinfo_t;
+
+    private:
+      procinfo_t     pid_        = {};
+      ConnectionType connection_ = {};
 
     public:
-      explicit pipe_connection(client_type ty) : base_connection(ty) {}
-      explicit pipe_connection(emlsp::client const &other) : base_connection(other) {}
-      ~pipe_connection() override = default;
-
-      int spawn_connection(char **argv) override;
-      int spawn_connection(char const **argv) override;
-      int spawn_connection(size_t argc, char **argv) override;
-      int spawn_connection(size_t argc, char const **argv) override;
-      int spawn_connection(std::vector<char *> &vec) override;
-      int spawn_connection(std::vector<char const *> &vec) override;
-
-      ssize_t read(void *buf, size_t nbytes) override;
-      ssize_t read(void *buf, size_t nbytes, UNUSED int flags) override;
-
-      ssize_t write(void const *buf, size_t nbytes) override;
-      ssize_t write(void const *buf, size_t nbytes, UNUSED int flags) override;
-
-      DELETE_COPY_CTORS(pipe_connection);
-      DEFAULT_MOVE_CTORS(pipe_connection);
-
-      /* All the arguments should be of type 'const char *'. */
-      template <typename... Types>
-      int spawn_connection_l(UNUSED Types &&...args)
+      base_connection()  = default;
+      ~base_connection()
       {
-            char const *unpack[] = {args..., nullptr};
-            constexpr size_t argc = (sizeof(unpack) / sizeof(unpack[0])) - SIZE_C(1);
-            assert(argc >= 1);
-            return spawn_connection(argc, const_cast<char **>(unpack));
+            if (pid_) {
+                  kill(pid_, SIGTERM);
+                  waitpid(pid_, nullptr, 0);
+            }
       }
-};
 
-class unix_socket_connection : public base_connection
-{
-      static socket_t open_new_socket(sockaddr_un &addr, char const *path);
-      static socket_t connect_to_socket(sockaddr_un const &addr);
+      ND ConnectionType   &connection() { return connection_; }
+      ND procinfo_t const &pid() const { return pid_; }
 
-    protected:
-      unix_socket_connection_s connection{};  //NOLINT
-
-    public:
-      explicit unix_socket_connection(client_type ty) : base_connection(ty) {}
-      explicit unix_socket_connection(emlsp::client const &other) : base_connection(other) {}
-      ~unix_socket_connection() override = default;
-
-      int spawn_connection(char **argv) override;
-      int spawn_connection(char const **argv) override;
-      int spawn_connection(size_t argc, char **argv) override;
-      int spawn_connection(size_t argc, char const **argv) override;
-      int spawn_connection(std::vector<char *> &vec) override;
-      int spawn_connection(std::vector<char const *> &vec) override;
-
-      ssize_t read(void *buf, size_t nbytes) override;
-      ssize_t read(void *buf, size_t nbytes, int flags) override;
-
-      ssize_t write(void const *buf, size_t nbytes) override;
-      ssize_t write(void const *buf, size_t nbytes, int flags) override;
-
-      DELETE_COPY_CTORS(unix_socket_connection);
-      DEFAULT_MOVE_CTORS(unix_socket_connection);
-
-      /* All the arguments should be of type 'const char *'. */
-      template <typename... Types>
-      int spawn_connection_l(UNUSED Types &&...args)
+      procinfo_t spawn_connection(size_t argc, char **argv)
       {
-            char const *unpack[] = {args..., nullptr};
-            constexpr size_t argc = (sizeof(unpack) / sizeof(unpack[0])) - SIZE_C(1);
-            assert(argc >= 1);
-            return spawn_connection(argc, const_cast<char **>(unpack));
+            pid_ = connection_.do_spawn_connection(argc, argv);
+            return pid_;
       }
+
+      procinfo_t spawn_connection(size_t argc, char const **argv)
+      {
+            return spawn_connection(argc, const_cast<char **>(argv));
+      }
+
+      procinfo_t spawn_connection(char **const argv)
+      {
+            char **p = argv;
+            while (*p++)
+                  ;
+            return spawn_connection(p - argv, argv);
+      }
+
+      procinfo_t spawn_connection(char const **const argv)
+      {
+            return spawn_connection(const_cast<char **>(argv));
+      }
+
+      procinfo_t spawn_connection(char const *const *const argv)
+      {
+            return spawn_connection(const_cast<char **>(argv));
+      }
+
+      procinfo_t spawn_connection(std::vector<char *> &vec)
+      {
+            if (vec[vec.size() - 1] != nullptr)
+                  vec.emplace_back(nullptr);
+            return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
+      }
+
+      procinfo_t spawn_connection(std::vector<char const *> &vec)
+      {
+            if (vec[vec.size() - 1] != nullptr)
+                  vec.emplace_back(nullptr);
+            return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
+      }
+
+      template <typename... Types>
+      int spawn_connection_l(Types &&...args)
+      {
+            const char *const pack[] = {args..., nullptr};
+            constexpr size_t  argc   = (sizeof(pack) / sizeof(pack[0])) - SIZE_C(1);
+            return spawn_connection(argc, const_cast<char **>(pack));
+      }
+
+      /* 
+       * Directly call the connection_'s `read()` method.
+       * Params: void *, size_t, int
+       */
+      template <typename ...Args>
+      ssize_t raw_read(Args &&...args)
+      {
+            return connection_.read(args...);
+      }
+
+      /* 
+       * Directly call the connection_'s `write()` method.
+       * Params: void *, size_t, int
+       */
+      template <typename ...Args>
+      ssize_t raw_write(Args &&...args)
+      {
+            return connection_.write(args...);
+      }
+
+      virtual void   write_message(void const *, size_t) = 0;
+      virtual size_t read_message(void **)               = 0;
+      virtual size_t read_message(char **)               = 0;
+
+
+      DELETE_COPY_CTORS(base_connection);
+      DEFAULT_MOVE_CTORS(base_connection);
 };
 
 } // namespace rpc

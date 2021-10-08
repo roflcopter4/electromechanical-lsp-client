@@ -10,12 +10,12 @@
 #include <fmt/compile.h>
 #include <fmt/printf.h>
 
-#include "lsp-protocol/lsp-protocol.hh"
+#include "lsp-protocol/lsp-connection.hh"
 
-char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,prof_leak:true";
+//char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,prof_leak:true";
 
 #define DEFINITELY_DONT_INLINE(...) \
-      extern __attribute__((__noinline__)) __VA_ARGS__ [[noinline]]
+       [[noinline]] extern __attribute__((noinline)) __VA_ARGS__
 
 #pragma GCC diagnostic ignored "-Wattributes"
 
@@ -39,6 +39,12 @@ DEFINITELY_DONT_INLINE(void test01());
 DEFINITELY_DONT_INLINE(void test02());
 } // namespace test
 } // namespace emlsp::rpc
+
+
+namespace emlsp::event {
+DEFINITELY_DONT_INLINE(void test01());
+DEFINITELY_DONT_INLINE(void test02());
+} // namespace emlsp::event
 
 #ifdef _WIN32
 static void init_wsa()
@@ -65,8 +71,8 @@ static void init_wsa()
 #define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT), ##__VA_ARGS__)
 #define FATAL_ERROR(msg) emlsp::util::win32::error_exit(L ## msg)
 
-[[maybe_unused]] __attribute__((__nonnull__)) static void
-try_func(_Notnull_ void (*fn)(), _Notnull_ char const *repr) noexcept;
+[[maybe_unused]] __attribute__((nonnull))
+static void try_func(_Notnull_ void (*fn)(), _Notnull_ char const *repr) noexcept;
 
 static void
 try_func(void (*const fn)(), char const *const repr) noexcept
@@ -90,24 +96,6 @@ void templ_test1(UNUSED int unused_, char const *(&argv)[Nstr])
             fmt::print(FMT_COMPILE("String {}: \"{}\"\n"), i, argv[i]);
 }
 
-template <size_t Nstr>
-void templ_test1(UNUSED int unused_, char const *(&&argv)[Nstr])
-{
-      fmt::print(FMT_COMPILE("Got {} strings...\n"), Nstr);
-      for (unsigned i = 0; i < Nstr; ++i)
-            fmt::print(FMT_COMPILE("String {}: \"{}\"\n"), i, argv[i]);
-}
-
-template <typename... Types>
-void templ_test2(UNUSED int unused_, Types &&...args)
-{
-      int          arr[] = {args...};
-      size_t const nelem = sizeof(arr) / sizeof(*arr);
-
-      for (unsigned i = 0; i < nelem; ++i)
-            std::cerr << "Have:\t" << arr[i] << '\n';
-}
-
 template <typename... Types>
 void templ_test3(UNUSED int unused_, Types &&...args)
 {
@@ -119,6 +107,7 @@ void templ_test3(UNUSED int unused_, Types &&...args)
 }
 #endif
 
+[[maybe_unused]]
 static constexpr
 char const initial_msg[] =
 R"({
@@ -137,6 +126,40 @@ R"({
       }
 })";
 
+struct bigthing {
+    public:
+      uint64_t volatile foo[8192]{};
+
+      bigthing() = delete;
+      ~bigthing() = default;
+
+      template <size_t N>
+      explicit bigthing(int const (&in)[N])
+      {
+            std::copy(in, in + N, foo);
+      }
+
+      template <size_t N>
+      explicit bigthing(int const(&&in)[N])
+      {
+            std::copy(in, in + N, foo);
+      }
+
+      DELETE_COPY_CTORS(bigthing);
+      DEFAULT_MOVE_CTORS(bigthing);
+};
+
+#if 0
+#include <concepts>
+#include <fstream>
+#include <functional>
+#include <istream>
+#include <ostream>
+#include <streambuf>
+#include <string>
+#include <string_view>
+#include <strstream>
+#endif
 
 int
 main(UNUSED int argc, UNUSED char *argv[])
@@ -145,50 +168,26 @@ main(UNUSED int argc, UNUSED char *argv[])
       init_wsa();
 #endif
 
-#if 0
-      std::map<std::string, std::any> thing;
-      thing.insert_or_assign( {"hello"}, std::string{"hello"});
-      thing.insert_or_assign( {"fak"}, 3 );
-      std::cout << std::any_cast<std::string>(thing["hello"]) << std::endl;;
-      std::cout << std::any_cast<int>(thing["fak"]) << std::endl;;
-#endif
-
       {
-            using emlsp::rpc::unix_socket_connection;
-            using emlsp::rpc::pipe_connection;
-            using client_type = emlsp::client::client_type;
+            UNUSED std::vector foo = {"clangd", "--pretty", "--pch-storage=memory", "--log=verbose"};
 
-            std::vector<char const *> foo = {"clangd", "--pretty", "--pch-storage=memory", "--log=verbose", nullptr};
-            pipe_connection myclient{client_type::LSP};
-            myclient.spawn_connection_l("gopls", "-vv", "serve", "-rpc.trace");
+            auto client = emlsp::rpc::lsp::unix_socket_connection{};
+            client.spawn_connection_l("clangd", "--pretty", "--pch-storage=memory", "--log=verbose");
+            client.write_message(initial_msg, sizeof(initial_msg) - 1);
+
+            char  *buf;
+            size_t len = client.read_message(buf);
+            std::string msg {buf, len};
+            std::cout.flush();
             std::cerr.flush();
-
-            std::string const header = "Content-Length: " + std::to_string(sizeof(initial_msg) - 1) + "\r\n\r\n" ;
-            myclient.write(header.data(), header.size());
-            myclient.write(initial_msg, sizeof(initial_msg) - 1);
-
-            char buf[8192];
-            myclient.read(buf, 3);
+            std::cout << '\n' << "Read msg of length " << len << '\n' << msg << "\n------ END MSG ------\n\n";
+            std::cout.flush();
+            delete[] buf;
       }
 
-      try {
-#if 0
-            TRY_FUNC(emlsp::rpc::json::nloh::test1);
-            TRY_FUNC(emlsp::rpc::json::nloh::test2);
-            TRY_FUNC(emlsp::rpc::json::rapid::test1);
-            TRY_FUNC(emlsp::rpc::json::rapid::test2);
-            TRY_FUNC(emlsp::rpc::json::test1);
-            TRY_FUNC(emlsp::rpc::json::test2);
-            TRY_FUNC(emlsp::rpc::event::test1);
-            TRY_FUNC(emlsp::rpc::json::test3);
-            TRY_FUNC(emlsp::rpc::test::test01);
-#endif
-      } catch (...) {
-      }
 
 #ifdef _WIN32
       WSACleanup();
 #endif
-
       return 0;
 }

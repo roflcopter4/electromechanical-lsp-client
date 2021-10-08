@@ -126,9 +126,11 @@ cleanup_sighandler(int const signum)
 #ifdef DOSISH
       signal(signum, SIG_DFL);
 #else
+#if 0
       struct sigaction act {};
       act.sa_handler = SIG_DFL;
       sigaction(signum, &act, nullptr);
+#endif
 #endif
 
       raise(signum);
@@ -172,9 +174,13 @@ get_temporary_directory(char const *prefix)
 path
 get_temporary_filename(char const *prefix, char const *suffix)
 {
-      char        buf[PATH_MAX + 1];
+      char buf[PATH_MAX + 1];
+#if defined _WIN32 && defined USING_LIBUV
+      even_dumber_tempname(buf, R"(\\.\pipe)", prefix, suffix);
+#else
       auto const &tmp_dir = cleanup.get_path();
       even_dumber_tempname(buf, tmp_dir.string().c_str(), prefix, suffix);
+#endif
 
       return {buf};
 }
