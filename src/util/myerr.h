@@ -25,34 +25,18 @@
 
 #if defined __cplusplus
 
-# include <fmt/printf.h>
 namespace emlsp::util {
 
 extern "C" { extern mtx_t util_c_error_write_mutex; }
 
-template<typename... T>
-void
-my_err_throw(UNUSED int const     status,
+extern void
+my_err_throw(int  const           status,
              bool const           print_err,
              char const *restrict file,
              int  const           line,
              char const *restrict func,
              char const *restrict format,
-             T   const &... args)
-{
-      int const e = errno;
-      std::stringstream buf;
-      mtx_lock(&util_c_error_write_mutex);
-
-      buf << fmt::format(FMT_COMPILE("{}: ({} {} - {}): "), MAIN_PROJECT_NAME, file, line, func)
-          << fmt::sprintf(format, args...);
-
-      if (print_err)
-            buf << fmt::format(FMT_COMPILE("\n\terrno {}: \"{}\""), e, strerror(e));
-
-      mtx_unlock(&util_c_error_write_mutex);
-      throw std::runtime_error(buf.str());
-}
+             ...);
 
 } // namespace emlsp::util
 

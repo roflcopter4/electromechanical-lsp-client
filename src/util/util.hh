@@ -4,12 +4,7 @@
 /****************************************************************************************/
 
 // No idea why this happens sometimes.
-#if __cplusplus < 202002L
-#  undef __cplusplus
-#  define __cplusplus 202002L
-#endif
 #include "Common.hh"
-#include <filesystem>
 
 namespace emlsp::util {
 
@@ -17,6 +12,28 @@ using std::filesystem::path;
 
 path get_temporary_directory(char const *prefix = nullptr);
 path get_temporary_filename(char const *prefix = nullptr, char const *suffix = nullptr);
+
+template <typename V>
+void
+resize_vector_hack(V &v, size_t const newSize)
+{
+      struct vt {
+            typename V::value_type v;
+            vt() = default;
+      };
+      static_assert(sizeof(vt[10]) == sizeof(typename V::value_type[10]),
+                    "alignment error");
+      using V2 =
+          std::vector<vt, typename std::allocator_traits<
+                              typename V::allocator_type>::template rebind_alloc<vt>>;
+      reinterpret_cast<V2 &>(v).resize(newSize);
+}
+
+template<typename T>
+concept Stringable = std::convertible_to<T, std::string>;
+
+template<typename T>
+concept NonStringable = !std::convertible_to<T, std::string>;
 
 namespace rpc {
 

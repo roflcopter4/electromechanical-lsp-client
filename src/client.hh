@@ -12,8 +12,6 @@ namespace emlsp
 
 /**
  * TODO: Documentation of some kind...
- *
- * Main class for the client. Ideally this should be more like a struct than a class.
  */
 class base_client
 {
@@ -59,15 +57,44 @@ using procinfo_t = pid_t;
 
 class base_connection_interface
 {
+    protected:
+      enum class sink_type {
+            DEFAULT,
+            DEVNULL,
+            FD,
+            FILENAME
+      } err_sink_type_ = sink_type::DEFAULT;
+
+      std::string fname_ = {};
+      int fd = (-1);
+
     public:
       base_connection_interface()  = default;
-      virtual ~base_connection_interface() = default;
+      virtual ~base_connection_interface()
+      {
+            switch (err_sink_type_)
+            {
+                  case sink_type::FILENAME:
+                  case sink_type::FD:
+                  case sink_type::DEVNULL:
+                  case sink_type::DEFAULT:
+                        break;
+            }
+      }
 
       virtual procinfo_t do_spawn_connection(size_t argc, char **argv) = 0;
       virtual ssize_t read(void *buf, size_t nbytes)                   = 0;
       virtual ssize_t read(void *buf, size_t nbytes, int flags)        = 0;
       virtual ssize_t write(void const *buf, size_t nbytes)            = 0;
       virtual ssize_t write(void const *buf, size_t nbytes, int flags) = 0;
+
+      void set_stderr_default() { err_sink_type_ = sink_type::DEFAULT; }
+      void set_stderr_devnull() { err_sink_type_ = sink_type::DEVNULL; }
+      void set_stderr_filename(std::string const &fname)
+      {
+            fname_         = fname;
+            err_sink_type_ = sink_type::FILENAME;
+      }
 
       DEFAULT_MOVE_CTORS(base_connection_interface);
       DEFAULT_COPY_CTORS(base_connection_interface);
@@ -186,17 +213,23 @@ class pipe_connection_impl final : public base_connection_interface
 } // namespace detail
 
 
+template <typename T>
+concept ConnectionImplVariant = std::same_as<T, emlsp::rpc::detail::unix_socket_connection_impl> ||
+                                std::same_as<T, emlsp::rpc::detail::pipe_connection_impl>;
+
+using util::Stringable;
+
 /**
  * TODO: Documentation of some kind...
  */
-template <typename ConnectionType>
+template <ConnectionImplVariant ConnectionImpl>
 class base_connection
 {
       using procinfo_t = detail::procinfo_t;
 
     private:
       procinfo_t     pid_        = {};
-      ConnectionType connection_ = {};
+      ConnectionImpl connection_ = {};
 
     public:
       base_connection()  = default;
@@ -208,8 +241,8 @@ class base_connection
             }
       }
 
-      ND ConnectionType   &connection() { return connection_; }
-      ND procinfo_t const &pid() const { return pid_; }
+      ND ConnectionImpl   &connection() { return connection_; }
+      ND procinfo_t const &pid() const  { return pid_; }
 
       procinfo_t spawn_connection(size_t argc, char **argv)
       {
@@ -254,7 +287,11 @@ class base_connection
             return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
       }
 
-      template <typename... Types>
+      /*
+       * To be used much like execl. All arguments must be `char const *`. Unlike execl,
+       * no null pointer is required as a sentinel.
+       */
+      template <Stringable... Types>
       int spawn_connection_l(Types &&...args)
       {
             const char *const pack[] = {args..., nullptr};
@@ -282,7 +319,14 @@ class base_connection
             return connection_.write(args...);
       }
 
+      template <size_t N>
+      void write_message_l(char const (&msg)[N])
+      {
+            write_message(msg, sizeof(msg) - 1);
+      }
+
       virtual void   write_message(void const *, size_t) = 0;
+      virtual void   write_message(std::string const &)  = 0;
       virtual size_t read_message(void **)               = 0;
       virtual size_t read_message(char **)               = 0;
 

@@ -15,27 +15,28 @@ add_executable(lsp-thing
     event/loop.cc
     rpc/object.cc
     event/event.cc
+    lsp-protocol/static-data.cc
 
     util/err.c
     util/tmpfile.c
     util/util.cc
 )
 
-#if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-#    target_precompile_headers(lsp-thing
-#        PRIVATE
-#        $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
-#    )
-#endif()
+if (TRUE OR NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+   target_precompile_headers(lsp-thing
+       PRIVATE
+       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
+   )
+endif()
 
 set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
              "${CMAKE_CURRENT_SOURCE_DIR}"
              "${GLib_INCLUDE_DIRS}"
 )
 
-# set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
-#         -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
-# )
+set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
+        -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
+)
 
 ################################################################################
 # Libraries

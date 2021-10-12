@@ -284,4 +284,36 @@ error_exit(wchar_t const *lpsz_function)
 } // namespace win32
 #endif
 
+void
+my_err_throw(UNUSED int const     status,
+             bool const           print_err,
+             char const *restrict file,
+             int  const           line,
+             char const *restrict func,
+             char const *restrict format,
+             ...)
+{
+      int const e = errno;
+      std::stringstream buf;
+      mtx_lock(&util_c_error_write_mutex);
+
+      buf << fmt::format(FMT_COMPILE("{}: ({} {} - {}):\n"), MAIN_PROJECT_NAME, file, line, func);
+
+      {
+            va_list ap;
+            char c_buf[2048];
+            va_start(ap, format);
+            ::vsnprintf(c_buf, sizeof(buf), format, ap);
+            va_end(ap);
+
+            buf << c_buf << '\n';
+      }
+
+      if (print_err)
+            buf << fmt::format(FMT_COMPILE("\n\terrno {}: \"{}\""), e, strerror(e));
+
+      mtx_unlock(&util_c_error_write_mutex);
+      throw std::runtime_error(buf.str());
+}
+
 } // namespace emlsp::util

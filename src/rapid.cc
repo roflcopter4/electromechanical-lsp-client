@@ -5,12 +5,6 @@
 
 constexpr auto constant_pi = 3.14159265358979323846;   // pi
 
-#define DUMP_EXCEPTION(e)                                                         \
-      std::cerr << fmt::format(R"(Caught exception "{}")" "\n"                    \
-                               R"(" at line {}, in file "{}", in function "{}")", \
-                               (e).what(), __LINE__, __FILE__, __FUNCTION__)      \
-                << std::endl
-
 namespace emlsp::rpc::json::rapid
 {
 
@@ -18,15 +12,14 @@ using rapidjson::Document;
 using rapidjson::Type;
 using rapidjson::Value;
 
-__attribute__((noinline))
-void
+NOINLINE void
 test1()
 {
       auto  *doc       = new Document(Type::kObjectType);
       auto &&allocator = doc->GetAllocator();
 
 #define ADDMEMBER(a, b) AddMember((a), (b), allocator)
-#define PUSH(x) PushBack((x), allocator)
+#define PUSH(x)         PushBack((x), allocator)
 
       doc->ADDMEMBER("PI", constant_pi);
       doc->ADDMEMBER("method", "initialize");
@@ -60,7 +53,7 @@ test1()
 
             auto o2 = Value{Type::kObjectType};
             if (o2.IsArray())
-                  throw std::runtime_error("Yeah, it's an array.");
+                  throw std::runtime_error("Yeah, it's an array. It's not supposed to be, but it is. Somehow.");
 
             obj->PUSH(o2);
 

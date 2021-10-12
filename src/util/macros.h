@@ -6,6 +6,9 @@
 #if !defined __GNUC__ && !defined __clang__
 # define __attribute__(x)
 #endif
+#ifndef _MSC_VER
+# define __declspec(...)
+#endif
 #ifndef __has_include
 # define __has_include(x)
 #endif
@@ -42,18 +45,26 @@
 # ifndef CXX_LANG_VER
 #  define CXX_LANG_VER __cplusplus
 # endif
-# if __cplusplus >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
-#  define UNUSED   [[maybe_unused]]
-#  define ND       [[nodiscard]]
-#  define NORETURN [[noreturn]]
+# if CXX_LANG_VER >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
+#  define UNUSED      [[maybe_unused]]
+#  define ND          [[nodiscard]]
+#  define NORETURN    [[noreturn]]
+#  define FALLTHROUGH [[fallthrough]]
+# elif defined __GNUC__
+#  define UNUSED      __attribute__((__unused__))
+#  define ND          __attribute__((__warn_unused_result__))
+#  define NORETURN    __attribute__((__noreturn__))
+#  define FALLTHROUGH __attribute__((__fallthrough__))
 # elif defined _MSC_VER
-#  define UNUSED   __pragma(warning(suppress : 4100 4101))
-#  define ND       _Check_return_
-#  define NORETURN __declspec(noreturn)
+#  define UNUSED      __pragma(warning(suppress : 4100 4101))
+#  define ND          _Check_return_
+#  define NORETURN    __declspec(noreturn)
+#  define FALLTHROUGH __fallthrough
 # else
-#  define UNUSED   __attribute__((__unused__))
-#  define ND       __attribute__((__warn_unused_result__))
-#  define NORETURN __attribute__((__noreturn__))
+#  define UNUSED
+#  define ND
+#  define NORETURN
+#  define FALLTHROUGH
 # endif
 
 # define DELETE_COPY_CTORS(t)               \
@@ -71,6 +82,15 @@
 # define DEFAULT_MOVE_CTORS(t)               \
       t(t &&) noexcept            = default; \
       t &operator=(t &&) noexcept = default
+
+#define DUMP_EXCEPTION(e)                                                            \
+      do {                                                                           \
+            std::cerr << fmt::format(                                                \
+                             FMT_COMPILE("\n" R"(Caught exception "{}")" "\n" R"(" at line {}, in file "{}", in function "{}")"), \
+                             (e).what(), __LINE__, __FILE__, __func__)               \
+                      << std::endl;                                                  \
+            std::cerr.flush();                                                       \
+      } while (0)
 
 #else // defined __cplusplus
 
@@ -103,6 +123,15 @@
 # endif
 
 #endif // defined __cplusplus
+
+#if defined __GNUC__ || defined __clang__
+# define NOINLINE __attribute__((__noinline__))
+#elif defined _MSC_VER
+# define NOINLINE __declspec(noinline)
+#else
+# define NOINLINE
+#endif
+
 /*--------------------------------------------------------------------------------------*/
 
 #ifndef __WORDSIZE

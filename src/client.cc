@@ -4,6 +4,15 @@
 
 #include <glib.h>
 
+#ifdef _WIN32
+#  define DEV_NULL "NUL"
+#else
+#  define DEV_NULL "/dev/null"
+#endif
+#ifndef O_BINARY
+#  define O_BINARY 0
+#endif
+
 namespace emlsp {
 namespace rpc {
 namespace detail {
@@ -185,11 +194,6 @@ process_startup_thread(void *varg)
 
 /*--------------------------------------------------------------------------------------*/
 
-#ifdef NDEBUG
-# undef NDEBUG
-#endif
-#include <cassert>
-
 procinfo_t
 unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
@@ -197,12 +201,19 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
       path_ = util::get_temporary_filename().string();
       root_ = open_new_socket();
 
-      std::cerr << fmt::format(FMT_COMPILE("(Socket bound to \"{}\" with raw value ({}).\n"),
-                               path_, root_);
-
 #ifdef _WIN32
       auto info = socket_info{tmppath.string(), win32_protect_argv(argc, argv)
                               sock, {}, {}, {}};
+
+      switch (err_sink_type_) {
+      case sink_type::DEVNULL:
+            throw emlsp::except::not_implemented("FIXME");
+            break;
+      case sink_type::FILENAME:
+      default:
+            break;
+      }
+
       thrd_t start_thread{};
       thrd_create(&start_thread, process_startup_thread, &info);
 
@@ -216,16 +227,29 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
       pid = info.pid;
       connected_ = info.connected_sock;
 #else
-      std::cerr << "Going to fork-exec with argv of size " << argc << '\n';
-      for (char **s = argv; *s; ++s)
-            std::cerr << *s << '\n';
-
       if ((pid = fork()) == 0) {
             socket_t dsock = connect_to_socket();
             ::dup2(dsock, 0);
             ::dup2(dsock, 1);
             ::close(dsock);
             assert(argv[0] != nullptr);
+
+            int fd = (-1);
+            switch (err_sink_type_) {
+            case sink_type::DEVNULL:
+                  fd = ::open(DEV_NULL, O_WRONLY|O_APPEND|O_BINARY);
+                  break;
+            case sink_type::FILENAME:
+                  fd = ::open(fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC|O_BINARY, 0644);
+                  break;
+            default:
+                  break;
+            }
+            if (fd > 0) {
+                  ::dup2(fd, 2);
+                  ::close(fd);
+            }
+
             ::execvp(argv[0], const_cast<char **>(argv));
             err(1, "exec failed");
       }
@@ -302,12 +326,26 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
       GError *gerr = nullptr;
       GPid    pid;
+      int flags = GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD);
+
+      //int fd = (-1);
+
+      switch (err_sink_type_) {
+      case sink_type::DEVNULL:
+            flags |= G_SPAWN_STDERR_TO_DEV_NULL;
+            break;
+      case sink_type::FILENAME:
+            //fd = open(fname_.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0644);
+            break;
+      default:
+            break;
+      }
 
       ::g_spawn_async_with_pipes(
              nullptr,
              const_cast<char **>(argv),
              environ,
-             GSpawnFlags(G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD),
+             static_cast<GSpawnFlags>(flags),
              nullptr,
              nullptr,
              &pid,

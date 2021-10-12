@@ -15,6 +15,8 @@
 
 # include "pch.hh"
 
+using std::operator""s; //NOLINT
+
 #else // not C++
 
 # include <assert.h>
@@ -66,8 +68,6 @@
 
 #ifdef __cplusplus
 # include "util/util.hh"
-# define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT),  ##__VA_ARGS__)
-# define FORMAT(FMT, ...) fmt::format(FMT_COMPILE(FMT), ##__VA_ARGS__)
 #else
 #endif
 

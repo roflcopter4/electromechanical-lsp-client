@@ -1,50 +1,47 @@
 #include "Common.hh"
-#include "util/myerr.h"
-#include "util/util.hh"
-
-#include <boost/format.hpp>
-
-#include <fmt/format.h>
-
-#include <fmt/color.h>
-#include <fmt/compile.h>
-#include <fmt/printf.h>
-
 #include "lsp-protocol/lsp-connection.hh"
+#include "lsp-protocol/static-data.hh"
+#include "rapid.hh"
+
+#include <nlohmann/json.hpp>
 
 //char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,prof_leak:true";
 
-#define DEFINITELY_DONT_INLINE(...) \
-       [[noinline]] extern __attribute__((noinline)) __VA_ARGS__
-
-#pragma GCC diagnostic ignored "-Wattributes"
-
 /****************************************************************************************/
 
-namespace emlsp::rpc {
-namespace json {
-DEFINITELY_DONT_INLINE(void test1());
-DEFINITELY_DONT_INLINE(void test2());
-DEFINITELY_DONT_INLINE(void test3());
-namespace nloh  { DEFINITELY_DONT_INLINE(void test1()); }
-namespace rapid { DEFINITELY_DONT_INLINE(void test1()); }
-} // namespace json
-
-namespace event {
-DEFINITELY_DONT_INLINE(void test1());
-} // namespace event
-
-namespace test {
-DEFINITELY_DONT_INLINE(void test01());
-DEFINITELY_DONT_INLINE(void test02());
-} // namespace test
-} // namespace emlsp::rpc
-
-
-namespace emlsp::event {
-DEFINITELY_DONT_INLINE(void test01());
-DEFINITELY_DONT_INLINE(void test02());
-} // namespace emlsp::event
+namespace emlsp {
+ namespace rpc {
+  namespace json {
+   NOINLINE extern void test1();
+   NOINLINE extern void test2();
+   NOINLINE extern void test3();
+   namespace nloh {
+    NOINLINE extern void test1();
+   } // namespace nloh 
+   namespace rapid {
+    NOINLINE extern void test1();
+   } // namespace rapid 
+  } // namespace json
+  namespace event {
+   NOINLINE extern void test1();
+  } // namespace event
+  namespace test {
+   NOINLINE extern void test01();
+   NOINLINE extern void test02();
+  } // namespace test
+  namespace lsp {
+   NOINLINE extern void test10();
+  } // namespace lsp
+ } // namespace rpc
+ namespace event {
+  NOINLINE extern void test01();
+  NOINLINE extern void test02();
+  NOINLINE extern void test03();
+ } // namespace event
+ namespace test {
+  NOINLINE extern void test01();
+ } // namespace test 
+} // namespace emlsp
 
 #ifdef _WIN32
 static void init_wsa()
@@ -107,59 +104,8 @@ void templ_test3(UNUSED int unused_, Types &&...args)
 }
 #endif
 
-[[maybe_unused]]
-static constexpr
-char const initial_msg[] =
-R"({
-      "jsonrpc": "2.0",
-      "id": 1,
-      "method": "initialize",
-      "params": {
-            "trace":     "on",
-            "locale":    "en_US.UTF8",
-            "clientInfo": {
-                  "name": ")" MAIN_PROJECT_NAME R"(",
-                  "version": ")" MAIN_PROJECT_VERSION_STRING R"("
-            },
-            "capabilities": {
-            }
-      }
-})";
-
-struct bigthing {
-    public:
-      uint64_t volatile foo[8192]{};
-
-      bigthing() = delete;
-      ~bigthing() = default;
-
-      template <size_t N>
-      explicit bigthing(int const (&in)[N])
-      {
-            std::copy(in, in + N, foo);
-      }
-
-      template <size_t N>
-      explicit bigthing(int const(&&in)[N])
-      {
-            std::copy(in, in + N, foo);
-      }
-
-      DELETE_COPY_CTORS(bigthing);
-      DEFAULT_MOVE_CTORS(bigthing);
-};
-
-#if 0
-#include <concepts>
-#include <fstream>
-#include <functional>
-#include <istream>
-#include <ostream>
-#include <streambuf>
-#include <string>
-#include <string_view>
-#include <strstream>
-#endif
+using emlsp::rpc::lsp::unix_socket_connection;
+using emlsp::rpc::lsp::pipe_connection;
 
 int
 main(UNUSED int argc, UNUSED char *argv[])
@@ -168,22 +114,41 @@ main(UNUSED int argc, UNUSED char *argv[])
       init_wsa();
 #endif
 
-      {
-            UNUSED std::vector foo = {"clangd", "--pretty", "--pch-storage=memory", "--log=verbose"};
+      try {
+            // emlsp::rpc::lsp::client<unix_socket_connection> client;
+#if 0
+            unix_socket_connection con;
+            emlsp::rpc::lsp::client client(con);
 
-            auto client = emlsp::rpc::lsp::unix_socket_connection{};
-            client.spawn_connection_l("clangd", "--pretty", "--pch-storage=memory", "--log=verbose");
-            client.write_message(initial_msg, sizeof(initial_msg) - 1);
+            client.con().spawn_connection_l("clangd", "--pch-storage=memory", "--log=verbose");
+            client.con().write_message_l(initialization_message);
 
             char  *buf;
-            size_t len = client.read_message(buf);
+            size_t len = client.con().read_message(buf);
             std::string msg {buf, len};
             std::cout.flush();
             std::cerr.flush();
-            std::cout << '\n' << "Read msg of length " << len << '\n' << msg << "\n------ END MSG ------\n\n";
             std::cout.flush();
+
+            {
+                  rapidjson::Document     obj;
+                  rapidjson::StringBuffer ss;
+                  rapidjson::PrettyWriter writer(ss);
+                  obj.ParseInsitu(buf);
+                  obj.Accept(writer);
+
+                  std::cout << '\n' << ss.GetString() << '\n';
+            }
+
             delete[] buf;
+#endif
+
+            TRY_FUNC(emlsp::event::test03);
       }
+      catch (std::exception &e) {
+            DUMP_EXCEPTION(e);
+      }
+
 
 
 #ifdef _WIN32
