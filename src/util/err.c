@@ -30,12 +30,32 @@ INITIALIZER_HACK(mutex_init)
       mtx_init(&util_c_error_write_mutex, mtx_plain);
 }
 
+static __inline void dump_error(int const errval)
+{
+      char  buf[128];
+      char *estr;
+
+#if defined HAVE_STRERROR_S || defined _MSC_VER
+      strerror_s(buf, 128, errval);
+      estr = buf;
+#elif defined HAVE_STRERROR_R
+      strerror_r(errval, buf, 128);
+      estr = buf;
+#else
+      estr = strerror(errval);
+#endif
+
+      fprintf(stderr, ": %s\n", estr);
+
+}
+
 void
 my_err_(int  const           status,
         bool const           print_err,
         char const *restrict file,
         int  const           line,
         char const *restrict func,
+        _Printf_format_string_
         char const *restrict format,
         ...)
 {
@@ -49,9 +69,9 @@ my_err_(int  const           status,
       va_end(ap);
 
       if (print_err)
-            fprintf(stderr, ": %s\n", strerror(e));
+            dump_error(e);
       else
-            putc('\n', stderr);
+            fputc('\n', stderr);
 
       fflush(stderr);
       SHOW_STACKTRACE();
@@ -66,11 +86,14 @@ my_warn_(bool const           print_err,
          char const *restrict file,
          int  const           line,
          char const *restrict func,
+         _Printf_format_string_
          char const *restrict format,
          ...)
 {
-      if (!DEBUG && !force)
+#ifndef DEBUG
+      if (!force)
             return;
+#endif
 
       va_list   ap;
       int const e = errno;
@@ -82,7 +105,7 @@ my_warn_(bool const           print_err,
       va_end(ap);
 
       if (print_err)
-            fprintf(stderr, ": %s\n", strerror(e));
+            dump_error(e);
       else
             fputc('\n', stderr);
 

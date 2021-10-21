@@ -4,7 +4,7 @@
 
 namespace emlsp::except {
 
-class not_implemented : public std::logic_error
+class not_implemented final : public std::logic_error
 {
     private:
       std::string text_;

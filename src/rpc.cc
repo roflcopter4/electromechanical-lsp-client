@@ -1,5 +1,6 @@
 // ReSharper disable CppInconsistentNaming
 #include "Common.hh"
+#include "pch.hh"
 #include "rapid.hh"
 #include "util/myerr.h"
 
@@ -37,8 +38,6 @@ struct socket_info {
       pid_t pid;
 #endif
 };
-
-#undef MSG_WAITALL
 
 UNUSED static socket_info *attempt_clangd_sock();
 UNUSED static void         test_recv(socket_t readfd);

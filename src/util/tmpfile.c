@@ -8,13 +8,6 @@
 #include "Common.hh"
 #include "util/c_util.h"
 
-#if HAVE_GETRANDNUM
-#  include <sys/random.h>
-#  define RAND(dst) getrandom(&dest, sizeof(dst), 0)
-#elif HAVE_ARC4RANDOM
-#  define RAND(dst) arc4random_buf(&dst, sizeof(dst))
-#endif
-
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -27,7 +20,7 @@
 #ifdef DUMB_TEMPNAME_NUM_CHARS
 # define NUM_RANDOM_CHARS DUMB_TEMPNAME_NUM_CHARS
 #else
-# define NUM_RANDOM_CHARS 9
+# define NUM_RANDOM_CHARS 16
 #endif
 
 #ifdef _WIN32
@@ -47,20 +40,24 @@
 # define CHAR_IS_FILESEP(ch) ((ch) == '/')
 #endif
 
+#define RAND() cxx_random_engine_get_random_val()
+
 static char *get_random_chars(char *buf);
 
 /*======================================================================================*/
 
 char *
-even_dumber_tempname(char       *restrict       buf,
-                     char const *restrict const dir,
-                     char const *restrict const prefix,
-                     char const *restrict const suffix)
+braindead_tempname(_Notnull_   char       *restrict       buf,
+                   _Notnull_   char const *restrict const dir,
+                   _Maybenull_ char const *restrict const prefix,
+                   _Maybenull_ char const *restrict const suffix)
 {
+      /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
+       * so this is about the best way I can think of to do this. */
       size_t len = strlen(dir);
       memcpy(buf, dir, len + 1);
 
-      if (!CHAR_IS_FILESEP(buf[len - 1]))
+      if (len > 0 && !CHAR_IS_FILESEP(buf[len - 1]))
             buf[len++] = FILESEP_CHAR;
 
       char *ptr = buf + len;
@@ -88,22 +85,14 @@ get_random_chars(char *buf)
 {
       char *ptr = buf;
 
-
       for (int i = 0; i < NUM_RANDOM_CHARS; ++i) {
-            unsigned const tmp = rand();
+            uint32_t const tmp = RAND();
 
             if ((tmp & 0x0F) < 2)
-                  *ptr++ = (char)((rand() % 10) + '0');
+                  *ptr++ = (char)((RAND() % 10) + '0');
             else
-                  *ptr++ = (char)((rand() % 26) + ((tmp & 1) ? 'A' : 'a'));
+                  *ptr++ = (char)((RAND() % 26) + ((tmp & 1) ? 'A' : 'a'));
       }
 
       return ptr;
-}
-
-/*--------------------------------------------------------------------------------------*/
-
-INITIALIZER_HACK(init)
-{
-      srand(cxx_random_device_get_random_val());
 }

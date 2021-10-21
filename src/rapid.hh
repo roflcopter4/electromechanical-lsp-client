@@ -64,13 +64,14 @@
 
 namespace emlsp::rpc::json {
 
-using util::NonStringable;
+using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
+template<typename T>
+concept NonStringRef = !std::convertible_to<
+      T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
 
 template <typename Allocator = rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator>>
 class rapid_doc
 {
-      using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
-
     private:
       rapidjson::Document doc_;
       rapidjson::Value   *cur_;
@@ -109,35 +110,31 @@ class rapid_doc
             cur_->AddMember(key, val, al_);
       }
 
-#if 0
-      template <typename T,
-                std::enable_if_t<!std::is_convertible<T, std::string>::value, int> = 0>
+      template <NonStringRef T>
       void add_member(StringRef &&key, T &val)
       {
             cur_->AddMember(key, rapidjson::Value(std::move(val)), al_);
       }
 
-      template <typename T,
-                std::enable_if_t<!std::is_convertible<T, std::string>::value, int> = 0>
-      void add_member(StringRef &&key, T &&val)
-      {
-            cur_->AddMember(key, rapidjson::Value(val), al_);
-      }
-#endif
-
-      template <NonStringable T>
-      void add_member(StringRef &&key, T &val)
-      {
-            cur_->AddMember(key, rapidjson::Value(std::move(val)), al_);
-      }
-
-      template <NonStringable T>
+      template <NonStringRef T>
       void add_member(StringRef &&key, T &&val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
-      template <NonStringable ...Types>
+      template <NonStringRef T>
+      void add_member(T &key, StringRef &&val)
+      {
+            cur_->AddMember(std::move(key), val, al_);
+      }
+
+      template <NonStringRef T>
+      void add_member(T &&key, StringRef &&val)
+      {
+            cur_->AddMember(key, rapidjson::Value(val), al_);
+      }
+
+      template <NonStringRef ...Types>
       void add_member(Types &&...args)
       {
             cur_->AddMember(args..., al_);
@@ -150,13 +147,13 @@ class rapid_doc
             cur_->PushBack(val, al_);
       }
 
-      template <NonStringable T>
+      template <NonStringRef T>
       void add_value(T &val)
       {
             cur_->PushBack(val, al_);
       }
 
-      template <NonStringable T>
+      template <NonStringRef T>
       void add_value(T &&val)
       {
             cur_->PushBack(val, al_);
@@ -164,15 +161,15 @@ class rapid_doc
 
       /*--------------------------------------------------------------------------------*/
 
-      void push_member(StringRef &&key, rapidjson::Type ty = rapidjson::Type::kObjectType)
+      void push_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
             stack_.push(cur_);
             cur_ = &cur_->FindMember(key)->value;
       }
 
-      template <NonStringable T>
-      void push_member(T &&key, rapidjson::Type ty = rapidjson::Type::kObjectType)
+      template <NonStringRef T>
+      void push_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
             stack_.push(cur_);
@@ -183,7 +180,7 @@ class rapid_doc
       {
             cur_->PushBack(rapidjson::Value(ty), al_);
             stack_.push(cur_);
-            cur_ = &(*cur_)[cur_->Size() - 1];
+            cur_ = &(*cur_)[cur_->Size() - SIZE_C(1)];
       }
 
       void pop(size_t n = 1)

@@ -114,6 +114,7 @@
 /*--------------------------------------------------------------------------------------*/
 
 #define FMT_HEADER_ONLY 1
+#define FMT_USE_USER_DEFINED_LITERALS 1
 #include <fmt/core.h>
 
 #include <fmt/compile.h>

@@ -13,13 +13,13 @@ add_executable(lsp-thing
     client.cc
 
     event/loop.cc
-    rpc/object.cc
     event/event.cc
     lsp-protocol/static-data.cc
 
     util/err.c
     util/tmpfile.c
     util/util.cc
+    util/c_util.c
 )
 
 if (TRUE OR NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -57,7 +57,7 @@ target_link_libraries(lsp-thing
     rapidjson
     nlohmann_json
     ${GLib_LIBRARY}
-    -luv
+    #-luv
 )
 
 if (USE_JEMALLOC STREQUAL "YES")

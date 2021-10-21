@@ -17,10 +17,10 @@ namespace emlsp {
    NOINLINE extern void test3();
    namespace nloh {
     NOINLINE extern void test1();
-   } // namespace nloh 
+   } // namespace nloh
    namespace rapid {
     NOINLINE extern void test1();
-   } // namespace rapid 
+   } // namespace rapid
   } // namespace json
   namespace event {
    NOINLINE extern void test1();
@@ -40,7 +40,7 @@ namespace emlsp {
  } // namespace event
  namespace test {
   NOINLINE extern void test01();
- } // namespace test 
+ } // namespace test
 } // namespace emlsp
 
 #ifdef _WIN32
@@ -112,6 +112,12 @@ main(UNUSED int argc, UNUSED char *argv[])
 {
 #ifdef _WIN32
       init_wsa();
+      if (_setmode(0, _O_BINARY) == (-1))
+            emlsp::util::win32::error_exit(L"_setmode(0)");
+      if (_setmode(1, _O_BINARY) == (-1))
+            emlsp::util::win32::error_exit(L"_setmode(1)");
+      if (_setmode(2, _O_BINARY) == (-1))
+            emlsp::util::win32::error_exit(L"_setmode(2)");
 #endif
 
       try {
@@ -149,6 +155,7 @@ main(UNUSED int argc, UNUSED char *argv[])
             DUMP_EXCEPTION(e);
       }
 
+      fmt::print(FMT_COMPILE("Hello, world!\n"));
 
 
 #ifdef _WIN32

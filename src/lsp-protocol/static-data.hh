@@ -34,14 +34,30 @@ R"({
                  },
                  "colorProvider": {
                      "dynamicRegistration": true
+                 },
+                 "publishDiagnostics": {
+                     "relatedInformation": true,
+                     "versionSupport": true,
+                     "codeDescriptionSupport": true,
+                     "dataSupport": true
+                 },
+                  "codeLens": {
+                     "dynamicRegistration": true
                  }
+             },
+
+             "workspace": {
+                 "applyEdit": false,
+                 "didChangeWatchedFiles": {
+                     "dynamicRegistration": true
+                  }
              }
          },
          "locale": "en_US.UTF8",
          "clientInfo": {
              "name": ")" MAIN_PROJECT_NAME R"(",
              "version": ")" MAIN_PROJECT_VERSION_STRING R"("
-         },   
+         },
          "processId": %d,
          "rootUri": %s,
          "trace": "off"
@@ -61,7 +77,7 @@ R"({
 
  */
 
-constexpr char const foobarbaz[] = 
+constexpr char const foobarbaz[] =
 R"({
   "id": 0,
   "jsonrpc": "2.0",
@@ -154,7 +170,7 @@ R"({
   }
 })";
 
-} // namespace emlsp::rpc::lsp::data 
+} // namespace emlsp::rpc::lsp::data
 
 /****************************************************************************************/
 #endif

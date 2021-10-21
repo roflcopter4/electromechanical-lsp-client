@@ -4,7 +4,7 @@
 #include "lsp-protocol/static-data.hh"
 
 #include "rapid.hh"
-//#include <fmt/printf.h>
+#include <fmt/printf.h>
 #include <nlohmann/json.hpp>
 
 #if 0
@@ -18,7 +18,8 @@
 #include <asio/streambuf.hpp>
 #endif
 
-//#include <uvw.hpp>
+#include <uv.h>
+#include <uvw.hpp>
 
 namespace emlsp::event {
 
@@ -35,13 +36,6 @@ void test01()
 #if 0
       auto buf = asio::streambuf();
       std::ostream os(&buf);
-#endif
-
-#if 0
-      str += "HELLO, IDIOT!\n";
-      str += "HELLO, IDIOT!\n";
-      str += "HELLO, IDIOT!\n";
-      str += "HELLO, IDIOT!\n";
 #endif
 
 #if 0
@@ -93,26 +87,45 @@ static void
 dump_message(void const *msg, size_t const len)
 {
       std::cout.flush();
+      fflush(stdout);
       std::cerr.flush();
+      fflush(stderr);
+
       fprintf(stdout, "\n\033[1;32m------ MSG LENGTH %zu ------\033[0m\n%.*s\n"
                       "\033[1;32m------ END MSG ------\033[0m\n\n",
               len, static_cast<int>(len), static_cast<char const *>(msg));
+
       fflush(stdout);
+      fflush(stderr);
 }
 
 static void dump_message(std::string const &msg) { dump_message(msg.data(), msg.size()); }
+static void dump_message(std::vector<char> const &msg) { dump_message(msg.data(), msg.size() - SIZE_C(1)); }
 
 using emlsp::rpc::lsp::data::initialization_message;
-using emlsp::rpc::lsp::unix_socket_connection;
-using emlsp::rpc::lsp::pipe_connection;
 
+#ifdef _WIN32
+static constexpr char const test_rooturi[] = R"("file:///D:/ass/VisualStudio/elemwin")";
+static constexpr char const test_uri[]     = R"(file:///D:/ass/VisualStudio/elemwin/src/main.cc)";
+static constexpr char const test_file[]    = R"(D:\ass\VisualStudio\elemwin\src\main.cc)";
+static constexpr char const clangd_exe[]   = R"(D:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\Llvm\x64\bin\clangd.exe)";
+#else
 static constexpr char const test_rooturi[] = R"("file:///home/bml/files/Projects/elemwin")";
 static constexpr char const test_uri[]     = "file:///home/bml/files/Projects/elemwin/src/main.cc";
 static constexpr char const test_file[]    = "/home/bml/files/Projects/elemwin/src/main.cc";
+static constexpr char const clangd_exe[]   = "clangd";
+#endif
+
+using emlsp::rpc::lsp::unix_socket_connection;
+using emlsp::rpc::lsp::pipe_connection;
+
+using con_type = emlsp::rpc::lsp::unix_socket_connection;
+//using con_type = emlsp::rpc::lsp::pipe_connection;
+//using con_type = emlsp::rpc::lsp::named_pipe_connection;
 
 
-NOINLINE static void
-test03_1(unix_socket_connection &con, std::vector<char> const &buf)
+UNUSED NOINLINE static void
+test03_1(con_type &con, std::vector<char> const &buf)
 {
       using rapidjson::Type;
       using rapidjson::Value;
@@ -144,20 +157,20 @@ test03_1(unix_socket_connection &con, std::vector<char> const &buf)
       dump_message(ss.GetString());
 }
 
-NOINLINE static void
-test03_2(unix_socket_connection &con, std::vector<char> const &buf)
+UNUSED NOINLINE static void
+test03_2(con_type &con, std::vector<char> const &buf)
 {
       using rapidjson::Type;
       using rapidjson::Value;
 
-      emlsp::rpc::json::rapid_doc wrap;
+      rpc::json::rapid_doc wrap;
       wrap.add_member ("method", "textDocument/didOpen");
       wrap.push_member("params");
       wrap.push_member("textDocument");
       wrap.add_member ("uri", test_uri);
       wrap.add_member ("languageId", "cpp");
       wrap.add_member ("version", 1);
-      wrap.add_member ("text", Value(buf.data(), buf.size() - 1));
+      wrap.add_member ("text", Value(buf.data(), buf.size() - SIZE_C(1)));
 
       con.write_message(wrap.doc());
       auto msg = con.read_message();
@@ -172,58 +185,81 @@ test03_2(unix_socket_connection &con, std::vector<char> const &buf)
       dump_message(ss.GetString());
 }
 
-NOINLINE static void
-test03_3(unix_socket_connection &con, std::vector<char> &buf)
+UNUSED NOINLINE static void
+test03_3(con_type &con, std::vector<char> &buf)
 {
       using nlohmann::json;
 
-      auto obj = json::object({
+      /* If you don't specify json::object explicitly, the library just guesses what
+       * kind of json value you might have wanted. It's usually wrong. */
+      auto obj = json::object( {
           {"method", "textDocument/didOpen"},
-          {"params", json::object({{"textDocument",
-                                    json::object({{"uri", test_uri},
-                                                  {"languageId", "cpp"},
-                                                  {"version", 1},
-                                                  {"text", json(buf.data())}})}})}
-      });
+          {"params", json::object( {{"textDocument",
+                                     json::object( {{"uri", test_uri},
+                                                    {"languageId", "cpp{}"},
+                                                    {"version", 1},
+                                                    {"text", json(buf.data())}} )
+                                    }}
+          )}
+      } );
 
       con.write_message(obj);
-      auto msg = con.read_message();
-      dump_message(msg.data(), msg.size() - 1);
+      auto const msg = con.read_message();
+      dump_message(msg.data(), msg.size() - SIZE_C(1));
 
-      auto rdobj = json::parse(msg.data());
+      auto const rdobj = json::parse(msg.data());
       std::stringstream ss;
       ss << std::setw(4) << rdobj << '\n';
 
       dump_message(ss.str());
 }
 
+namespace {
+
+void
+uv_poll_callback(uv_poll_t *hand, UNUSED int status, UNUSED int events)
+{
+      auto      *con = static_cast<unix_socket_connection *>(hand->data);
+      auto const msg  = con->read_message();
+      dump_message(msg);
+}
+
+void uvw_poll_callback (uvw::PollEvent const &ev, uvw::PollHandle &handle)
+{
+      if (ev.flags & uvw::details::UVPollEvent::READABLE) {
+            auto con = handle.data<unix_socket_connection>();
+            auto const msg  = con->read_message();
+            dump_message(msg);
+      }
+}
+
+} // namespace
+
 void test03()
 {
       std::vector<char> buf;
 
       {
-            struct stat st; //NOLINT
+            struct stat st; //NOLINT(cppcoreguidelines-pro-type-member-init)
             FILE *fp = ::fopen(test_file, "rb");
             ::fstat(::fileno(fp), &st);
-
-            emlsp::util::resize_vector_hack(buf, st.st_size + 1);
+            util::resize_vector_hack(buf, st.st_size + SIZE_C(1));
             (void)::fread(buf.data(), 1, st.st_size, fp);
-            buf[st.st_size] = '\0';
             ::fclose(fp);
+            buf[st.st_size] = '\0';
       }
 
-      char *init;
-      int   initlen = ::asprintf(&init, initialization_message, ::getpid(), test_rooturi);
+      auto const init = fmt::sprintf(FMT_STRING(initialization_message), ::getpid(), test_rooturi);
       std::cout << "I HAVE: " << init << '\n';
       std::cout.flush();
 
-#if 1
+#if 0
       fmt::print(FMT_COMPILE("\n\033[1;31mrapidjson\033[0m\n\n"));
       {
-            unix_socket_connection con;
-            con.connection().set_stderr_devnull();
-            con.spawn_connection_l("clangd", "--pch-storage=memory");
-            con.write_message(init, initlen);
+            con_type con;
+            //con.connection().set_stderr_devnull();
+            con.spawn_connection_l(clangd_exe, "--pch-storage=memory", "--log=verbose");
+            con.write_message(init);
             con.discard_message();
             test03_1(con, buf);
       }
@@ -232,11 +268,19 @@ void test03()
 #if 0
       fmt::print(FMT_COMPILE("\n\033[1;31mMy wrapper\033[0m\n\n"));
       {
-            unix_socket_connection con;
-            con.connection().set_stderr_devnull();
-            con.spawn_connection_l("clangd", "--pch-storage=memory");
-            con.write_message(init, initlen);
-            con.discard_message();
+            con_type con;
+            //con.connection().set_stderr_devnull();
+            con.spawn_connection_l(clangd_exe, "--pch-storage=memory", "--log=verbose");
+            con.write_message(init);
+            //con.discard_message();
+            {
+                  //auto foo = con.read_message_string();
+                  auto foo = con.read_message();
+                  std::cerr.flush();
+                  std::cerr << fmt::format(FMT_COMPILE("\nRead {} bytes ->\n((\n{}\n))\n\n"), foo.size(), foo.data());
+                  dump_message(foo.data(), foo.size() - 1);
+                  std::cerr.flush();
+            }
             test03_2(con, buf);
       }
 #endif
@@ -244,15 +288,57 @@ void test03()
 #if 0
       fmt::print(FMT_COMPILE("\n\033[1;31mnlohmann\033[0m\n\n"));
       {
-            pipe_connection con;
-            con.spawn_connection_l("clangd", "--pch-storage=memory");
-            con.write_message(init, initlen);
+            con_type con;
+            //con.connection().set_stderr_devnull();
+            con.spawn_connection_l(clangd_exe, "--pch-storage=memory", "--log=verbose");
+            con.write_message(init);
             con.discard_message();
             test03_3(con, buf);
       }
 #endif
 
-      free(init); //NOLINT
+#if 0
+      {
+            auto con = std::make_unique<unix_socket_connection>();
+            con->spawn_connection_l(clangd_exe, "--pch-storage=memory", "--log=verbose");
+            con->write_message(init);
+
+            auto loop = std::make_unique<uv_loop_t>();
+            auto hand = std::make_unique<uv_poll_t>();
+
+            uv_loop_init(loop.get());
+            uv_poll_init_socket(loop.get(), hand.get(), (*con)()());
+            loop->data = hand->data = con.get();
+
+            uv_poll_start(hand.get(), UV_READABLE, uv_poll_callback);
+            uv_run(loop.get(), UV_RUN_DEFAULT);
+            uv_poll_stop(hand.get());
+      }
+#endif
+
+#if 1
+      {
+            auto con = std::make_shared<unix_socket_connection>();
+            con->spawn_connection_l(clangd_exe, "--pch-storage=memory", "--log=verbose");
+            con->write_message(init);
+
+            auto loop   = uvw::Loop::create();
+            auto handle = loop->resource<uvw::PollHandle>(uvw::OSSocketHandle((*con)()()));
+
+            loop->data(con);
+            handle->data(con);
+            handle->on<uvw::PollEvent>(std::function(uvw_poll_callback));
+            handle->start(uvw::details::UVPollEvent::READABLE);
+
+            loop->run();
+
+            handle->stop();
+            handle->close();
+            loop->close();
+            handle.reset();
+            loop.reset();
+      }
+#endif
 }
 
 } // namespace emlsp::event
@@ -262,4 +348,4 @@ namespace emlsp::rpc::event::test {
 
 
 
-} // namespace emlsp::rpc::event::test 
+} // namespace emlsp::rpc::event::test

@@ -161,6 +161,7 @@
 #endif
 
 #define SIZE_C        P99_PASTE_3(UINT, __WORDSIZE, _C) //NOLINT(cppcoreguidelines-macro-usage)
+#define SSIZE_C       P99_PASTE_3(INT,  __WORDSIZE, _C) //NOLINT(cppcoreguidelines-macro-usage)
 #define SLS(s)        ("" s ""), (sizeof(s))            //NOLINT(cppcoreguidelines-macro-usage)
 #define LSTRCPY(d, s) memcpy((d), SLS(s))               //NOLINT(cppcoreguidelines-macro-usage)
 #define eprintf(...)  fprintf(stderr, __VA_ARGS__)      //NOLINT(cppcoreguidelines-macro-usage)
@@ -172,6 +173,10 @@
 #  define PATH_MAX MAX_PATH
 # endif
 #endif
+
+#define __STDC_WANT_LIB_EXT__    1
+#define __STDC_WANT_LIB_EXT1__   1
+#define __STDC_WANT_SECURE_LIB__ 1
 
 /****************************************************************************************/
 #endif // macros.h

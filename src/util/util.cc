@@ -7,10 +7,6 @@
 #include <random>
 #include <sys/stat.h>
 
-#ifndef SOCK_CLOEXEC
-#  define SOCK_CLOEXEC 0
-#endif
-
 #if defined HAVE_MKDTEMP
 #  define MKDTEMP(x) mkdtemp(x)
 #else
@@ -41,16 +37,16 @@ static class cleanup_c
 {
     private:
       path tmp_path_{};
-      std::vector<path>    delete_list_;
+      std::vector<path>    delete_list_{};
       std::recursive_mutex mut_{};
 
     public:
-      void push(path const &Path)
+      void push(path const &path_arg)
       {
             mut_.lock();
             if (tmp_path_.empty())
-                  tmp_path_ = Path;
-            delete_list_.emplace_back(Path);
+                  tmp_path_ = path_arg;
+            delete_list_.emplace_back(path_arg);
             mut_.unlock();
       }
 
@@ -58,7 +54,7 @@ static class cleanup_c
       {
             mut_.lock();
             if (tmp_path_.empty())
-                  push(get_temporary_directory(MAIN_PROJECT_NAME ".main."));
+                  push(get_temporary_directory(MAIN_PROJECT_NAME "."));
             mut_.unlock();
             return tmp_path_;
       }
@@ -67,15 +63,16 @@ static class cleanup_c
       {
             mut_.lock();
             try {
-                  for (auto const &Path : delete_list_) {
-                        if (exists(Path)) {
-                              fprintf(stderr, "\nRemoving path '%s'\n", Path.string().c_str());
-                              remove_all(Path);
+                  for (auto const &value : delete_list_) {
+                        if (exists(value)) {
+                              fprintf(stderr, "\nRemoving path '%s'\n", value.string().c_str());
+                              remove_all(value);
                         }
                   }
-            } catch (std::exception &e) {
+                  fflush(stderr);
+            } catch (...) {
                   mut_.unlock();
-                  throw e;
+                  throw;
             }
 
             tmp_path_ = path{};
@@ -175,11 +172,12 @@ path
 get_temporary_filename(char const *prefix, char const *suffix)
 {
       char buf[PATH_MAX + 1];
+
 #if defined _WIN32 && defined USING_LIBUV
-      even_dumber_tempname(buf, R"(\\.\pipe)", prefix, suffix);
+      braindead_tempname(buf, R"(\\.\pipe)", prefix, suffix);
 #else
       auto const &tmp_dir = cleanup.get_path();
-      even_dumber_tempname(buf, tmp_dir.string().c_str(), prefix, suffix);
+      braindead_tempname(buf, tmp_dir.string().c_str(), prefix, suffix);
 #endif
 
       return {buf};
@@ -193,12 +191,13 @@ socket_t
 open_new_socket(char const *const path)
 {
       struct sockaddr_un addr = {};
-      strcpy(addr.sun_path, path);
+      strcpy_s(addr.sun_path, path);
       addr.sun_family = AF_UNIX;
 
       auto const connection_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
 #ifdef DOSISH
-      if (auto const e = GetLastError(); e != 0)
+      if (auto const e = WSAGetLastError(); e != 0)
             FATAL_ERROR("socket");
 #else
       if (connection_sock == (-1))
@@ -223,8 +222,9 @@ connect_to_socket(char const *const path)
       addr.sun_family = AF_UNIX;
 
       auto const data_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
 #ifdef DOSISH
-      if (auto const e = GetLastError(); e != 0)
+      if (auto const e = WSAGetLastError(); e != 0)
             FATAL_ERROR("socket");
 #else
       if (data_sock == (-1))
@@ -250,6 +250,13 @@ cxx_random_device_get_random_val(void)
       return rd();
 }
 
+extern "C" uint32_t
+cxx_random_engine_get_random_val(void)
+{
+      static std::default_random_engine rand_engine(cxx_random_device_get_random_val());
+      return static_cast<uint32_t>(rand_engine());
+}
+
 #ifdef DOSISH
 #include <strsafe.h>
 namespace win32
@@ -266,7 +273,7 @@ error_exit(wchar_t const *lpsz_function)
                      nullptr, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                      reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
 
-      LPVOID lp_display_buf =
+      void *const lp_display_buf =
           LocalAlloc(LMEM_ZEROINIT,
                      (static_cast<size_t>(lstrlenW(lpsz_function)) +
                       static_cast<size_t>(lstrlenW(static_cast<LPWSTR>(msg_buf))) + SIZE_C(40)) * sizeof(WCHAR));
@@ -309,8 +316,11 @@ my_err_throw(UNUSED int const     status,
             buf << c_buf << '\n';
       }
 
+      char errbuf[256];
+      strerror_s(errbuf, e);
+
       if (print_err)
-            buf << fmt::format(FMT_COMPILE("\n\terrno {}: \"{}\""), e, strerror(e));
+            buf << fmt::format(FMT_COMPILE("\n\terrno {}: \"{}\""), e, errbuf);
 
       mtx_unlock(&util_c_error_write_mutex);
       throw std::runtime_error(buf.str());
