@@ -7,9 +7,9 @@
 
 #if defined __GNUC__ || defined __clang__
 # ifdef __clang__
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(printf, __VA_ARGS__)))
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
 # else
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(gnu_printf, __VA_ARGS__)))
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
 # endif
 #else
 # define ATTRIBUTE_PRINTF(...)

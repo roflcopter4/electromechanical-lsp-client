@@ -12,8 +12,9 @@
 # define O_BINARY 0
 #endif
 
-namespace emlsp::rpc {
-namespace detail {
+#define AUTOC auto const
+
+namespace emlsp::ipc::detail {
 /****************************************************************************************/
 
 #ifdef _WIN32
@@ -63,7 +64,7 @@ start_process_with_pipe(UNUSED char const   *exe,
       /* _open_osfhandle() ought to transfer ownership of the handle to the file
        * descriptor. The original HANDLE isn't leaked when it goes out of scope. */
       pipefds[WRITE_FD] = _open_osfhandle(reinterpret_cast<intptr_t>(handles[INPUT_PIPE][WRITE_FD]), _O_APPEND);
-      pipefds[READ_FD]  = _open_osfhandle(reinterpret_cast<intptr_t>(handles[OUTPUT_PIPE][READ_FD]),  _O_RDONLY);
+      pipefds[READ_FD]  = _open_osfhandle(reinterpret_cast<intptr_t>(handles[OUTPUT_PIPE][READ_FD]), _O_RDONLY);
 
       if (!CreateProcessA(nullptr, argv, nullptr, nullptr, TRUE, 0, nullptr, nullptr, &start_info, pi))
             util::win32::error_exit(L"CreateProcess() failed");
@@ -144,9 +145,6 @@ protect_argv(int const argc, char **argv)
             if (need_dblquotes)
                   str += '"';
 
-            /* Only quotes and backslashes preceding quotes are escaped:
-             * see "Parsing C Command-Line Arguments" at
-             * https://docs.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments */
             while (*p) {
                   if (*p == '"') {
                         /* Add backslash for escaping quote itself */
@@ -179,18 +177,17 @@ protect_argv(int const argc, char **argv)
       return str;
 }
 
-NORETURN static int
-start_process_with_pipe_wrapper(void *varg)
+static void
+start_process_with_socket_wrapper(socket_info *info, int *errval)
 {
-      auto *info = static_cast<socket_info *>(varg);
-
       try {
             info->connected_sock = util::rpc::connect_to_socket(info->path.c_str());
       } catch (std::exception &e) {
-            std::cerr << "Caught exception \"" << e.what()
-                      << "\" while attempting to connect to socket at "
-                      << info->path << std::endl;
-            thrd_exit(WSAGetLastError());
+            fmt::print(stderr, FMT_COMPILE(
+                "Caught exception \"{}\" while attempting to connect to socket at \"{}\".\n"
+                ), e.what(), info->path);
+            *errval = WSAGetLastError();
+            return;
       }
 
       STARTUPINFOA startinfo = {};
@@ -203,12 +200,11 @@ start_process_with_pipe_wrapper(void *varg)
       if (!SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      bool b = CreateProcessA(nullptr, const_cast<LPSTR>(info->cmdline.c_str()),
-                              nullptr, nullptr, TRUE,
-                              0, nullptr, nullptr,
-                              &startinfo, &info->pid);
-      auto const error = GetLastError();
-      thrd_exit(static_cast<int>(b ? 0LU : error));
+      bool b = CreateProcessA(nullptr, const_cast<LPSTR>(info->cmdline.c_str()), nullptr,
+                              nullptr, true, 0, nullptr, nullptr, &startinfo, &info->pid);
+
+      AUTOC error = GetLastError();
+      *errval     = static_cast<int>(b ? 0LU : error);
 }
 
 } // namespace win32
@@ -253,35 +249,33 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
       root_ = open_new_socket();
 
 #ifdef _WIN32
+      int  errval = 0;
       auto info = win32::socket_info{path_, win32::protect_argv(argc, argv),
                                      root_, {}, {}, get_err_handle(), {}};
+      auto start_thread = std::thread{win32::start_process_with_socket_wrapper,
+                                      &info, &errval};
 
-      thrd_t start_thread{};
-      thrd_create(&start_thread, win32::start_process_with_pipe_wrapper, &info);
-
-      sockaddr_un con_addr{};
-      int         len            = sizeof(con_addr);
-      auto const  connected_sock = ::accept(root_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+      sockaddr_un con_addr = {};
+      int         len      = sizeof(con_addr);
+      AUTOC connected_sock = accept(root_, reinterpret_cast<sockaddr *>(&con_addr), &len);
 
       if (!connected_sock || connected_sock == static_cast<uintptr_t>(-1))
             err(1, "accept");
 
-      int e;
-      thrd_join(start_thread, &e);
-      if (e != 0)
-            err(e, "Process creation failed.");
+      start_thread.join();
+      if (errval != 0)
+            errx(errval, "Process creation failed -> %d.", errval);
       if (err_sink_type_ != sink_type::DEFAULT)
             CloseHandle(info.err_handle);
 
       pid = info.pid;
-      connected_ = info.connected_sock;
 
 #else // Not Windows
 
-      if ((pid = fork()) == 0) {
+      if ((pid = ::fork()) == 0) {
             socket_t dsock = connect_to_socket();
-            ::dup2(dsock, 0);
-            ::dup2(dsock, 1);
+            ::dup2(dsock, STDOUT_FILENO);
+            ::dup2(dsock, STDIN_FILENO);
             ::close(dsock);
             assert(argv[0] != nullptr);
 
@@ -291,7 +285,7 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
                   fd = ::open(dev_null, O_WRONLY|O_APPEND|O_BINARY);
                   break;
             case sink_type::FILENAME:
-                  fd = ::open(fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC|O_BINARY, 0644);
+                  fd = ::open(fname_.c_str(), O_RDWR|O_CREAT|O_APPEND|O_BINARY, 0600);
                   break;
             default:
                   break;
@@ -322,13 +316,13 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
 socket_t
 unix_socket_connection_impl::open_new_socket()
 {
-      ::memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
+      memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
       addr_.sun_family = AF_UNIX;
 
-      socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const connection_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef _WIN32
-      if (auto const e = ::WSAGetLastError(); e != 0)
+      if (auto const e = WSAGetLastError(); e != 0)
             err(1, "socket(): %d", e);
 #else
       if (connection_sock == (-1))
@@ -337,11 +331,10 @@ unix_socket_connection_impl::open_new_socket()
       ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      auto const ret =
-          ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
+      AUTOC ret = bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
       if (ret == (-1))
            err(1, "bind");
-      if (::listen(connection_sock, 0) == (-1))
+      if (listen(connection_sock, 0) == (-1))
            err(1, "listen");
 
       return connection_sock;
@@ -350,20 +343,19 @@ unix_socket_connection_impl::open_new_socket()
 socket_t
 unix_socket_connection_impl::connect_to_socket()
 {
-      socket_t const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const data_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef _WIN32
-      if (auto const e = ::WSAGetLastError(); e != 0)
+      if (auto const e = WSAGetLastError(); e != 0)
             err(1, "socket(): %d", e);
 #else
       if (data_sock == (-1))
            err(1, "socket");
-      int tmp = ::fcntl(data_sock, F_GETFL);
-      ::fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
+      int tmp = fcntl(data_sock, F_GETFL);
+      fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      auto const ret =
-          ::connect(data_sock, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
+      AUTOC ret = connect(data_sock, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
       if (ret == (-1))
             err(1, "connect");
 
@@ -381,8 +373,8 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
       int pipefds[2];
       procinfo_t pid{};
 
-      HANDLE     err_handle = get_err_handle();
-      auto const cmdline    = win32::protect_argv(static_cast<int>(argc), argv);
+      HANDLE err_handle = get_err_handle();
+      AUTOC  cmdline    = win32::protect_argv(static_cast<int>(argc), argv);
 
       win32::start_process_with_pipe(argv[0], const_cast<char *>(cmdline.c_str()),
                                      pipefds, err_handle, &pid);
@@ -403,6 +395,86 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 
 #else // Not Windows
 
+# define READ_FD  (0)
+# define WRITE_FD (1)
+
+static void
+open_pipe(int fds[2])
+{
+# ifdef HAVE_PIPE2
+      if (pipe2(fds, O_CLOEXEC) == (-1))
+            err(1, "pipe2()");
+# else
+      int flg;
+      if (pipe(fds) == (-1))
+            err(1, "pipe()");
+            /* Surely the compiler will unroll this... */
+#  pragma unroll
+      for (int i = 0; i < 2; ++i) {
+            if ((flg = fcntl(fds[i], F_GETFL)) == (-1))
+                  err(3 + i, "fcntl(F_GETFL)");
+            if (fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
+                  err(5 + i, "fcntl(F_SETFL)");
+      }
+# endif
+# ifdef __linux__ /* Can't do this on the BSDs. */
+      if (fcntl(fds[0], F_SETPIPE_SZ, 16384) == (-1))
+            err(2, "fcntl(F_SETPIPE_SZ)");
+# endif
+}
+
+procinfo_t
+pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
+{
+      int        fds[2][2];
+      procinfo_t pid;
+
+      switch (err_sink_type_) {
+      case sink_type::DEVNULL:
+            fd_ = ::open(dev_null, O_WRONLY|O_APPEND|O_BINARY, 0600);
+            break;
+      case sink_type::FILENAME:
+            fd_ = ::open(fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC|O_BINARY, 0600);
+            break;
+      default:
+            break;
+      }
+
+      open_pipe(fds[0]);
+      open_pipe(fds[1]);
+
+      if ((pid = fork()) == 0) {
+            if (::dup2(fds[0][READ_FD], STDIN_FILENO) == (-1))
+                  err(1, "dup2() failed\n");
+            if (::dup2(fds[1][WRITE_FD], STDOUT_FILENO) == (-1))
+                  err(1, "dup2() failed\n");
+            if (fd_ != (-1)) {
+                  if (::dup2(fd_, STDERR_FILENO) == (-1))
+                        err(1, "dup2() failed\n");
+                  ::close(fd_);
+            }
+
+            ::close(fds[0][0]);
+            ::close(fds[0][1]);
+            ::close(fds[1][0]);
+            ::close(fds[1][1]);
+
+            if (execvp(argv[0], argv) == (-1))
+                  err(1, "exec() failed\n");
+      }
+
+      ::close(fds[0][READ_FD]);
+      ::close(fds[1][WRITE_FD]);
+      if (fd_ != (-1))
+            ::close(fd_);
+
+      write_ = fds[0][WRITE_FD];
+      read_  = fds[1][READ_FD];
+
+      return pid;
+}
+
+#if 0
 procinfo_t
 pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
@@ -423,13 +495,14 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
             break;
       }
 
-      ::g_spawn_async_with_pipes(
+      g_spawn_async_with_pipes_and_fds(
              nullptr,
              const_cast<char **>(argv),
              environ,
              static_cast<GSpawnFlags>(flags),
              nullptr,
              nullptr,
+
              &pid,
              &write_,
              &read_,
@@ -437,13 +510,58 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
              &gerr
       );
 
+
       if (gerr != nullptr)
             throw std::runtime_error(fmt::format(FMT_COMPILE("glib error: {}"), gerr->message));
 
       return (procinfo_t)pid;
 }
+#endif
 
 #endif
+
+pipe_connection_impl::~pipe_connection_impl()
+{
+      if (read_ != (-1))
+            ::close(read_);
+      if (write_ != (-1))
+            ::close(write_);
+}
+
+ssize_t
+pipe_connection_impl::read(void *buf, size_t const nbytes, UNUSED int flags)
+{
+      size_t total = 0;
+
+#if 0
+      size_t n;
+      do {
+            n = ::read(read_, static_cast<char *>(buf) + total, nbytes - total);
+      } while (n != SIZE_C(-1) && (total += n) < nbytes);
+#endif
+
+      if (flags & MSG_WAITALL) {
+            size_t n;
+            do {
+                  n = ::read(read_, static_cast<char *>(buf) + total, nbytes - total);
+            } while (n != SIZE_C(-1) && (total += n) < nbytes);
+      } else {
+            total = ::read(read_, buf, nbytes);
+      }
+
+      return static_cast<ssize_t>(total);
+}
+
+ssize_t
+pipe_connection_impl::write(void const *buf, size_t const nbytes, UNUSED int flags)
+{
+      size_t total = 0, n;
+      do {
+            n = ::write(write_, static_cast<char const *>(buf) + total, nbytes - total);
+      } while (n != SIZE_C(-1) && (total += n) < nbytes);
+
+      return static_cast<ssize_t>(total);
+}
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -486,9 +604,8 @@ start_process_with_named_pipe(char                *argv,
       if (connection == INVALID_HANDLE_VALUE)
             util::win32::error_exit(L"CreateFileA");
 
-      STARTUPINFOA start_info;
-      memset(&start_info, 0, sizeof start_info);
       memset(pi, 0, sizeof *pi);
+      STARTUPINFOA start_info = {};
       start_info.cb           = sizeof(STARTUPINFOA);
       start_info.dwFlags      = STARTF_USESTDHANDLES;
       start_info.hStdInput    = connection;
@@ -506,18 +623,17 @@ start_process_with_named_pipe(char                *argv,
       return 0;
 }
 
-static int
-start_process_with_named_pipe_wrapper(void *vdata)
+static void
+start_process_with_named_pipe_wrapper(named_pipe_info *info, int *errval)
 {
-      auto *info = static_cast<named_pipe_info *>(vdata);
       auto const ret =
           start_process_with_named_pipe(const_cast<char *>(info->argv.c_str()), info->path,
                                         info->base_handle, info->err_handle, &info->pi);
 
-      std::cerr << "Process (" << info->pi.dwProcessId << ") created successfully.\n";
-      std::cerr.flush();
+      fmt::print(stderr, FMT_COMPILE("Process `{}' created successfully.\n"), info->pi.dwProcessId);
+      fflush(stderr);
 
-      thrd_exit(static_cast<int>(ret));
+      *errval = static_cast<int>(ret);
 }
 
 } // namespace win32
@@ -540,8 +656,8 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
            0, nullptr // Default wait time and security attrs.
       );
 
-      std::cerr << "Using pipe at " << fname_ << " with raw value " << pipe_ << '\n';
-      std::cerr.flush();
+      fmt::print(stderr, FMT_COMPILE("Using pipe at `{}' with raw value `{}'.\n"), fname_, pipe_);
+      fflush(stderr);
 
       win32::named_pipe_info info = {pipe_,
                                      get_err_handle(),
@@ -549,25 +665,61 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
                                      win32::protect_argv(static_cast<int>(argc), argv),
                                      {}};
 
-      thrd_t start_thread{};
-      thrd_create(&start_thread, win32::start_process_with_named_pipe_wrapper, &info);
+      int  errval       = 0;
+      auto start_thread = std::thread{win32::start_process_with_named_pipe_wrapper, &info, &errval};
 
       if (!ConnectNamedPipe(pipe_, nullptr))
             err(1, "ConnectNamedPipe()");
 
-      int e;
-      thrd_join(start_thread, &e);
-      if (e != 0)
-            err(e, "Process creation failed. -> %d", e);
+      start_thread.join();
+      if (errval != 0)
+            errx(errval, "Process creation failed. -> %d", errval);
       if (err_sink_type_ != sink_type::DEFAULT)
             CloseHandle(info.err_handle);
 
       return info.pi;
 }
 
+ssize_t
+win32_named_pipe_impl::read(void *buf, size_t const nbytes, int const flags)
+{
+      size_t total = 0;
+      DWORD  n     = 0;
+      int    ret;
+
+      if (flags & MSG_WAITALL) {
+            do {
+                  ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, nullptr);;
+            } while (n != UINT32_C(-1) && (total += n) < nbytes);
+      } else {
+            ret = ReadFile(pipe_, buf, nbytes, &n, nullptr);;
+      }
+
+      AUTOC e = GetLastError();
+      if (!ret && e != ERROR_MORE_DATA)
+            util::win32::error_exit(L"ReadFile");
+
+      return static_cast<ssize_t>(total);
+}
+
+ssize_t
+win32_named_pipe_impl::write(void const *buf, size_t const nbytes, int const flags)
+{
+      size_t total = 0;
+      DWORD  n     = 0;
+      int    ret;
+      do {
+            ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, nullptr);;
+      } while (n != UINT32_C(-1) && (total += n) < nbytes);
+
+      if (!ret)
+            util::win32::error_exit(L"WriteFile");
+
+      return static_cast<ssize_t>(total);
+}
+
 #endif
 
 
 /****************************************************************************************/
-} // namespace detail
-} // namespace emlsp::rpc
+} // namespace emlsp::ipc::detail

@@ -2,13 +2,15 @@
 #ifndef HGUARD_d_PCH_HH_
 #define HGUARD_d_PCH_HH_
 
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
 #include "util/macros.h"
 
 #include <algorithm>
 #include <any>
 #include <array>
 #include <atomic>
-#include <barrier>
 #include <bit>
 #include <bitset>
 #include <charconv>
@@ -30,7 +32,6 @@
 #include <iostream>
 #include <istream>
 #include <iterator>
-#include <latch>
 #include <limits>
 #include <list>
 #include <locale>
@@ -44,11 +45,9 @@
 #include <ostream>
 #include <queue>
 #include <random>
-#include <ranges>
 #include <ratio>
 #include <regex>
 #include <scoped_allocator>
-#include <semaphore>
 #include <set>
 #include <span>
 #include <sstream>
@@ -113,14 +112,31 @@
 
 /*--------------------------------------------------------------------------------------*/
 
-#define FMT_HEADER_ONLY 1
-#define FMT_USE_USER_DEFINED_LITERALS 1
 #include <fmt/core.h>
 
 #include <fmt/compile.h>
 #include <fmt/format-inl.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <fmt/printf.h>
+
+
+#ifdef NDEBUG
+#  define RAPIDJSON_ASSERT(x)
+#  define RAPIDJSON_NOEXCEPT_ASSERT(x)
+#else
+#  define RAPIDJSON_ASSERT_THROWS
+#  define RAPIDJSON_NOEXCEPT_ASSERT(x) assert(x)
+#  define RAPIDJSON_ASSERT(x)                                    \
+      do {                                                       \
+            if (!(x)) [[unlikely]] {                             \
+                  errx(1, "rapidjson assertion failed: %s", #x); \
+            }                                                    \
+      } while (0)
+#endif
+
+//#include "rapid.hh"
+#include <rapidjson/rapidjson.h>
 
 /****************************************************************************************/
 #endif

@@ -1,6 +1,5 @@
 // ReSharper disable CppDeclarationHidesLocal
 #include "Common.hh"
-
 #include "rapid.hh"
 
 constexpr auto constant_pi = 3.14159265358979323846;   // pi

@@ -1,12 +1,8 @@
 // ReSharper disable CppInconsistentNaming
 #include "Common.hh"
-#include "pch.hh"
-#include "rapid.hh"
 #include "util/myerr.h"
 
 #include <glib.h>
-#include <nlohmann/json.hpp>
-#include <stack>
 
 #ifdef HAVE_THREADS_H
 #  include <threads.h>
@@ -20,9 +16,6 @@
 #  warning "false was a macro!"
 #  undef false
 #endif
-
-#define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT),  ##__VA_ARGS__)
-#define FORMAT(FMT, ...) fmt::format(FMT_COMPILE(FMT), ##__VA_ARGS__)
 
 namespace emlsp::rpc::json
 {
@@ -76,8 +69,8 @@ void test2()
             std::stringstream ss;
             ss << obj;
             std::string msg = ss.str();
-            std::string header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
-            PRINT("Writing string:\n{}\n", msg);
+            std::string header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
+            fmt::print(FMT_COMPILE("Writing string:\n{}\n"), msg);
             (void)write(writefd, msg.data(), msg.length());
       }
 
@@ -107,7 +100,7 @@ class Object : public rapidjson::Value
       template <typename T>
       void addmember(StringRefType name, T &&value)
       {
-            (void)AddMember((name), (value), allocator_);
+            (void)AddMember(name, value, allocator_);
       }
 
 };
@@ -157,7 +150,7 @@ class Wrapper
       __attribute__((__always_inline__))
       void addmember(rapidjson::GenericStringRef<rapidjson::UTF8<>::Ch> name, T &&value)
       {
-            (void)obj_.AddMember(std::move(name), std::move(value), allocator_);
+            (void)obj_.AddMember(std::move(name), std::forward<T &&>(value), allocator_);
       }
 };
 
@@ -176,42 +169,20 @@ void test1()
 #define ADDMEMBER(a, b) AddMember((a), (b), allocator)
 #define PUSH(x) PushBack((x), allocator)
 
-      // using rapidjson::Document;
-      // using rapidjson::Type;
-      // using rapidjson::Value;
-
-      int    writefd = -1;
-      int    readfd  = -1;
-      GPid   pid     = attempt_clangd_pipe(&writefd, &readfd);
-      // auto   doc     = std::make_unique<rapidjson::Document>(rapidjson::Type::kObjectType);
-      // auto docinst = Document{rapidjson::Type::kObjectType};
-      // auto doc = &docinst;
-
-
-#if 0
-      auto doc = std::make_unique<Document<rapidjson::MemoryPoolAllocator<>>
-                                 >(rapidjson::Type::kObjectType);
-#endif
-
-      auto doc = new Wrapper<rapidjson::Document>(rapidjson::Document{rapidjson::kObjectType});
-
-      // auto &&allocator = doc->GetAllocator();
+      int  writefd = -1;
+      int  readfd  = -1;
+      GPid pid     = attempt_clangd_pipe(&writefd, &readfd);
+      auto doc     = new Wrapper(rapidjson::Document{rapidjson::kObjectType});
 
       doc->addmember("jsonrpc", "2.0");
       doc->addmember("id", 1);
       doc->addmember("method", "initialize");
 
       {
-            // Object obj(doc->get_allocator());
-            // auto obj = rapidjson::Value(rapidjson::Type::kObjectType);
-            // auto obj = Wrapper{rapidjson::Value{rapidjson::kObjectType}, doc->get_allocator()};
             auto obj = wrap_new_object(doc->get_allocator());
-            // obj.SetObject();
 
             {
                   auto subobj = wrap_new_object(doc->get_allocator());
-                  // Object subobj(doc->get_allocator());
-                  // auto subobj = rapidjson::Value(rapidjson::Type::kObjectType);
                   subobj.addmember("depression", true);
                   subobj.addmember("failure", true);
                   subobj.addmember("confidence", false);
@@ -219,8 +190,6 @@ void test1()
             }
             {
                   auto subobj = wrap_new_object(doc->get_allocator());
-                  // Object subobj(doc->get_allocator());
-                  // auto subobj = rapidjson::Value(rapidjson::Type::kObjectType);
                   subobj.addmember("name", "retard");
                   subobj.addmember("version", rapidjson::StringRef("0.0.1"));
                   obj.addmember("clientInfo", std::move(subobj.yield()));
@@ -231,13 +200,12 @@ void test1()
 
       rapidjson::StringBuffer ss;
       rapidjson::Writer       writer{ss};
-      // doc->get().Accept(writer);
       doc->get().Accept(writer);
 
       {
             std::string msg    = ss.GetString();
-            std::string header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
-            PRINT("Writing string:\n{}{}\n", header, msg);
+            std::string header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
+            fmt::print(FMT_COMPILE("Writing string:\n{}{}\n"), header, msg);
 
             (void)write(writefd, header.data(), header.length());
             (void)write(writefd, msg.data(), msg.length());
@@ -272,13 +240,13 @@ class Wrapper
       template <typename T>
       void add_member(StringRef name, T &&value)
       {
-            (void)cur_->AddMember(std::move(name), std::move(value), doc_.GetAllocator());
+            (void)cur_->AddMember(std::move(name), std::forward<T &&>(value), doc_.GetAllocator());
       }
 
       template <typename T>
       void add_value(T &&value)
       {
-            (void)cur_->PushBack(std::move(value), doc_.GetAllocator());
+            (void)cur_->PushBack(std::forward<T &&>(value), doc_.GetAllocator());
       }
 
       UNUSED void push(Type const ty = Type::kObjectType)
@@ -343,26 +311,10 @@ void test3_()
       wrp->doc().Accept(writer);
 
       std::string const &msg   = ss.GetString();
-      std::string const header = FORMAT("Content-Length: {}\r\n\r\n", msg.length());
-      PRINT("({}) Writing string:\n{}{}\n", __FUNCTION__, header, msg);
+      std::string const header = fmt::format(FMT_COMPILE("Content-Length: {}\r\n\r\n"), msg.length());
+      fmt::print(FMT_COMPILE("({}) Writing string:\n{}{}\n"), __FUNCTION__, header, msg);
 
       {
-#if 0
-            socket_info const *info = attempt_clangd_sock();
-
-            (void)send(info->accepted_sock, header.data(), (int)header.length(), 0);
-            (void)send(info->accepted_sock, msg.data(), (int)msg.length(), 0);
-
-            test_recv(info->accepted_sock);
-
-            closesocket(info->accepted_sock);
-            closesocket(info->connected_sock);
-            closesocket(info->main_sock);
-            CloseHandle(info->pid.hThread);
-            CloseHandle(info->pid.hProcess);
-            delete info;
-#endif
-
             int    writefd = -1;
             int    readfd  = -1;
             GPid   pid     = attempt_clangd_pipe(&writefd, &readfd);
@@ -517,7 +469,7 @@ attempt_clangd_sock()
       auto const sock    = util::rpc::open_new_socket(tmppath.string().c_str());
       auto      *info    = new socket_info{tmppath.string(), sock, {}, {}, {}};
 
-      std::cerr << FORMAT("(Socket bound to \"{}\" with raw value ({}).\n", tmppath.string(), sock);
+      std::cerr << fmt::format(FMT_COMPILE("(Socket bound to \"{}\" with raw value ({}).\n"), tmppath.string(), sock);
 
 #ifdef _WIN32
       thrd_t start_thread{};
@@ -575,7 +527,7 @@ attempt_clangd_pipe(int *writefd, int *readfd)
       );
 
       if (gerr != nullptr)
-            throw std::runtime_error(FORMAT("glib error: {}", gerr->message));
+            throw std::runtime_error(fmt::format(FMT_COMPILE("glib error: {}"), gerr->message));
 
       return pid;
 }

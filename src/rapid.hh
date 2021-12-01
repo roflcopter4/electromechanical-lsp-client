@@ -1,6 +1,6 @@
-#pragma once
 #ifndef HGUARD_d_RAPID_HH_
 #define HGUARD_d_RAPID_HH_
+#pragma once
 /****************************************************************************************/
 
 #include "Common.hh"
@@ -8,34 +8,6 @@
 #ifdef GetObject
 # undef GetObject
 #endif
-
-#define P00_PASTE_2_HELPER_2(a, b) a ## b
-#define P00_PASTE_2_HELPER_1(a, b) P00_PASTE_2_HELPER_2(a, b)
-#define PP_PASTE_2(a, b) P00_PASTE_2_HELPER_1(a, b)
-
-#define P00_STRINGIFY_HELPER(x) #x
-#define PP_STRINGIFY(x) P00_STRINGIFY_HELPER(x)
-
-#ifdef NDEBUG
-#  define RAPIDJSON_ASSERT(x)
-#  define RAPIDJSON_NOEXCEPT_ASSERT(x)
-#else
-#  define RAPIDJSON_ASSERT_THROWS
-#  define RAPIDJSON_NOEXCEPT_ASSERT(x) assert(x)
-#  define RAPIDJSON_ASSERT(x)                                \
-      do {                                                   \
-            if (!(x)) [[unlikely]] {                         \
-                  err(1, "rapidjson assertion failed: " #x); \
-            }                                                \
-      } while (0)
-#endif
-
-#define RAPIDJSON_SSE2 1
-#define RAPIDJSON_SSE42 1
-#define RAPIDJSON_USE_MEMBERSMAP 1
-#define RAPIDJSON_HAS_CXX11_TYPETRAITS 1
-#define RAPIDJSON_HAS_CXX11_RANGE_FOR  1
-#define RAPIDJSON_HAS_STDSTRING 1
 
 #include <rapidjson/rapidjson.h>
 
@@ -47,7 +19,6 @@
 #include <rapidjson/writer.h>
 
 #include <rapidjson/allocators.h>
-#include <rapidjson/cursorstreamwrapper.h>
 #include <rapidjson/encodedstream.h>
 #include <rapidjson/encodings.h>
 #include <rapidjson/filereadstream.h>
@@ -62,12 +33,11 @@
 
 /****************************************************************************************/
 
-namespace emlsp::rpc::json {
+namespace emlsp::ipc::json {
 
 using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
 template<typename T>
-concept NonStringRef = !std::convertible_to<
-      T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
+concept NonStringRef = !std::convertible_to<T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
 
 template <typename Allocator = rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator>>
 class rapid_doc
@@ -197,7 +167,7 @@ class rapid_doc
       }
 };
 
-} // namespace emlsp::rpc::json
+} // namespace emlsp::ipc::json
 
 /****************************************************************************************/
 #endif

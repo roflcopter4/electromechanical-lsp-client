@@ -12,6 +12,7 @@ project (electromechanical-lsp LANGUAGES C CXX VERSION 0.0.1)
 include (CheckFunctionExists)
 include (CheckSymbolExists)
 include (CheckIncludeFile)
+include (FindPkgConfig)
 
 
 ###############################################################################
@@ -48,7 +49,7 @@ else()
          -D__USE_ISOCXX11 -D_GNU_SOURCE -DHAVE_CONFIG_H)
 endif()
 
-add_definitions(-DHAVE_CONFIG_H)
+add_definitions(-DHAVE_CONFIG_H -D__STDC_WANT_SECURE_LIB__=1)
 include_directories("${CMAKE_CURRENT_BINARY_DIR}")
 include_directories("${PROJECT_SOURCE_DIR}/include")
 include_directories("${PROJECT_SOURCE_DIR}/src")
@@ -58,29 +59,80 @@ set (CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
 ###############################################################################
 
+if (WIN32)
+    foreach( v $ENV{PKG_CONFIG_PATH} )
+        string(REPLACE "/" "\\" _temp_pkgconfig_path "${_temp_pkgconfig_path}")
+        list(APPEND _temp_pkgconfig_path "${v}")
+    endforeach()
+    string(REPLACE ";" ":" _temp_pkgconfig_path "${_temp_pkgconfig_path}")
+    set(ENV{PKG_CONFIG_PATH} "${_temp_pkgconfig_path}")
+    unset(_temp_pkgconfig_path)
+endif()
+
+if (MSVC)
+    #execute_process(COMMAND D:/new_msys64/usr/bin/pkg-config.exe --cflags glib-2.0
+    #                RESULT_VARIABLE _my_pkgconfig_retval
+    #                OUTPUT_VARIABLE GLib_PKG_CFLAGS
+    #                ERROR_VARIABLE _my_pkgconfig_error
+    #                OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+
+    #if (${_my_pkgconfig_retval} GREATER 0)
+    #    message(FATAL_ERROR "Failed to locate glib: ${_my_pkgconfig_error}")
+    #endif()
+    #execute_process(COMMAND D:/new_msys64/usr/bin/pkg-config.exe --libs glib-2.0
+    #                OUTPUT_VARIABLE GLib_PKG_LIBS
+    #                OUTPUT_STRIP_TRAILING_WHITESPACE)
+    execute_process(COMMAND pkgconf.exe --cflags glib-2.0
+                    RESULT_VARIABLE _my_pkgconfig_retval
+                    OUTPUT_VARIABLE GLib_PKG_CFLAGS
+                    ERROR_VARIABLE _my_pkgconfig_error
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+
+    if (${_my_pkgconfig_retval} GREATER 0)
+        message(FATAL_ERROR "Failed to locate glib: ${_my_pkgconfig_error}")
+    endif()
+    execute_process(COMMAND pkgconf.exe --libs glib-2.0
+                    OUTPUT_VARIABLE GLib_PKG_LIBS
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+endif()
+
+###############################################################################
+
 list(APPEND CMAKE_MODULE_PATH
      "${CMAKE_SOURCE_DIR}/cmake"
      "${CMAKE_SOURCE_DIR}/cmake/gnome-cmake/modules")
 
-if (WIN32)
-    if (NOT VCPKG_ROOT)
-        message(FATAL_ERROR "Must provide a definition for VCPKG_ROOT (ie the directory with vcpkg.exe")
+if (NOT MINGW)
+    if (WIN32)
+        if (NOT VCPKG_ROOT)
+            message(FATAL_ERROR "Must provide a definition for VCPKG_ROOT (ie the directory with vcpkg.exe")
+        endif()
+        message( "INSTALLED DIR IS \"${VCPKG_ROOT}\"" )
+        list(APPEND CMAKE_MODULE_PATH "${VCPKG_ROOT}/scripts/buildsystems")
+        include (vcpkg)
+    else()
+        list (APPEND CMAKE_MODULE_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
+        list (APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
     endif()
-    message( "INSTALLED DIR IS \"${VCPKG_ROOT}\"" )
-    list(APPEND CMAKE_MODULE_PATH "${VCPKG_ROOT}/scripts/buildsystems")
-    include (vcpkg)
 endif()
 
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+# set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+# set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package (Threads REQUIRED)
-find_package (fmt REQUIRED)
-find_package (RapidJSON REQUIRED)
-find_package (nlohmann_json REQUIRED)
-find_package (GLib REQUIRED)
+#find_package (GLib REQUIRED)
+if (NOT MSVC)
+    find_package (GLib REQUIRED)
+    find_package (LibUV REQUIRED)
+endif()
+#find_package (nlohmann_json REQUIRED)
+#find_package (RapidJSON REQUIRED)
+find_package (fmt 8.0.0)
 
-include_directories(fmt_INCLUDE_DIRECTORIES)
+if (NOT fmt_FOUND)
+    set (fmt_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/include/fmt/include")
+endif()
 
 if (USE_JEMALLOC)
     find_package (Jemalloc REQUIRED)
@@ -110,6 +162,9 @@ CHECK_SYMBOL_EXISTS (clock_gettime  "time.h"     HAVE_CLOCK_GETTIME)
 CHECK_SYMBOL_EXISTS (timespec_get   "time.h"     HAVE_TIMESPEC_GET)
 CHECK_SYMBOL_EXISTS (nanosleep      "time.h"     HAVE_NANOSLEEP)
 
+CHECK_SYMBOL_EXISTS (strerror_r     "string.h"   HAVE_STRERROR_R)
+CHECK_SYMBOL_EXISTS (strerror_s     "string.h"   HAVE_STRERROR_S)
+
 CHECK_INCLUDE_FILE ("execinfo.h"    HAVE_EXECINFO_H)
 CHECK_INCLUDE_FILE ("intrin.h"      HAVE_INTRIN_H)
 CHECK_INCLUDE_FILE ("stdatomic.h"   HAVE_STDATOMIC_H)
@@ -123,7 +178,11 @@ if (NOT HAVE_THREADS_H)
     if (WIN32)
         find_package (tinycthread REQUIRED)
     else()
-        message(FATAL_ERROR "C11 threads library is required.")
+        message(WARNING
+            "C11 threads library is required. I'm going to assume you have "
+            "tinycthreads installed because I'm too lazy to write anything "
+            "to search for it."
+        )
     endif()
 endif()
 
@@ -183,21 +242,31 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
          -Wno-gnu-statement-expression -Werror=return-type
          -Wno-sign-compare
     )
-    set (CLANG_STDLIB -stdlib=libc++)
-    set (BASE ${BASE} ${WARNS}
-        ${CLANG_STDLIB} -g3 -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager
-    )
-    set (LTO_STR -flto=full -fwhole-program-vtables)
 
-    string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
-            # -fuse-ld=gold -stdlib=libstdc++ -rtlib=compiler-rt --unwindlib=libgcc
-            -fuse-ld=lld -rtlib=compiler-rt ${CLANG_STDLIB} --unwindlib=libunwind
-            -Wl,--lto-O3 -Wl,--lto-whole-program-visibility ${LTO_STR}
-    )
+    if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
+        set (LTO_STR -flto=full -fwhole-program-vtables)
+    endif()
 
-    set (__EXTRA_C_CXX_RELEASE_FLAGS -fvectorize -fslp-vectorize
-         -fwhole-program-vtables
+    if (WIN32)
+        set (CLANG_STDLIB -stdlib=libc++)
+        string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
+                ${CLANG_STDLIB} ${LTO_STR}
+                -fuse-ld=lld -rtlib=libgcc #-rtlib=compiler-rt --unwindlib=libunwind
         )
+    else()
+        set (CLANG_STDLIB -stdlib=libc++)
+        string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
+                # -fuse-ld=gold -stdlib=libstdc++ -rtlib=compiler-rt --unwindlib=libgcc
+                ${CLANG_STDLIB}
+                -fuse-ld=lld -rtlib=compiler-rt --unwindlib=libunwind
+                -Wl,--lto-O3 -Wl,--lto-whole-program-visibility ${LTO_STR}
+        )
+    endif()
+    set (__EXTRA_C_CXX_RELEASE_FLAGS
+         -fvectorize -fslp-vectorize -fwhole-program-vtables)
+
+    set (BASE ${BASE} ${WARNS}
+              ${CLANG_STDLIB} -g3 -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager)
 
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 

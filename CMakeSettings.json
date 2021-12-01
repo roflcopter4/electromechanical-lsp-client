@@ -27,7 +27,8 @@
           "value": "/DWIN32 /D_WINDOWS /EHsc -Zc:preprocessor -Zc:__cplusplus /mt /std:c++20 /MP",
           "type": "STRING"
         }
-      ]
+      ],
+      "cmakeExecutable": "D:\\Program Files\\Microsoft Visual Studio\\2022\\Preview\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
     }
   ]
 }

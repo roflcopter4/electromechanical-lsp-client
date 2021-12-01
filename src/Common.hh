@@ -1,6 +1,6 @@
-#pragma once
 #ifndef HGUARD_d_COMMON_HH_
 #define HGUARD_d_COMMON_HH_
+#pragma once
 /****************************************************************************************/
 
 #ifdef HAVE_CONFIG_H
@@ -15,7 +15,8 @@
 
 # include "pch.hh"
 
-using std::operator""s; //NOLINT
+using namespace std::literals;
+using namespace fmt::literals;
 
 #else // not C++
 

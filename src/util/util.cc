@@ -2,16 +2,15 @@
 #include "util/myerr.h"
 #include "util/util.hh"
 
-#include <filesystem>
-#include <mutex>
-#include <random>
-#include <sys/stat.h>
-
 #if defined HAVE_MKDTEMP
 #  define MKDTEMP(x) mkdtemp(x)
 #else
 #  include <glib.h>
 #  define MKDTEMP(x) g_mkdtemp(x)
+#endif
+
+#ifndef _MSC_VER
+#  define _Printf_format_string_
 #endif
 
 #ifdef DOSISH
@@ -33,10 +32,10 @@ namespace {
 
 void cleanup_sighandler(int signum);
 
-static class cleanup_c
+class cleanup_c
 {
     private:
-      path tmp_path_{};
+      path                 tmp_path_{};
       std::vector<path>    delete_list_{};
       std::recursive_mutex mut_{};
 
@@ -65,7 +64,7 @@ static class cleanup_c
             try {
                   for (auto const &value : delete_list_) {
                         if (exists(value)) {
-                              fprintf(stderr, "\nRemoving path '%s'\n", value.string().c_str());
+                              warnx("\nRemoving path '%s'\n", value.string().c_str());
                               remove_all(value);
                         }
                   }
@@ -90,7 +89,7 @@ static class cleanup_c
 #else
             struct sigaction act{};
             act.sa_handler = cleanup_sighandler;
-            act.sa_flags = SA_NOCLDWAIT | SA_RESETHAND | SA_RESTART;
+            act.sa_flags   = SA_NOCLDWAIT | SA_RESETHAND | SA_RESTART;
             sigaction(SIGABRT, &act, nullptr);
             sigaction(SIGHUP,  &act, nullptr);
             sigaction(SIGINT,  &act, nullptr);
@@ -105,15 +104,19 @@ static class cleanup_c
             try {
                   do_cleanup();
             } catch (std::exception &e) {
-                  std::cerr << fmt::format(FMT_COMPILE("Caught:\n{}\nwhen cleaning temporary files.\n"), e.what());
-                  std::cerr.flush();
+                  try {
+                        std::cerr << "Caught exception:\n    " << e.what()
+                                  << "\nwhen cleaning temporary files.\n";
+                        std::cerr.flush();
+                  } catch (...) {}
             }
       }
 
       DELETE_COPY_CTORS(cleanup_c);
       DELETE_MOVE_CTORS(cleanup_c);
-} cleanup;
+};
 
+static cleanup_c cleanup{};
 
 void
 cleanup_sighandler(int const signum)
@@ -123,11 +126,9 @@ cleanup_sighandler(int const signum)
 #ifdef DOSISH
       signal(signum, SIG_DFL);
 #else
-#if 0
       struct sigaction act {};
       act.sa_handler = SIG_DFL;
       sigaction(signum, &act, nullptr);
-#endif
 #endif
 
       raise(signum);
@@ -154,11 +155,11 @@ get_temporary_directory(char const *prefix)
             memcpy(buf + str.size(), FILESEP_STR "XXXXXX", 8);
       }
 
-      MKDTEMP(buf);
+      (void)MKDTEMP(buf);
       path ret(buf);
 
-      /* Paranoia. Justified paranoia: on Windows g_mkdtemp doesn't set any permissions
-       * at all. */
+      /* Paranoia; justified paranoia: on Windows g_mkdtemp doesn't set any
+       * permissions at all. */
       std::error_code code{};
       std::filesystem::permissions(ret, std::filesystem::perms::owner_all, code);
       if (code.value() != 0)
@@ -173,12 +174,8 @@ get_temporary_filename(char const *prefix, char const *suffix)
 {
       char buf[PATH_MAX + 1];
 
-#if defined _WIN32 && defined USING_LIBUV
-      braindead_tempname(buf, R"(\\.\pipe)", prefix, suffix);
-#else
       auto const &tmp_dir = cleanup.get_path();
       braindead_tempname(buf, tmp_dir.string().c_str(), prefix, suffix);
-#endif
 
       return {buf};
 }
@@ -191,27 +188,56 @@ socket_t
 open_new_socket(char const *const path)
 {
       struct sockaddr_un addr = {};
-      strcpy_s(addr.sun_path, path);
+      strcpy(addr.sun_path, path);
       addr.sun_family = AF_UNIX;
 
-      auto const connection_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      auto const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef DOSISH
-      if (auto const e = WSAGetLastError(); e != 0)
+      if (auto const e = ::WSAGetLastError(); e != 0)
             FATAL_ERROR("socket");
 #else
       if (connection_sock == (-1))
            FATAL_ERROR("socket");
-      int tmp = fcntl(connection_sock, F_GETFL);
-      fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
+      int tmp = ::fcntl(connection_sock, F_GETFL);
+      ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      if (bind(connection_sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == (-1))
+      int const ret = ::bind(
+          connection_sock, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_un)
+      );
+
+      if (ret == (-1))
             FATAL_ERROR("bind");
-      if (listen(connection_sock, 0) == (-1))
+      if (::listen(connection_sock, 0) == (-1))
             FATAL_ERROR("listen");
 
       return connection_sock;
+}
+
+socket_t
+connect_to_socket(sockaddr_un const *addr)
+{
+      auto const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+#ifdef DOSISH
+      if (auto const e = ::WSAGetLastError(); e != 0)
+            FATAL_ERROR("socket");
+#else
+      if (data_sock == (-1))
+           FATAL_ERROR("socket");
+      int tmp = ::fcntl(data_sock, F_GETFL);
+      ::fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
+#endif
+
+      int const ret = ::connect(
+          data_sock, reinterpret_cast<sockaddr const *>(addr), sizeof(sockaddr_un)
+      );
+
+      if (ret == (-1))
+            FATAL_ERROR("connect");
+
+      return data_sock;
 }
 
 socket_t
@@ -220,23 +246,7 @@ connect_to_socket(char const *const path)
       sockaddr_un addr{};
       strcpy(addr.sun_path, path);
       addr.sun_family = AF_UNIX;
-
-      auto const data_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-
-#ifdef DOSISH
-      if (auto const e = WSAGetLastError(); e != 0)
-            FATAL_ERROR("socket");
-#else
-      if (data_sock == (-1))
-           FATAL_ERROR("socket");
-      int tmp = fcntl(data_sock, F_GETFL);
-      fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
-#endif
-
-      if (connect(data_sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) == (-1))
-            FATAL_ERROR("connect");
-
-      return data_sock;
+      return connect_to_socket(&addr);
 }
 
 } // namespace rpc
@@ -258,7 +268,7 @@ cxx_random_engine_get_random_val(void)
 }
 
 #ifdef DOSISH
-#include <strsafe.h>
+#  include <strsafe.h>
 namespace win32
 {
 
@@ -269,20 +279,23 @@ error_exit(wchar_t const *lpsz_function)
       DWORD const dw      = WSAGetLastError();
       LPVOID      msg_buf = nullptr;
 
-      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                         FORMAT_MESSAGE_IGNORE_INSERTS,
                      nullptr, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
                      reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
 
       void *const lp_display_buf =
           LocalAlloc(LMEM_ZEROINIT,
-                     (static_cast<size_t>(lstrlenW(lpsz_function)) +
-                      static_cast<size_t>(lstrlenW(static_cast<LPWSTR>(msg_buf))) + SIZE_C(40)) * sizeof(WCHAR));
+                     (wcslen(lpsz_function) + wcslen(static_cast<LPWSTR>(msg_buf)) + 40) *
+                         sizeof(WCHAR));
       assert(lp_display_buf != nullptr);
-      StringCchPrintfW(static_cast<STRSAFE_LPWSTR>(lp_display_buf),
-                       LocalSize(lp_display_buf) / sizeof(WCHAR), L"%s failed with error %d: %s",
-                       lpsz_function, dw, static_cast<LPWSTR>(msg_buf));
-      MessageBoxW(nullptr, static_cast<LPCWSTR>(lp_display_buf), L"Error", MB_OK);
 
+      StringCchPrintfW(static_cast<STRSAFE_LPWSTR>(lp_display_buf),
+                       LocalSize(lp_display_buf) / sizeof(WCHAR),
+                       L"%s failed with error %d: %s",
+                       lpsz_function, dw, static_cast<LPWSTR>(msg_buf));
+
+      MessageBoxW(nullptr, static_cast<LPCWSTR>(lp_display_buf), L"Error", MB_OK);
       LocalFree(msg_buf);
       LocalFree(lp_display_buf);
       ExitProcess(dw);
@@ -297,33 +310,67 @@ my_err_throw(UNUSED int const     status,
              char const *restrict file,
              int  const           line,
              char const *restrict func,
+             _Notnull_ _Printf_format_string_
              char const *restrict format,
              ...)
 {
       int const e = errno;
-      std::stringstream buf;
-      mtx_lock(&util_c_error_write_mutex);
+      std::string buf;
+      ::mtx_lock(&util_c_error_write_mutex);
 
-      buf << fmt::format(FMT_COMPILE("{}: ({} {} - {}):\n"), MAIN_PROJECT_NAME, file, line, func);
+      buf += fmt::format(FMT_COMPILE("{}: ({} {} - {}):\n"),
+                         MAIN_PROJECT_NAME, file, line, func);
 
       {
             va_list ap;
             char c_buf[2048];
             va_start(ap, format);
-            ::vsnprintf(c_buf, sizeof(buf), format, ap);
+            vsnprintf(c_buf, sizeof c_buf, format, ap);
             va_end(ap);
 
-            buf << c_buf << '\n';
+            buf += c_buf;
+            buf += '\n';
       }
 
+      char *errstr;
+
+#if defined HAVE_STRERROR_R
       char errbuf[256];
-      strerror_s(errbuf, e);
+      errstr = ::strerror_r(e, errbuf, 256);
+#elif defined HAVE_STRERROR_S
+      char errbuf[256];
+      ::strerror_s(errbuf, 256, e);
+      errstr = errbuf;
+#else
+      errstr = strerror(e);
+#endif
 
       if (print_err)
-            buf << fmt::format(FMT_COMPILE("\n\terrno {}: \"{}\""), e, errbuf);
+            buf += fmt::format(FMT_COMPILE("    errno {}: `{}'"), e, errstr);
 
-      mtx_unlock(&util_c_error_write_mutex);
-      throw std::runtime_error(buf.str());
+      ::mtx_unlock(&util_c_error_write_mutex);
+      throw std::runtime_error(buf);
+}
+
+/****************************************************************************************/
+
+std::vector<char>
+slurp_file(char const *fname)
+{
+      std::vector<char> buf;
+      struct stat       st; // NOLINT(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
+      FILE             *fp = ::fopen(fname, "rb");
+      if (!fp)
+            err(1, "fopen()");
+
+      ::fstat(::fileno(fp), &st);
+      resize_vector_hack(buf, st.st_size + SIZE_C(1));
+      if (::fread(buf.data(), 1, st.st_size, fp) != static_cast<size_t>(st.st_size))
+            err(1, "fread()");
+      ::fclose(fp);
+
+      buf[st.st_size] = '\0';
+      return buf;
 }
 
 } // namespace emlsp::util

@@ -8,35 +8,42 @@
 # define FUNCTION_ __PRETTY_FUNCTION__
 # define PRINTF_SAL
 # ifdef __clang__
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(printf, __VA_ARGS__)))
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
 # else
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(gnu_printf, __VA_ARGS__)))
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
 # endif
 #else
-# define ATTRIBUTE_PRINTF(...)
 # if defined _MSC_VER
 #  define FUNCTION_ __FUNCTION__
-#  define PRINTF_SAL _Printf_format_string_
+#  define PRINTF_SAL _Notnull_ _Printf_format_string_
 # else
 #  define FUNCTION_ __func__
 #  define PRINTF_SAL
 # endif
+# define ATTRIBUTE_PRINTF(...)
 #endif
+#define CSTR_RESTRICT char const *__restrict
+#define FORMAT_STR    PRINTF_SAL CSTR_RESTRICT
 
 #if defined __cplusplus
 
 namespace emlsp::util {
 
+/* The C++ function 'my_err_throw` must use the same mutex as the C function my_err_,
+ * even if it means awkwardly mixing APIs. */
 extern "C" { extern mtx_t util_c_error_write_mutex; }
 
+[[noreturn]]
 extern void
-my_err_throw(int  const           status,
-             bool const           print_err,
-             char const *restrict file,
-             int  const           line,
-             char const *restrict func,
-             char const *restrict format,
-             ...);
+my_err_throw(int           status,
+             bool          print_err,
+             CSTR_RESTRICT file,
+             int           line,
+             CSTR_RESTRICT func,
+             FORMAT_STR    format,
+             ...)
+      ATTRIBUTE_PRINTF(6, 7) __attribute__((__nonnull__(6)));
+
 
 } // namespace emlsp::util
 
@@ -45,8 +52,8 @@ my_err_throw(int  const           status,
 
 #else // defined __cplusplus
 
-#  define err(EVAL, ...)  my_err_ ((EVAL), true,  __FILE__, __LINE__, FUNCTION_, __VA_ARGS__)
-#  define errx(EVAL, ...) my_err_ ((EVAL), false, __FILE__, __LINE__, FUNCTION_, __VA_ARGS__)
+#  define err(EVAL, ...)  my_err_((EVAL), true,  __FILE__, __LINE__, FUNCTION_, __VA_ARGS__)
+#  define errx(EVAL, ...) my_err_((EVAL), false, __FILE__, __LINE__, FUNCTION_, __VA_ARGS__)
 
 #endif
 
@@ -57,25 +64,31 @@ __BEGIN_DECLS
 #define shout(...)      my_warn_(true,  true,  __FILE__, __LINE__, FUNCTION_, ##__VA_ARGS__)
 #define shoutx(...)     my_warn_(false, true,  __FILE__, __LINE__, FUNCTION_, ##__VA_ARGS__)
 
-NORETURN extern void my_err_(int  status,
-                             bool print_err,
-                             char const *__restrict file,
-                             int line,
-                             char const *__restrict func,
-                             PRINTF_SAL char const *__restrict format,
-                             ...) ATTRIBUTE_PRINTF(6, 7);
+NORETURN extern void
+my_err_(int           status,
+        bool          print_err,
+        CSTR_RESTRICT file,
+        int           line,
+        CSTR_RESTRICT func,
+        FORMAT_STR    format,
+        ...)
+     ATTRIBUTE_PRINTF(6, 7) __attribute__((__nonnull__(6)));
 
-extern void          my_warn_(bool print_err,
-                              bool force,
-                              char const *__restrict file,
-                              int line,
-                              char const *__restrict func,
-                              PRINTF_SAL char const *__restrict format,
-                              ...) ATTRIBUTE_PRINTF(6, 7);
+extern void
+my_warn_(bool          print_err,
+         bool          force,
+         CSTR_RESTRICT file,
+         int           line,
+         CSTR_RESTRICT func,
+         FORMAT_STR    format,
+         ...)
+     ATTRIBUTE_PRINTF(6, 7) __attribute__((__nonnull__(6)));
 
 __END_DECLS
 
 #undef ATTRIBUTE_PRINTF
 #undef PRINTF_SAL
+#undef CSTR_RESTRICT
+#undef FORMAT_STR
 #endif
 // vim: ft=cpp

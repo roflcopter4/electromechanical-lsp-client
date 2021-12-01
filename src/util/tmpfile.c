@@ -1,8 +1,9 @@
+// ReSharper disable CppInconsistentNaming
 #ifndef __USE_ISOC99
-# define __USE_ISOC99 1
+# define __USE_ISOC99 1 //NOLINT
 #endif
 #ifndef __USE_ISOC11
-# define __USE_ISOC11 1
+# define __USE_ISOC11 1 //NOLINT
 #endif
 
 #include "Common.hh"
@@ -47,13 +48,14 @@ static char *get_random_chars(char *buf);
 /*======================================================================================*/
 
 char *
-braindead_tempname(_Notnull_   char       *restrict       buf,
+braindead_tempname(_Notnull_   char       *restrict const buf,
                    _Notnull_   char const *restrict const dir,
                    _Maybenull_ char const *restrict const prefix,
                    _Maybenull_ char const *restrict const suffix)
 {
       /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
-       * so this is about the best way I can think of to do this. */
+       * so this is about the best way I can think of to do this. Here's hoping the
+       * compiler is smart enough to work out what's going on. */
       size_t len = strlen(dir);
       memcpy(buf, dir, len + 1);
 

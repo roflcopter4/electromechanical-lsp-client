@@ -1,6 +1,5 @@
+// ReSharper disable CppInconsistentNaming
 #include "myerr.h"
-
-#include <pthread.h>
 
 #define DEBUG true
 
@@ -20,6 +19,9 @@
       })
 #else
 #  define SHOW_STACKTRACE(...)
+#endif
+#ifndef _Printf_format_string_
+#  define _Printf_format_string_
 #endif
 
 extern mtx_t util_c_error_write_mutex;
@@ -55,7 +57,7 @@ my_err_(int  const           status,
         char const *restrict file,
         int  const           line,
         char const *restrict func,
-        _Printf_format_string_
+        _Printf_format_string_ _Notnull_
         char const *restrict format,
         ...)
 {
@@ -64,7 +66,7 @@ my_err_(int  const           status,
       mtx_lock(&util_c_error_write_mutex);
 
       fprintf(stderr, "%s: (%s %d - %s): ", MAIN_PROJECT_NAME, file, line, func);
-      va_start(ap, format);
+      __va_start(&ap, format);
       vfprintf(stderr, format, ap);
       va_end(ap);
 
@@ -86,11 +88,11 @@ my_warn_(bool const           print_err,
          char const *restrict file,
          int  const           line,
          char const *restrict func,
-         _Printf_format_string_
+         _Printf_format_string_ _Notnull_
          char const *restrict format,
          ...)
 {
-#ifndef DEBUG
+#ifdef NDEBUG
       if (!force)
             return;
 #endif

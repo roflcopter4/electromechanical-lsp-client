@@ -2,9 +2,13 @@
 #include "util/c_util.h"
 
 #ifndef HAVE_ASPRINTF
+#  if !defined __MINGW32__ && !defined __MINGW64__ && defined vsnprintf
+#    undef vsnprintf
+#  endif
+
 int
 asprintf(_Notnull_ char **destp,
-         _Notnull_ _Printf_format_string_ char const *restrict fmt,
+         _Notnull_ _Printf_format_string_ char const *__restrict fmt,
          ...)
 {
       int     len;

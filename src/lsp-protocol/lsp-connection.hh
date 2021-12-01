@@ -1,33 +1,35 @@
 #pragma once
 #ifndef HGUARD_d_LSP_PROTOCOL_d_LSP_CONNECTION_HH_
 #define HGUARD_d_LSP_PROTOCOL_d_LSP_CONNECTION_HH_
-/****************************************************************************************/
 
 #include "Common.hh"
 #include "client.hh"
-
 #include "rapid.hh"
-#include <nlohmann/json.hpp>
+//#include <nlohmann/json.hpp>
+
+namespace emlsp::ipc::lsp {
+/****************************************************************************************/
 
 
-namespace emlsp::rpc::lsp {
-namespace detail {}
+namespace detail {} // namespace detail
 
 
 /**
  * TODO: Documentation
  */
+// template <emlsp::ipc::ConnectionImplVariant ConnectionType>
 template <typename ConnectionType>
-class base_connection : public emlsp::rpc::base_connection<ConnectionType>
+class base_connection : public emlsp::ipc::base_connection<ConnectionType>
 {
 #ifdef __INTELLISENSE__
       static constexpr ssize_t discard_buffer_size = SSIZE_C(16383);
 #else
       static constexpr ssize_t discard_buffer_size = SSIZE_C(65536);
 #endif
-      using base = emlsp::rpc::base_connection<ConnectionType>;
+      using base = emlsp::ipc::base_connection<ConnectionType>;
 
     public:
+      using connection_type = ConnectionType;
       using base::connection;
       using base::pid;
       using base::raw_read;
@@ -44,17 +46,28 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
             size_t  len;
             uint8_t ch;
 
-            raw_read(buf, 16); // Discard
-            raw_read(&ch, 1);
-
+            raw_read(buf, 16, MSG_WAITALL); // Discard
+            raw_read(&ch, 1, MSG_WAITALL);
             while (::isdigit(ch)) {
                   *ptr++ = static_cast<char>(ch);
-                  raw_read(&ch, 1);
+                  raw_read(&ch, 1, MSG_WAITALL);
             }
 
             *ptr = '\0';
             len  = ::strtoull(buf, &ptr, 10);
-            raw_read(buf, 3); // Discard
+
+            /* Some "clever" servers send some extra bullshit after the message length.
+             * Just search for the mandatory '\r\n\r\n' sequence to ignore it. */
+            for (;;) {
+                  while (ch != '\r')
+                        raw_read(&ch, 1, MSG_WAITALL);
+                  raw_read(&ch, 1, MSG_WAITALL);
+                  if (ch != '\n')
+                        continue;
+                  raw_read(buf, 2, MSG_WAITALL);
+                  if (::strncmp(buf, "\r\n", 2) == 0)
+                        break;
+            }
 
             if (ptr == buf || len == 0) [[unlikely]] {
                   throw std::runtime_error(
@@ -79,17 +92,11 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
       base_connection()           = default;
       ~base_connection() override = default;
 
-      template <typename ...Types>
-      explicit base_connection(Types &&...args)
-      {
-            spawn_connection(args...);
-      }
-
       std::string read_message_string() override
       {
             auto len = get_content_length();
             auto msg = std::string(len + 1, '\0');
-            raw_read(msg.data(), len);
+            raw_read(msg.data(), len, MSG_WAITALL);
             return msg;
       }
 
@@ -101,7 +108,7 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
             auto len = get_content_length();
             auto msg = std::vector<char>();
             util::resize_vector_hack(msg, len + 1);
-            raw_read(msg.data(), len);
+            raw_read(msg.data(), len, MSG_WAITALL);
             msg[len] = '\0';
             return msg;
       }
@@ -117,7 +124,7 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
       {
             auto len = get_content_length();
             *buf     = new char[len + 1];
-            raw_read(*buf, len);
+            raw_read(*buf, len, MSG_WAITALL);
             (*buf)[len] = '\0';
             return len;
       }
@@ -160,6 +167,20 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
       }
 
       /**
+       * \brief Read an RPC message into an allocated buffer, and assign it to the
+       *        supplied shared_ptr, which should not be initialized.
+       * \param buf Reference to an uninitialized shared_ptr<char[]>.
+       * \return Number of bytes read.
+       */
+      size_t read_message(std::shared_ptr<char[]> &buf) override
+      {
+            char      *msg;
+            auto const len = read_message(&msg);
+            buf            = std::shared_ptr<char[]>(msg);
+            return len;
+      }
+
+      /**
        * \brief Read and ignore an entire RPC message.
        * \return Number of bytes read.
        */
@@ -169,7 +190,7 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
             char          msg[discard_buffer_size];
 
             for (auto n = len; n > 0; n -= discard_buffer_size)
-                  raw_read(msg, std::min(n, discard_buffer_size));
+                  raw_read(msg, std::min(n, discard_buffer_size), MSG_WAITALL);
 
             return len;
       }
@@ -208,6 +229,7 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
             write_message(ss.GetBuffer(), ss.GetSize());
       }
 
+#if 0
       void write_message(nlohmann::json &doc)
       {
             doc ["jsonrpc"] = "2.0";
@@ -216,20 +238,20 @@ class base_connection : public emlsp::rpc::base_connection<ConnectionType>
             auto const msg = buf.str();
             write_message(msg.data(), msg.size());
       }
+#endif
 
       DELETE_COPY_CTORS(base_connection);
       DEFAULT_MOVE_CTORS(base_connection);
 };
 
 
-using unix_socket_connection = base_connection<emlsp::rpc::detail::unix_socket_connection_impl>;
-using pipe_connection        = base_connection<emlsp::rpc::detail::pipe_connection_impl>;
+using unix_socket_connection = base_connection<emlsp::ipc::detail::unix_socket_connection_impl>;
+using pipe_connection        = base_connection<emlsp::ipc::detail::pipe_connection_impl>;
 #ifdef _WIN32
-using named_pipe_connection  = base_connection<emlsp::rpc::detail::win32_named_pipe_impl>;
+using named_pipe_connection  = base_connection<emlsp::ipc::detail::win32_named_pipe_impl>;
 #endif
 
 
-} // namespace emlsp::rpc::lsp
-
 /****************************************************************************************/
+} // namespace emlsp::ipc::lsp
 #endif // lsp-connection.hh

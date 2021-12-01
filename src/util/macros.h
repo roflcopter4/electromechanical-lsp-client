@@ -6,7 +6,7 @@
 #if !defined __GNUC__ && !defined __clang__
 # define __attribute__(x)
 #endif
-#ifndef _MSC_VER
+#if !defined __declspec && !defined _MSC_VER
 # define __declspec(...)
 #endif
 #ifndef __has_include
@@ -86,7 +86,7 @@
 #define DUMP_EXCEPTION(e)                                                            \
       do {                                                                           \
             std::cerr << fmt::format(                                                \
-                             FMT_COMPILE("\n" R"(Caught exception "{}")" "\n" R"(" at line {}, in file "{}", in function "{}")"), \
+                             FMT_COMPILE("Caught exception:\n{}\n" R"(at line {}, in file '{}', in function '{}')"), \
                              (e).what(), __LINE__, __FILE__, __func__)               \
                       << std::endl;                                                  \
             std::cerr.flush();                                                       \
@@ -174,9 +174,26 @@
 # endif
 #endif
 
-#define __STDC_WANT_LIB_EXT__    1
-#define __STDC_WANT_LIB_EXT1__   1
-#define __STDC_WANT_SECURE_LIB__ 1
+/*--------------------------------------------------------------------------------------*/
+
+#define USEC2SECOND (1000000UL)    /*     1,000,000 - one million */
+#define NSEC2SECOND (1000000000UL) /* 1,000,000,000 - one billion */
+
+#define TIMESPEC_FROM_DOUBLE(FLT) \
+        { (uintmax_t)(FLT), (uintmax_t)(((double)((FLT) - (double)((uintmax_t)(FLT)))) * (double)NSEC2SECOND) }
+
+#define TIMESPEC_FROM_SECOND_FRACTION(i, d) \
+        { (uintmax_t)(i), (uintmax_t)(NSEC2SECOND / ((uintmax_t)(d))) }
+
+#if 0
+#define TIMESPEC_FROM_DOUBLE(STS, FLT)              \
+        ((void)( (STS)->tv_sec  = (uintmax_t)(FLT), \
+                 (STS)->tv_nsec = (uintmax_t)(((double)((FLT) - (double)((uintmax_t)(FLT)))) * (double)NSEC2SECOND) ))
+
+#define TIMESPEC_FROM_SECOND_FRACTION(STS, i, d) \
+        ((void)( (STS)->tv_sec  = (uintmax_t)(i), \
+                 (STS)->tv_nsec =  (uintmax_t)(NSEC2SECOND / ((uintmax_t)(d))) ))
+#endif
 
 /****************************************************************************************/
 #endif // macros.h

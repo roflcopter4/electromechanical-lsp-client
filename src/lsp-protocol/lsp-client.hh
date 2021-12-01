@@ -6,16 +6,15 @@
 #include "Common.hh"
 #include "client.hh"
 #include "lsp-protocol/lsp-connection.hh"
+#include <thread>
+#include <mutex>
 
-//#include "rapid.hh"
-//#include <nlohmann/json.hpp>
-
-namespace emlsp::rpc::lsp {
+namespace emlsp::ipc::lsp {
 
 #if 0
 template <typename T>
-concept ConnectionVariant = std::same_as<T, emlsp::rpc::lsp::unix_socket_connection> ||
-                            std::same_as<T, emlsp::rpc::lsp::pipe_connection>;
+concept ConnectionVariant = std::same_as<T, emlsp::ipc::lsp::unix_socket_connection> ||
+                            std::same_as<T, emlsp::ipc::lsp::pipe_connection>;
 #endif
 
 #if 0
@@ -40,7 +39,7 @@ class client
       DELETE_MOVE_CTORS(client);
 };
 
-} // namespace emlsp::rpc::lsp
+} // namespace emlsp::ipc::lsp
 
 /****************************************************************************************/
 #endif // lsp-client.hh

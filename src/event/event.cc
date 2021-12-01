@@ -86,7 +86,7 @@
 #endif
 
 
-namespace emlsp::rpc::event
+namespace emlsp::ipc::event
 {
 
 #if 0
@@ -127,11 +127,9 @@ void test1()
 }
 #endif
 
-using emlsp::rpc::lsp::data::initialization_message;
-
 void
 test02()
 {
 }
 
-} // namespace emlsp::rpc::event
+} // namespace emlsp::ipc::event
