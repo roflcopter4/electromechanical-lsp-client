@@ -1,13 +1,14 @@
+#ifndef HGUARD__IPC__LSP___CONNECTION_HH_
+#define HGUARD__IPC__LSP___CONNECTION_HH_ //NOLINT
 #pragma once
-#ifndef HGUARD_d_LSP_PROTOCOL_d_LSP_CONNECTION_HH_
-#define HGUARD_d_LSP_PROTOCOL_d_LSP_CONNECTION_HH_
 
 #include "Common.hh"
-#include "client.hh"
+#include "ipc/base_connection.hh"
 #include "rapid.hh"
 //#include <nlohmann/json.hpp>
 
-namespace emlsp::ipc::lsp {
+inline namespace emlsp {
+namespace ipc::lsp {
 /****************************************************************************************/
 
 
@@ -17,27 +18,36 @@ namespace detail {} // namespace detail
 /**
  * TODO: Documentation
  */
-// template <emlsp::ipc::ConnectionImplVariant ConnectionType>
-template <typename ConnectionType>
-class base_connection : public emlsp::ipc::base_connection<ConnectionType>
+#if 0
+template <typename ConnectionImpl,
+         typename std::enable_if<std::is_base_of<ipc::detail::base_connection_interface,
+                                                 ConnectionImpl>::value, bool>::type = true>
+template <ipc::ConnectionImplVariant ConnectionImpl>
+#endif
+
+template <typename ConnectionImpl>
+#ifndef __TAG_HIGHLIGHT__
+      requires (ipc::ConnectionImplVariant<ConnectionImpl>)
+#endif
+class base_connection : public ipc::base_connection<ConnectionImpl>
 {
 #ifdef __INTELLISENSE__
       static constexpr ssize_t discard_buffer_size = SSIZE_C(16383);
 #else
       static constexpr ssize_t discard_buffer_size = SSIZE_C(65536);
 #endif
-      using base = emlsp::ipc::base_connection<ConnectionType>;
+      using base = ipc::base_connection<ConnectionImpl>;
 
     public:
-      using connection_type = ConnectionType;
-      using base::connection;
+      using connection_type = ConnectionImpl;
+      // using base::connection;
       using base::pid;
       using base::raw_read;
       using base::raw_write;
       using base::spawn_connection;
 
     private:
-      size_t get_content_length()
+      ND size_t get_content_length()
       {
             /* Exactly 64 bytes assuming an 8 byte pointer size. Three cheers for
              * pointless "optimizations". */
@@ -46,11 +56,11 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
             size_t  len;
             uint8_t ch;
 
-            raw_read(buf, 16, MSG_WAITALL); // Discard
-            raw_read(&ch, 1, MSG_WAITALL);
+            (void)raw_read(buf, 16, 0x100); // Discard
+            (void)raw_read(&ch, 1, MSG_WAITALL);
             while (::isdigit(ch)) {
                   *ptr++ = static_cast<char>(ch);
-                  raw_read(&ch, 1, MSG_WAITALL);
+                  (void)raw_read(&ch, 1, MSG_WAITALL);
             }
 
             *ptr = '\0';
@@ -59,13 +69,15 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
             /* Some "clever" servers send some extra bullshit after the message length.
              * Just search for the mandatory '\r\n\r\n' sequence to ignore it. */
             for (;;) {
-                  while (ch != '\r')
-                        raw_read(&ch, 1, MSG_WAITALL);
-                  raw_read(&ch, 1, MSG_WAITALL);
-                  if (ch != '\n')
-                        continue;
-                  raw_read(buf, 2, MSG_WAITALL);
-                  if (::strncmp(buf, "\r\n", 2) == 0)
+                  while (ch != '\r') [[unlikely]] {
+                  fail:
+                        (void)raw_read(&ch, 1, MSG_WAITALL);
+                  }
+                  (void)raw_read(&ch, 1, MSG_WAITALL);
+                  if (ch != '\n') [[unlikely]]
+                        goto fail;
+                  (void)raw_read(buf, 2, MSG_WAITALL);
+                  if (::strncmp(buf, "\r\n", 2) == 0) [[likely]]
                         break;
             }
 
@@ -89,26 +101,35 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
 
     /*------------------------------------------------------------------------------------*/
     public:
-      base_connection()           = default;
+      base_connection() = default;
       ~base_connection() override = default;
 
+      /**
+       * \brief Read an rpc message into a buffer contained in a std::string.
+       */
       std::string read_message_string() override
       {
             auto len = get_content_length();
             auto msg = std::string(len + 1, '\0');
-            raw_read(msg.data(), len, MSG_WAITALL);
+
+            UNUSED auto const nread = raw_read(msg.data(), len, MSG_WAITALL);
+            assert(nread == len);
+
             return msg;
       }
 
       /**
-       * \brief Read an rpc message into a buffer contained in an std::vector.
+       * \brief Read an rpc message into a buffer contained in a std::vector.
        */
       std::vector<char> read_message() override
       {
             auto len = get_content_length();
             auto msg = std::vector<char>();
             util::resize_vector_hack(msg, len + 1);
-            raw_read(msg.data(), len, MSG_WAITALL);
+
+            UNUSED auto const nread = raw_read(msg.data(), len, MSG_WAITALL);
+            assert(nread == len);
+
             msg[len] = '\0';
             return msg;
       }
@@ -124,7 +145,10 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
       {
             auto len = get_content_length();
             *buf     = new char[len + 1];
-            raw_read(*buf, len, MSG_WAITALL);
+
+            UNUSED auto const nread = raw_read(*buf, len, MSG_WAITALL);
+            assert(nread == len);
+
             (*buf)[len] = '\0';
             return len;
       }
@@ -140,7 +164,7 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
 
       /**
        * \brief Read an RPC message into an allocated buffer, and assign it to the
-       *        supplied pointer.
+       *        supplied pointer reference. For those too lazy to take its address.
        * \param buf Reference to a valid (char *) variable.
        * \return Number of bytes read.
        */
@@ -189,8 +213,11 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
             ssize_t const len = get_content_length();
             char          msg[discard_buffer_size];
 
-            for (auto n = len; n > 0; n -= discard_buffer_size)
-                  raw_read(msg, std::min(n, discard_buffer_size), MSG_WAITALL);
+            for (auto n = len; n > 0; n -= discard_buffer_size) {
+                  auto        const toread = std::min(n, discard_buffer_size);
+                  UNUSED auto const nread  = raw_read(msg, toread, MSG_WAITALL);
+                  assert(nread == toread);
+            }
 
             return len;
       }
@@ -245,13 +272,14 @@ class base_connection : public emlsp::ipc::base_connection<ConnectionType>
 };
 
 
-using unix_socket_connection = base_connection<emlsp::ipc::detail::unix_socket_connection_impl>;
-using pipe_connection        = base_connection<emlsp::ipc::detail::pipe_connection_impl>;
+using unix_socket_connection = base_connection<ipc::detail::unix_socket_connection_impl>;
+using pipe_connection        = base_connection<ipc::detail::pipe_connection_impl>;
 #ifdef _WIN32
-using named_pipe_connection  = base_connection<emlsp::ipc::detail::win32_named_pipe_impl>;
+using named_pipe_connection  = base_connection<ipc::detail::win32_named_pipe_impl>;
 #endif
 
 
 /****************************************************************************************/
-} // namespace emlsp::ipc::lsp
+} // namespace ipc::lsp
+} // namespace emlsp
 #endif // lsp-connection.hh

@@ -1,6 +1,7 @@
 #include "Common.hh"
 #include "client.hh"
 #include "event/loop.hh"
+#include "lsp-protocol/lsp-client.hh"
 #include "lsp-protocol/lsp-connection.hh"
 #include "lsp-protocol/static-data.hh"
 #include "msgpack/dumper.hh"
@@ -12,11 +13,13 @@
 
 #define AUTOC auto const
 
-namespace emlsp::ipc::mpack {
-std::string encode_fmt(unsigned size_hint, char const *__restrict fmt, ...);
-} // namespace emlsp::ipc::mpack
+inline namespace emlsp {
 
-namespace emlsp::ipc::lsp::test {
+namespace ipc::mpack {
+std::string encode_fmt(unsigned size_hint, char const *__restrict fmt, ...);
+} // namespace ipc::mpack
+
+namespace ipc::lsp::test {
 
 namespace {
 
@@ -79,7 +82,7 @@ write_and_dump(unix_socket_connection &con, rapidjson::Document const &doc)
 
 } // namespace
 
-class client_ptr : public std::shared_ptr<rapidjson_unix_socket_client<>>
+class client_ptr : public std::shared_ptr<base_client<unix_socket_connection, rapidjson::Document>>
 {
     public:
       unix_socket_connection &operator()() const { return get()->con(); }
@@ -130,7 +133,7 @@ NOINLINE void test10()
       auto  mut       = std::mutex{};
       auto  lock      = std::unique_lock{mut};
       auto  condition = std::make_shared<std::condition_variable>();
-      auto  client    = client_ptr { std::make_shared<rapidjson_unix_socket_client<>>(std::move(con)) };
+      auto  client    = client_ptr { std::make_shared<base_client<unix_socket_connection, rapidjson::Document>>(std::move(con)) };
       AUTOC data      = std::make_shared<callback_data>(std::move(client), condition);
 
       loop->data(data);
@@ -219,4 +222,102 @@ NOINLINE void test12()
 #endif
 }
 
-} // namespace emlsp::ipc::lsp::test
+} // namespace ipc::lsp::test
+
+namespace ipc {
+
+#if 0
+template <typename ConnectionType, typename MsgType, typename UserDataType>
+ipc::base_client<ConnectionType, MsgType, UserDataType>::event_loop::event_loop(
+    base_client<ConnectionType, MsgType, UserDataType> *client)
+    : client_(client)
+{
+      uv_loop_init(&loop_);
+#ifndef _WIN32
+      uv_signal_init(&loop_, &signal_watchers_[0]);
+      uv_signal_init(&loop_, &signal_watchers_[1]);
+#endif
+      uv_signal_init(&loop_, &signal_watchers_[2]);
+      uv_signal_init(&loop_, &signal_watchers_[3]);
+      uv_signal_init(&loop_, &signal_watchers_[4]);
+
+      loop_.data               = static_cast<void *>(client_);
+      phand_.data              = static_cast<void *>(client_);
+      signal_watchers_[0].data = static_cast<void *>(client_);
+      signal_watchers_[1].data = static_cast<void *>(client_);
+      signal_watchers_[2].data = static_cast<void *>(client_);
+      signal_watchers_[3].data = static_cast<void *>(client_);
+      signal_watchers_[4].data = static_cast<void *>(client_);
+}
+
+template <typename ConnectionType, typename MsgType, typename UserDataType>
+ipc::base_client<ConnectionType, MsgType, UserDataType>::event_loop::~event_loop()
+{
+      uv_loop_close(&loop_);
+}
+
+template <typename ConnectionType, typename MsgType, typename UserDataType>
+void 
+ipc::base_client<ConnectionType, MsgType, UserDataType>::event_loop::start()
+{
+      if (std::is_same<ConnectionType, lsp::unix_socket_connection>::value)
+            uv_poll_init_socket(&loop_, &phand_, client_->con().accepted());
+      else
+            uv_poll_init(&loop_, &phand_, client_->con().read_fd());
+
+#ifndef _WIN32
+      uv_signal_start_oneshot(&signal_watchers_[0], &detail::loop_graceful_signal_cb<ConnectionType, MsgType, UserDataType>, SIGUSR1);
+      uv_signal_start_oneshot(&signal_watchers_[1], &detail::loop_signal_cb, SIGPIPE);
+#endif
+      uv_signal_start_oneshot(&signal_watchers_[2], &detail::loop_signal_cb, SIGINT);
+      uv_signal_start_oneshot(&signal_watchers_[3], &detail::loop_graceful_signal_cb<ConnectionType, MsgType, UserDataType>, SIGHUP);
+      uv_signal_start_oneshot(&signal_watchers_[4], &detail::loop_signal_cb, SIGTERM);
+}
+#endif
+
+
+namespace detail {
+
+#if 0
+template <typename ConnectionType, typename MsgType, typename UserDataType>
+void 
+event_loop_stop_uv_handles(void *vdata)
+{
+      auto *data = static_cast<ipc::base_client<ConnectionType, MsgType, UserDataType> *>(vdata);
+
+#ifndef _WIN32
+      uv_signal_stop(&data->loop().signal_watchers[0]);
+      uv_signal_stop(&data->loop().signal_watchers[1]);
+#endif
+      uv_signal_stop(&data->loop().signal_watchers[2]);
+      uv_signal_stop(&data->loop().signal_watchers[3]);
+      uv_signal_stop(&data->loop().signal_watchers[4]);
+      uv_poll_stop(&data->loop().poll_handle);
+      uv_stop(&data->loop().loop_handle);
+      uv_loop_close(&data->loop().loop_handle);
+}
+
+template <typename ConnectionType, typename MsgType, typename UserDataType>
+void loop_graceful_signal_cb(uv_signal_t *handle, UNUSED int const signum)
+{
+      base_client<ConnectionType, MsgType, UserDataType>::event_loop::stop_uv_handles(handle->data);
+}
+#endif
+
+void loop_signal_cb(UNUSED uv_signal_t *handle, int const signum)
+{
+      switch (signum) {
+      case SIGTERM:
+            fflush(stderr);
+            quick_exit(0);
+      case SIGHUP:
+      case SIGINT:
+      default:
+            exit(0);
+      }
+}
+
+} // namespace detail
+} // namespace ipc
+
+} // namespace emlsp

@@ -1,7 +1,7 @@
 // ReSharper disable CppInconsistentNaming
 #include "myerr.h"
 
-#define DEBUG true
+#include "c_util.h"
 
 #define SHUTUPGCC __attribute__((__unused__)) ssize_t n =
 
@@ -34,18 +34,8 @@ INITIALIZER_HACK(mutex_init)
 
 static __inline void dump_error(int const errval)
 {
-      char  buf[128];
-      char *estr;
-
-#if defined HAVE_STRERROR_S || defined _MSC_VER
-      strerror_s(buf, 128, errval);
-      estr = buf;
-#elif defined HAVE_STRERROR_R
-      strerror_r(errval, buf, 128);
-      estr = buf;
-#else
-      estr = strerror(errval);
-#endif
+      char        buf[128];
+      char const *estr = my_strerror(errval, buf, 128);
 
       fprintf(stderr, ": %s\n", estr);
 
@@ -66,7 +56,7 @@ my_err_(int  const           status,
       mtx_lock(&util_c_error_write_mutex);
 
       fprintf(stderr, "%s: (%s %d - %s): ", MAIN_PROJECT_NAME, file, line, func);
-      __va_start(&ap, format);
+      va_start(ap, format);
       vfprintf(stderr, format, ap);
       va_end(ap);
 

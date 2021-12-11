@@ -5,7 +5,8 @@
 
 #include <uvw.hpp>
 
-namespace emlsp::ipc {
+inline namespace emlsp {
+namespace ipc {
 
 static thrd_t event_loop_thread;
 
@@ -38,7 +39,7 @@ void wtf_am_i_doing2(uvw::DataEvent const &event, UNUSED uvw::ProcessHandle &han
       fmt::print(FMT_COMPILE("I have read \"{}\"\n"), std::string{event.data.get(), event.length});
 }
 
-void run_event_loop_cxx(int const fd)
+void run_event_loop_cxx([[maybe_unused]] int const fd)
 {
       static std::atomic_flag event_loop_called{};
       if (event_loop_called.test_and_set())
@@ -55,14 +56,15 @@ void run_event_loop_cxx(int const fd)
       // auto thrd = std::thread(killme, std::move(loop));
 
       loop->run();
-      Sleep(100);
 
 #ifdef _WIN32
+      Sleep(100);
       if (::WriteFile(hand->fd(), "FUCKING RETARD\n", 15, nullptr, nullptr))
             err(1, "write()");
       if (::WriteFile(hand->fd(), "FUCKING RETARD\n", 15, nullptr, nullptr))
             err(1, "write()");
 #else
+      usleep(100);
       if (::write(hand->fd(), SLS("FUCKING RETARD\n") - 1) == (-1))
             err(1, "write()");
       if (::write(hand->fd(), SLS("FUCKING RETARD\n") - 1) == (-1))
@@ -220,4 +222,5 @@ event_loop_signal_cb(uv_signal_t *handle, int const signum)
       }
 }
 
-} // namespace emlsp::ipc
+} // namespace ipc
+} // namespace emlsp

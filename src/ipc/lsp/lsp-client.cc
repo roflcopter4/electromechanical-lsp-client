@@ -1,7 +1,8 @@
 #include "Common.hh"
-#include "lsp-client.hh"
+#include "ipc/lsp/lsp-client.hh"
 
-namespace emlsp::rpc::lsp {
+inline namespace emlsp {
+namespace ipc::lsp {
 
 #if 0
 std::map<std::string, std::any> protocolmap = {
@@ -50,4 +51,5 @@ void test10()
       std::cout << 100'000 << '\t' << u2.get<uintmax_t>() << '\n';
 }
 
-} // namespace emlsp::rpc::lsp 
+} // namespace ipc::lsp 
+} // namespace emlsp

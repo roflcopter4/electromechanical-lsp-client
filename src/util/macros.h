@@ -3,6 +3,10 @@
 #define HGUARD_d_MACROS_H_
 /****************************************************************************************/
 
+#if !defined _GNU_SOURCE && defined __gnu_linux__
+#  define _GNU_SOURCE //NOLINT
+#endif
+
 #if !defined __GNUC__ && !defined __clang__
 # define __attribute__(x)
 #endif
@@ -83,13 +87,12 @@
       t(t &&) noexcept            = default; \
       t &operator=(t &&) noexcept = default
 
-#define DUMP_EXCEPTION(e)                                                            \
-      do {                                                                           \
-            std::cerr << fmt::format(                                                \
-                             FMT_COMPILE("Caught exception:\n{}\n" R"(at line {}, in file '{}', in function '{}')"), \
-                             (e).what(), __LINE__, __FILE__, __func__)               \
-                      << std::endl;                                                  \
-            std::cerr.flush();                                                       \
+#define DUMP_EXCEPTION(e)                                                                                      \
+      do {                                                                                                     \
+            fmt::print(stderr,                                                                                 \
+                       FMT_COMPILE("Caught exception:\n{}\n" R"(at line {}, in file '{}', in function '{}')"), \
+                       (e).what(), __LINE__, __FILE__, __func__);                                              \
+            fflush(stderr);                                                                                    \
       } while (0)
 
 #else // defined __cplusplus
@@ -173,6 +176,17 @@
 #  define PATH_MAX MAX_PATH
 # endif
 #endif
+
+#if defined __GNUC__ || defined __clang__
+# define FUNCTION_NAME __PRETTY_FUNCTION__
+#else
+# if defined _MSC_VER
+#  define FUNCTION_NAME __FUNCTION__
+# else
+#  define FUNCTION_NAME __func__
+# endif
+#endif
+
 
 /*--------------------------------------------------------------------------------------*/
 

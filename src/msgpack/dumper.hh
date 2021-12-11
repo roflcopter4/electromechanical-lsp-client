@@ -5,7 +5,8 @@
 
 #include <msgpack.hpp>
 
-namespace emlsp::ipc::mpack {
+inline namespace emlsp {
+namespace ipc::mpack {
 
 class dumper
 {
@@ -31,4 +32,5 @@ class dumper
       void dump_dict(msgpack::object_map const *dict);
 };
 
-} // namespace emlsp::ipc::mpack
+} // namespace ipc::mpack
+} // namespace emlsp

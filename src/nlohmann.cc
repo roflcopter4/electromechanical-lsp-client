@@ -2,15 +2,14 @@
 
 #include <iomanip>
 
-namespace constants
-{
+#include <nlohmann/json.hpp>
+
+inline namespace emlsp {
+namespace constants {
 constexpr auto pi = 3.1415926535897932384626433832795028841971693993751; // pi
 } // namespace constants
 
-#include <nlohmann/json.hpp>
-
-namespace emlsp::rpc::json::nloh
-{
+namespace rpc::json::nloh {
 
 using json = nlohmann::json;
 
@@ -34,4 +33,5 @@ test1()
       std::cout << std::setw(4) << obj << '\n';
 }
 
-} // namespace emlsp::rpc::json::nloh
+} // namespace rpc::json::nloh
+} // namespace emlsp

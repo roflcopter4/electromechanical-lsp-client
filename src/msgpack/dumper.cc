@@ -1,6 +1,7 @@
 #include "msgpack/dumper.hh"
 
-namespace emlsp::ipc::mpack {
+inline namespace emlsp {
+namespace ipc::mpack {
 
 void dumper::put_nl()
 {
@@ -102,4 +103,5 @@ void dumper::dump_dict(msgpack::object_map const *dict)
       }
 }
 
-} // namespace emlsp::ipc::mpack
+} // namespace ipc::mpack
+} // namespace emlsp

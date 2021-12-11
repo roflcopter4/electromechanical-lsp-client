@@ -1,16 +1,18 @@
-#ifndef HGUARD_d_LSP_PROTOCOL_d_STATIC_DATA_HH_
-#define HGUARD_d_LSP_PROTOCOL_d_STATIC_DATA_HH_
+#ifndef HGUARD__IPC__LSP___STATIC_DATA_HH_
+#define HGUARD__IPC__LSP___STATIC_DATA_HH_
 #pragma once
 /****************************************************************************************/
 
 #include "Common.hh"
 #include <string>
 
-namespace emlsp::ipc::lsp::data {
+inline namespace emlsp {
+namespace ipc::lsp::data {
 
 extern std::string init_msg(std::string const &root);
 
-} // namespace emlsp::ipc::lsp::data
+} // namespace ipc::lsp::data
+} // namespace emlsp
 
 /****************************************************************************************/
 #endif

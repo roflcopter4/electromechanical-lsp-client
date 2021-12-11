@@ -4,8 +4,8 @@
 
 constexpr auto constant_pi = 3.14159265358979323846;   // pi
 
-namespace emlsp::rpc::json::rapid
-{
+inline namespace emlsp {
+namespace ipc::json::rapid {
 
 using rapidjson::Document;
 using rapidjson::Type;
@@ -73,4 +73,5 @@ test1()
       delete doc;
 }
 
-} // namespace emlsp::rpc::json::rapid
+} // namespace ipc::json::rapid
+} // namespace emlsp

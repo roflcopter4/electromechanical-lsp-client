@@ -2,7 +2,10 @@
 #include "Common.hh"
 #include "util/myerr.h"
 
+#include "rapid.hh"
+
 #include <glib.h>
+#include <nlohmann/json.hpp>
 
 #ifdef HAVE_THREADS_H
 #  include <threads.h>
@@ -17,7 +20,8 @@
 #  undef false
 #endif
 
-namespace emlsp::rpc::json
+inline namespace emlsp {
+namespace rpc::json
 {
 struct socket_info {
       std::string path;
@@ -466,7 +470,7 @@ static socket_info *
 attempt_clangd_sock()
 {
       auto const tmppath = util::get_temporary_filename();
-      auto const sock    = util::rpc::open_new_socket(tmppath.string().c_str());
+      auto const sock    = util::ipc::open_new_socket(tmppath.string().c_str());
       auto      *info    = new socket_info{tmppath.string(), sock, {}, {}, {}};
 
       std::cerr << fmt::format(FMT_COMPILE("(Socket bound to \"{}\" with raw value ({}).\n"), tmppath.string(), sock);
@@ -532,4 +536,5 @@ attempt_clangd_pipe(int *writefd, int *readfd)
       return pid;
 }
 
-} // namespace emlsp::rpc::json
+} // namespace rpc::json
+} // namespace emlsp

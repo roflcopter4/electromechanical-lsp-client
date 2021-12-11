@@ -1,5 +1,5 @@
 #include "Common.hh"
-#include "client.hh"
+#include "ipc/connection_impl.hh"
 #include "util/exceptions.hh"
 
 #ifdef _WIN32
@@ -14,7 +14,8 @@
 
 #define AUTOC auto const
 
-namespace emlsp::ipc::detail {
+inline namespace emlsp {
+namespace ipc::detail {
 /****************************************************************************************/
 
 #ifdef _WIN32
@@ -285,7 +286,7 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
                   fd = ::open(dev_null, O_WRONLY|O_APPEND|O_BINARY);
                   break;
             case sink_type::FILENAME:
-                  fd = ::open(fname_.c_str(), O_RDWR|O_CREAT|O_APPEND|O_BINARY, 0600);
+                  fd = ::open(fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC|O_BINARY, 0600);
                   break;
             default:
                   break;
@@ -319,7 +320,7 @@ unix_socket_connection_impl::open_new_socket()
       memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
       addr_.sun_family = AF_UNIX;
 
-      socket_t const connection_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef _WIN32
       if (auto const e = WSAGetLastError(); e != 0)
@@ -331,10 +332,10 @@ unix_socket_connection_impl::open_new_socket()
       ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      AUTOC ret = bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
+      AUTOC ret = ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
       if (ret == (-1))
            err(1, "bind");
-      if (listen(connection_sock, 0) == (-1))
+      if (::listen(connection_sock, 0) == (-1))
            err(1, "listen");
 
       return connection_sock;
@@ -343,19 +344,19 @@ unix_socket_connection_impl::open_new_socket()
 socket_t
 unix_socket_connection_impl::connect_to_socket()
 {
-      socket_t const data_sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef _WIN32
-      if (auto const e = WSAGetLastError(); e != 0)
+      if (auto const e = ::WSAGetLastError(); e != 0)
             err(1, "socket(): %d", e);
 #else
       if (data_sock == (-1))
            err(1, "socket");
-      int tmp = fcntl(data_sock, F_GETFL);
-      fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
+      int tmp = ::fcntl(data_sock, F_GETFL);
+      ::fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
 
-      AUTOC ret = connect(data_sock, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
+      AUTOC ret = ::connect(data_sock, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
       if (ret == (-1))
             err(1, "connect");
 
@@ -402,23 +403,23 @@ static void
 open_pipe(int fds[2])
 {
 # ifdef HAVE_PIPE2
-      if (pipe2(fds, O_CLOEXEC) == (-1))
+      if (::pipe2(fds, O_CLOEXEC) == (-1))
             err(1, "pipe2()");
 # else
       int flg;
-      if (pipe(fds) == (-1))
+      if (::pipe(fds) == (-1))
             err(1, "pipe()");
             /* Surely the compiler will unroll this... */
 #  pragma unroll
       for (int i = 0; i < 2; ++i) {
-            if ((flg = fcntl(fds[i], F_GETFL)) == (-1))
+            if ((flg = ::fcntl(fds[i], F_GETFL)) == (-1))
                   err(3 + i, "fcntl(F_GETFL)");
-            if (fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
+            if (::fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
                   err(5 + i, "fcntl(F_SETFL)");
       }
 # endif
 # ifdef __linux__ /* Can't do this on the BSDs. */
-      if (fcntl(fds[0], F_SETPIPE_SZ, 16384) == (-1))
+      if (::fcntl(fds[0], F_SETPIPE_SZ, 16384) == (-1))
             err(2, "fcntl(F_SETPIPE_SZ)");
 # endif
 }
@@ -459,7 +460,7 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
             ::close(fds[1][0]);
             ::close(fds[1][1]);
 
-            if (execvp(argv[0], argv) == (-1))
+            if (::execvp(argv[0], argv) == (-1))
                   err(1, "exec() failed\n");
       }
 
@@ -520,18 +521,19 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 
 #endif
 
-pipe_connection_impl::~pipe_connection_impl()
+void pipe_connection_impl::close()
 {
-      if (read_ != (-1))
+      if (read_ > 2)
             ::close(read_);
-      if (write_ != (-1))
+      if (write_ > 2)
             ::close(write_);
+      read_ = write_ = (-1);
 }
 
 ssize_t
-pipe_connection_impl::read(void *buf, size_t const nbytes, UNUSED int flags)
+pipe_connection_impl::read(void *buf, ssize_t const nbytes, UNUSED int flags)
 {
-      size_t total = 0;
+      ssize_t total = 0;
 
 #if 0
       size_t n;
@@ -541,11 +543,15 @@ pipe_connection_impl::read(void *buf, size_t const nbytes, UNUSED int flags)
 #endif
 
       if (flags & MSG_WAITALL) {
-            size_t n;
+            ssize_t n;
             do {
+                  if (read_ == (-1)) [[unlikely]]
+                        throw ipc::except::connection_closed();
                   n = ::read(read_, static_cast<char *>(buf) + total, nbytes - total);
-            } while (n != SIZE_C(-1) && (total += n) < nbytes);
+            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
       } else {
+            if (read_ == (-1)) [[unlikely]]
+                  throw ipc::except::connection_closed();
             total = ::read(read_, buf, nbytes);
       }
 
@@ -553,12 +559,16 @@ pipe_connection_impl::read(void *buf, size_t const nbytes, UNUSED int flags)
 }
 
 ssize_t
-pipe_connection_impl::write(void const *buf, size_t const nbytes, UNUSED int flags)
+pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int flags)
 {
-      size_t total = 0, n;
+      ssize_t total = 0;
+      ssize_t n;
+
       do {
+            if (write_ == (-1)) [[unlikely]]
+                  throw ipc::except::connection_closed();
             n = ::write(write_, static_cast<char const *>(buf) + total, nbytes - total);
-      } while (n != SIZE_C(-1) && (total += n) < nbytes);
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
 
       return static_cast<ssize_t>(total);
 }
@@ -722,4 +732,5 @@ win32_named_pipe_impl::write(void const *buf, size_t const nbytes, int const fla
 
 
 /****************************************************************************************/
-} // namespace emlsp::ipc::detail
+} // namespace ipc::detail
+} // namespace emlsp

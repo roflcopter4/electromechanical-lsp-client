@@ -5,26 +5,29 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 add_executable(lsp-thing
-    # $<TARGET_OBJECTS:x4c_parser>
     main.cc
-    #nlohmann.cc
     rapid.cc
-    #rpc.cc
-    connection_impl.cc
 
-    event/loop.cc
-    event/event.cc
-    event/test.cc
-    lsp-protocol/static-data.cc
-    lsp-protocol/lsp-client.cc
+    ipc/connection_impl.cc
+    ipc/base_client.cc
+
+    ipc/lsp/static-data.cc
+    ipc/lsp/lsp-client.cc
+
     mpack-cxx/mpack.cc
-
     mpack/format.cc
-
     msgpack/dumper.cc
 
-    basic_loop.cc
+    #nlohmann.cc
+    #rpc.cc
+    # event/event.cc
+    # event/test.cc
+    # basic_loop.cc
+
+    libevent.cc
     why/simple.cc
+
+    thehellisthis.cc
 
     util/err.c
     util/tmpfile.c
@@ -32,12 +35,12 @@ add_executable(lsp-thing
     util/c_util.c
 )
 
-if (TRUE OR NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-   target_precompile_headers(lsp-thing
-       PRIVATE
-       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
-   )
-endif()
+#if (TRUE OR NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+#   target_precompile_headers(lsp-thing
+#       PRIVATE
+#       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
+#   )
+#endif()
 
 set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
              "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -60,9 +63,9 @@ else ()
     list(JOIN GLib_PKG_CFLAGS " " _glib_cflags )
     message("${_glib_cflags}")
     set_property(TARGET lsp-thing APPEND PROPERTY COMPILE_FLAGS "${_glib_cflags}")
-    set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
-            -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
-    )
+    #    set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
+    #            -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
+    #    )
 endif()
 
 ################################################################################
@@ -84,25 +87,29 @@ elseif (NOT HAVE_THREADS_H)
 endif()
 
 target_link_libraries(lsp-thing
+    -Wl,-as-needed
+
     ${CMAKE_THREAD_LIBS_INIT}
     ${GLib_LIBRARY}
-	${GLib_PKG_LIBS}
+    ${GLib_PKG_LIBS}
 
     ${GLib_LIBRARIES}
     ${LIBUV_LIBRARIES}
     #${LIBUV_LIBRARY}
+
+    -levent_core -levent_pthreads -levent_extra -levent_openssl -levent
 )
 
 if (fmt_FOUND)
-	target_link_libraries(lsp-thing fmt::fmt-header-only)
+    target_link_libraries(lsp-thing fmt::fmt-header-only)
 endif()
 
 if (MSVC)
-	target_link_libraries(lsp-thing
-		"${_WIN32_VCPKG_LIB_PATH}/libuv.lib"
-		"${_WIN32_VCPKG_LIB_PATH}/glib-2.0.lib"
-		"${_WIN32_VCPKG_LIB_PATH}/intl.lib"
-		"${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
+    target_link_libraries(lsp-thing
+        "${_WIN32_VCPKG_LIB_PATH}/libuv.lib"
+        "${_WIN32_VCPKG_LIB_PATH}/glib-2.0.lib"
+        "${_WIN32_VCPKG_LIB_PATH}/intl.lib"
+        "${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
     )
 endif()
 

@@ -1,5 +1,5 @@
-#ifndef HGUARD_d_RAPID_HH_
-#define HGUARD_d_RAPID_HH_
+#ifndef HGUARD__RAPID_HH_
+#define HGUARD__RAPID_HH_
 #pragma once
 /****************************************************************************************/
 
@@ -31,9 +31,10 @@
 #include <rapidjson/schema.h>
 #include <rapidjson/writer.h>
 
-/****************************************************************************************/
+inline namespace emlsp {
+namespace ipc::json {
 
-namespace emlsp::ipc::json {
+/****************************************************************************************/
 
 using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
 template<typename T>
@@ -131,6 +132,27 @@ class rapid_doc
 
       /*--------------------------------------------------------------------------------*/
 
+      void set_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      {
+            cur_->AddMember(key, rapidjson::Value(ty), al_);
+            cur_ = &cur_->FindMember(key)->value;
+      }
+
+      template <NonStringRef T>
+      void set_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      {
+            cur_->AddMember(key, rapidjson::Value(ty), al_);
+            cur_ = &cur_->FindMember(key)->value;
+      }
+
+      void set_value(rapidjson::Type const ty)
+      {
+            cur_->PushBack(rapidjson::Value(ty), al_);
+            cur_ = &(*cur_)[cur_->Size() - SIZE_C(1)];
+      }
+
+      /*--------------------------------------------------------------------------------*/
+
       void push_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
@@ -167,7 +189,7 @@ class rapid_doc
       }
 };
 
-} // namespace emlsp::ipc::json
-
 /****************************************************************************************/
+} // namespace ipc::json
+} // namespace emlsp
 #endif

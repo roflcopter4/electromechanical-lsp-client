@@ -1,11 +1,12 @@
 #pragma once
-#ifndef HGUARD_d_CLIENT_DETAILS_HH_
-#define HGUARD_d_CLIENT_DETAILS_HH_
+#ifndef HGUARD__IPC__BASE_CONNECTION_DETAILS_HH_
+#define HGUARD__IPC__BASE_CONNECTION_DETAILS_HH_
 /****************************************************************************************/
 
-#include "client.hh"
+#include "ipc/base_connection.hh"
 
-namespace emlsp::ipc::detail {
+inline namespace emlsp {
+namespace ipc::detail {
 
 template <typename AddrType>
 socket_connection_base_impl<AddrType>::~socket_connection_base_impl()
@@ -66,7 +67,8 @@ socket_connection_base_impl<AddrType>::write(void const *buf, size_t const nbyte
       return total;
 }
 
-} // namespace emlsp::ipc::detail
+} // namespace ipc::detail
+} // namespace emlsp
 
 /****************************************************************************************/
-#endif // client_details.hh
+#endif // base_connection_details.hh

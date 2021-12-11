@@ -2,7 +2,8 @@
 #include "Common.hh"
 #include "util/util.hh"
 
-namespace emlsp::except {
+inline namespace emlsp {
+namespace except {
 
 class not_implemented final : public std::logic_error
 {
@@ -20,18 +21,19 @@ class not_implemented final : public std::logic_error
       {}
 
     public:
-      not_implemented() : not_implemented("Feature not yet implememented", __FUNCTION__)
+      not_implemented() : not_implemented("Feature not yet implememented", FUNCTION_NAME)
       {}
 
       explicit not_implemented(const char *message)
-          : not_implemented(message, __FUNCTION__)
+          : not_implemented(message, FUNCTION_NAME)
       {}
 
       explicit not_implemented(const std::string &message)
-          : not_implemented(message, __FUNCTION__)
+          : not_implemented(message, FUNCTION_NAME)
       {}
 
       ND char const *what() const noexcept override { return text_.c_str(); }
 };
 
-} // namespace emlsp::except
+} // namespace except
+} // namespace emlsp

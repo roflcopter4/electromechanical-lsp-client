@@ -1,7 +1,7 @@
-#include "client.hh"
-#include "event/loop.hh"
-#include "lsp-protocol/lsp-connection.hh"
-#include "lsp-protocol/static-data.hh"
+#include "ipc/base_connection.hh"
+#include "ipc/base_client.hh"
+#include "ipc/lsp/lsp-connection.hh"
+#include "ipc/lsp/static-data.hh"
 
 //#include <nlohmann/json.hpp>
 
@@ -32,7 +32,8 @@
 #endif
 
 
-namespace emlsp::event {
+inline namespace emlsp {
+namespace event {
 
 #if 0
 void test01()
@@ -534,11 +535,12 @@ NOINLINE void test03()
 #endif
 }
 
-} // namespace emlsp::event
+} // namespace event
 
-
-namespace emlsp::ipc::event::test {
+namespace ipc::event::test {
 
 
 
 } // namespace emlsp::ipc::event::test
+
+} // namespace emlsp

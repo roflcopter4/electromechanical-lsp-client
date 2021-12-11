@@ -1,6 +1,6 @@
 #include "Common.hh"
-#include "lsp-protocol/lsp-connection.hh"
-#include "lsp-protocol/static-data.hh"
+#include "ipc/lsp/lsp-connection.hh"
+#include "ipc/lsp/static-data.hh"
 
 //#include <asio.hpp>
 // #include <glib.h>
@@ -86,8 +86,8 @@
 #endif
 
 
-namespace emlsp::ipc::event
-{
+inline namespace emlsp {
+namespace ipc::event {
 
 #if 0
 void test1()
@@ -132,4 +132,5 @@ test02()
 {
 }
 
-} // namespace emlsp::ipc::event
+} // namespace ipc::event
+} // namespace emlsp

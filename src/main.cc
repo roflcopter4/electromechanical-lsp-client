@@ -1,21 +1,17 @@
 #include "Common.hh"
-#include "lsp-protocol/lsp-connection.hh"
+#include "ipc/lsp/lsp-connection.hh"
+
+#include "thehellisthis.hh"
 
 //#include <nlohmann/json.hpp>
-
 //char const *malloc_conf = "stats_print:true,confirm_conf:true,abort_conf:true,prof_leak:true";
-
-#ifdef _WIN32
-static std::string const home_dir = getenv("USERPROFILE");
-#else
-static std::string const home_dir = getenv("HOME");
-#endif
 
 /****************************************************************************************/
 
-namespace emlsp {
+inline namespace emlsp {
  namespace ipc {
-  void run_event_loop_cxx(int const);
+  void run_event_loop_cxx(int);
+#if 0
   namespace lsp {
    namespace test {
     NOINLINE extern void test10();
@@ -23,6 +19,7 @@ namespace emlsp {
     NOINLINE extern void test12();
    } // namespace test
   } // namespace lsp
+#endif
   namespace test {
   } // namespace test
  } // namespace ipc
@@ -30,6 +27,10 @@ namespace emlsp {
   NOINLINE extern void test03();
   NOINLINE extern void lets_do_this(std::filesystem::path const &fname);
  } // namespace event
+ namespace libevent {
+  NOINLINE void testing01(std::filesystem::path const &fname);
+  NOINLINE void testing02(std::filesystem::path const &fname);
+ } // namespace libevent
 } // namespace emlsp
 
 #ifdef _WIN32
@@ -53,50 +54,41 @@ static void init_wsa()
 
 /****************************************************************************************/
 
-#define TRY_FUNC(fn) try_func((fn), #fn)
-#define PRINT(FMT, ...)  fmt::print(FMT_COMPILE(FMT), ##__VA_ARGS__)
-#define FATAL_ERROR(msg) emlsp::util::win32::error_exit(L ## msg)
-
-
-UNUSED __attribute__((nonnull))
-static void
-try_func(_Notnull_ void (*fn)(), _Notnull_ char const *repr)
-{
-      try {
-            fn();
-            std::cout << '\n';
-            std::cout.flush();
-      } catch (std::exception &e) {
-            // Might as well flush the stream here.
-            fmt::print(stderr, FMT_COMPILE("Caught exception running function \"{}\":  `{}'\n"), repr, e.what());
-            std::cerr <<  "{}"_format(3);
-            std::cerr.flush();
-      }
-}
-
-
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(UNUSED int argc, UNUSED char *argv[])
 {
 #ifdef _WIN32
       init_wsa();
       if (_setmode(0, _O_BINARY) == (-1))
-            emlsp::util::win32::error_exit(L"_setmode(0)");
+            util::win32::error_exit(L"_setmode(0)");
       if (_setmode(1, _O_BINARY) == (-1))
-            emlsp::util::win32::error_exit(L"_setmode(1)");
+            util::win32::error_exit(L"_setmode(1)");
       if (_setmode(2, _O_BINARY) == (-1))
-            emlsp::util::win32::error_exit(L"_setmode(2)");
+            util::win32::error_exit(L"_setmode(2)");
 #endif
+      
 
-      if (argc != 2)
-            errx(1, "You are a freaking moron, you know that?");
+      if (argc < 2) {
+            fmt::print(stderr, FMT_COMPILE("ERROR: Missing paramater.\n"));
+            exit(2);
+      }
+      if (argc > 2) {
+            fmt::print(stderr, FMT_COMPILE("ERROR: Too many paramaters.\n"));
+            exit(3);
+      }
+      if (!std::filesystem::exists(argv[1]) || std::filesystem::is_directory(argv[1])) {
+            fmt::print(stderr, FMT_COMPILE("ERROR: Invalid paramater \"{}\": must be a file.\n"), argv[1]);
+            exit(4);
+      }
 
       try {
-            // TRY_FUNC(emlsp::event::test03);
-            // TRY_FUNC(emlsp::ipc::lsp::test::test11);
-            // TRY_FUNC(emlsp::ipc::lsp::test::test12);
-            // emlsp::ipc::run_event_loop_cxx(0);
-            emlsp::event::lets_do_this(std::filesystem::canonical(argv[1]));
+            // TRY_FUNC(event::test03);
+            // TRY_FUNC(ipc::lsp::test::test11);
+            // TRY_FUNC(ipc::lsp::test::test12);
+            // ipc::run_event_loop_cxx(0);
+            // event::lets_do_this(std::filesystem::canonical(argv[1]));
+            //libevent::testing01(std::filesystem::canonical(argv[1]));
+            libevent::testing02(std::filesystem::canonical(argv[1]));
       } catch (std::exception &e) {
             DUMP_EXCEPTION(e);
       }

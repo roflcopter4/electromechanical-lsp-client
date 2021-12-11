@@ -1,7 +1,8 @@
 #include "Common.hh"
-#include "static-data.hh"
+#include "ipc/lsp/static-data.hh"
 
-namespace emlsp::ipc::lsp::data {
+inline namespace emlsp {
+namespace ipc::lsp::data {
 
 /*
  * Required input
@@ -163,4 +164,5 @@ R"({
 
 
 
-} // namespace emlsp::ipc::lsp::data 
+} // namespace ipc::lsp::data 
+} // namespace emlsp

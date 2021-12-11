@@ -31,3 +31,25 @@ asprintf(_Notnull_ char **destp,
       return len;
 }
 #endif
+
+char const *
+my_strerror(errno_t const errval, char *buf, size_t const buflen)
+{
+      char const *estr;
+
+#if defined HAVE_STRERROR_S || defined _MSC_VER
+      strerror_s(buf, buflen, errval);
+      estr = buf;
+#elif defined HAVE_STRERROR_R
+# if defined __GNU_LIBRARY__ && defined _GNU_SOURCE
+      estr = strerror_r(errval, buf, buflen);
+# else
+      strerror_r(errval, buf, buflen);
+      estr = buf;
+# endif
+#else
+      estr = strerror(errval);
+#endif
+
+      return estr;
+}

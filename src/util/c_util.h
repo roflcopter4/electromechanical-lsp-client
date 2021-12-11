@@ -19,10 +19,16 @@
 #else
 # define PFSAL
 # define _Maybenull_ //NOLINT
+# define _Check_return_ __attribute__((__warn_unused_result__)) //NOLINT
 #endif
 
 
 __BEGIN_DECLS
+
+
+_Check_return_ char const *
+my_strerror(errno_t errval, _Notnull_ char *buf, size_t buflen)
+    __attribute__((__nonnull__(2)));
 
 
 /**
@@ -70,5 +76,5 @@ __END_DECLS
 #undef ATTRIBUTE_PRINTF
 
 /****************************************************************************************/
-#endif // Common.hh
+#endif // c_util.h
 // vim: ft=c

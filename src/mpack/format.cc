@@ -3,7 +3,8 @@
 
 #include <cstdarg>
 
-namespace emlsp::ipc::mpack {
+inline namespace emlsp {
+namespace ipc::mpack {
 
 typedef unsigned char uchar;
 
@@ -326,4 +327,5 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
         return ss.str();
 }
 
-} // namespace emlsp::ipc::mpack
+} // namespace ipc::mpack
+} // namespace emlsp

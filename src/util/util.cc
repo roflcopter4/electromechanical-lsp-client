@@ -18,16 +18,18 @@
 #  define FILESEP_STR  "\\"
 #else
 #  define FILESEP_STR  "/"
-#  define FATAL_ERROR(msg)                                              \
-      do {                                                              \
-            std::string s_ = std::string(msg) + ": " + strerror(errno); \
-            throw std::runtime_error(s_);                               \
+#  define FATAL_ERROR(msg)                                                           \
+      do {                                                                           \
+            char buf[128];                                                           \
+            std::string s_ = std::string(msg) + ": " + my_strerror(errno, buf, 128); \
+            throw std::runtime_error(s_);                                            \
       } while (0)
 #endif
 
 /****************************************************************************************/
 
-namespace emlsp::util {
+inline namespace emlsp {
+namespace util {
 namespace {
 
 void cleanup_sighandler(int signum);
@@ -182,7 +184,7 @@ get_temporary_filename(char const *prefix, char const *suffix)
 
 /****************************************************************************************/
 
-namespace rpc {
+namespace ipc {
 
 socket_t
 open_new_socket(char const *const path)
@@ -198,7 +200,7 @@ open_new_socket(char const *const path)
             FATAL_ERROR("socket");
 #else
       if (connection_sock == (-1))
-           FATAL_ERROR("socket");
+            FATAL_ERROR("socket");
       int tmp = ::fcntl(connection_sock, F_GETFL);
       ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
 #endif
@@ -249,7 +251,7 @@ connect_to_socket(char const *const path)
       return connect_to_socket(&addr);
 }
 
-} // namespace rpc
+} // namespace ipc
 
 /****************************************************************************************/
 
@@ -332,18 +334,8 @@ my_err_throw(UNUSED int const     status,
             buf += '\n';
       }
 
-      char *errstr;
-
-#if defined HAVE_STRERROR_R
-      char errbuf[256];
-      errstr = ::strerror_r(e, errbuf, 256);
-#elif defined HAVE_STRERROR_S
-      char errbuf[256];
-      ::strerror_s(errbuf, 256, e);
-      errstr = errbuf;
-#else
-      errstr = strerror(e);
-#endif
+      char        errbuf[128];
+      char const *errstr = my_strerror(e, errbuf, 128);
 
       if (print_err)
             buf += fmt::format(FMT_COMPILE("    errno {}: `{}'"), e, errstr);
@@ -373,4 +365,23 @@ slurp_file(char const *fname)
       return buf;
 }
 
-} // namespace emlsp::util
+std::string char_repr(char const ch)
+{
+      switch (ch) {
+      case '\n':
+            return "\\n";
+      case '\r':
+            return "\\r";
+      case '\0':
+            return "\\0";
+      case '\t':
+            return "\\t";
+      case ' ':
+            return "<SPACE>";
+      default:
+            return std::string{ch};
+      }
+}
+
+} // namespace util
+} // namespace emlsp
