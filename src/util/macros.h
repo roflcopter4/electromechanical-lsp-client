@@ -1,14 +1,15 @@
 #pragma once
-#ifndef HGUARD_d_MACROS_H_
-#define HGUARD_d_MACROS_H_
+#ifndef HGUARD__MACROS_H_
+#define HGUARD__MACROS_H_
 /****************************************************************************************/
 
-#if !defined _GNU_SOURCE && defined __gnu_linux__
-#  define _GNU_SOURCE //NOLINT
-#endif
+#include <limits.h>
 
-#if !defined __GNUC__ && !defined __clang__
+#if !defined __GNUC__ && !defined __clang__ && !defined __attribute__
 # define __attribute__(x)
+#endif
+#ifndef __attr_access
+# define __attr_access(x)
 #endif
 #if !defined __declspec && !defined _MSC_VER
 # define __declspec(...)
@@ -17,65 +18,44 @@
 # define __has_include(x)
 #endif
 
-#ifdef _MSC_VER
-# define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
-# define _CRT_SECURE_NO_WARNINGS 1
-# define _USE_DECLSPECS_FOR_SAL 1
-# ifdef __cplusplus
-#  ifdef _MSVC_LANG
-#   define CXX_LANG_VER _MSVC_LANG
-#  endif
-# else
-#  define restrict __restrict
-# endif
-#else
-# define _Notnull_ //NOLINT
-#endif
-
-#if defined _WIN32 || defined _WIN64
-# define WIN32_LEAN_AND_MEAN 1
-# define NOMINMAX 1
-# define DOSISH 1 // One never escapes their roots.
-#elif defined __linux__   || defined __bsd__  || defined bsd  || \
-      defined __FreeBSD__ || defined __unix__ || defined unix
-# define UNIXISH 1
-#else
-# error "What the hell kind of OS are you even using?"
-#endif
-
-/*--------------------------------------------------------------------------------------*/
 #ifdef __cplusplus
-
+# if defined _MSC_VER && defined _MSVC_LANG
+#  define CXX_LANG_VER _MSVC_LANG
+# endif
 # ifndef CXX_LANG_VER
 #  define CXX_LANG_VER __cplusplus
 # endif
-# if CXX_LANG_VER >= 201700L || (defined __cplusplus && defined __TAG_HIGHLIGHT__)
-#  define UNUSED      [[maybe_unused]]
-#  define ND          [[nodiscard]]
-#  define NORETURN    [[noreturn]]
-#  define FALLTHROUGH [[fallthrough]]
-# elif defined __GNUC__
-#  define UNUSED      __attribute__((__unused__))
-#  define ND          __attribute__((__warn_unused_result__))
-#  define NORETURN    __attribute__((__noreturn__))
-#  define FALLTHROUGH __attribute__((__fallthrough__))
-# elif defined _MSC_VER
-#  define UNUSED      __pragma(warning(suppress : 4100 4101))
-#  define ND          _Check_return_
-#  define NORETURN    __declspec(noreturn)
-#  define FALLTHROUGH __fallthrough
-# else
-#  define UNUSED
-#  define ND
-#  define NORETURN
-#  define FALLTHROUGH
-# endif
+#endif
+
+#if (defined __cplusplus && (CXX_LANG_VER >= 201700L)) || (defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L)
+# define UNUSED      [[maybe_unused]]
+# define ND          [[nodiscard]]
+# define NORETURN    [[noreturn]]
+# define FALLTHROUGH [[fallthrough]]
+#elif defined __GNUC__
+# define UNUSED      __attribute__((__unused__))
+# define ND          __attribute__((__warn_unused_result__))
+# define NORETURN    __attribute__((__noreturn__))
+# define FALLTHROUGH __attribute__((__fallthrough__))
+#elif defined _MSC_VER
+# define UNUSED      __pragma(warning(suppress : 4100 4101))
+# define ND          _Check_return_
+# define NORETURN    __declspec(noreturn)
+# define FALLTHROUGH __fallthrough
+#else
+# define UNUSED
+# define ND
+# define NORETURN
+# define FALLTHROUGH
+#endif
+
+#ifdef __cplusplus
 
 # define DELETE_COPY_CTORS(t)               \
       t(t const &)                = delete; \
       t &operator=(t const &)     = delete
 
-#define DELETE_MOVE_CTORS(t)                \
+# define DELETE_MOVE_CTORS(t)               \
       t(t &&) noexcept            = delete; \
       t &operator=(t &&) noexcept = delete
 
@@ -87,15 +67,26 @@
       t(t &&) noexcept            = default; \
       t &operator=(t &&) noexcept = default
 
-#define DUMP_EXCEPTION(e)                                                                                      \
-      do {                                                                                                     \
-            fmt::print(stderr,                                                                                 \
-                       FMT_COMPILE("Caught exception:\n{}\n" R"(at line {}, in file '{}', in function '{}')"), \
-                       (e).what(), __LINE__, __FILE__, __func__);                                              \
-            fflush(stderr);                                                                                    \
+# define DUMP_EXCEPTION(e)                                                             \
+      do {                                                                             \
+            fmt::print(stderr,                                                         \
+                       FMT_COMPILE("Caught exception:\n{}\nat line {}, in file '{}', " \
+                                   "in function '{}'\n"),                              \
+                       (e).what(), __LINE__, __FILE__, FUNCTION_NAME);                 \
+            fflush(stderr);                                                            \
       } while (0)
 
-#else // defined __cplusplus
+# ifdef __TAG_HIGHLIGHT__
+#  define REQUIRES(...)
+# else
+#  define REQUIRES(...) requires __VA_ARGS__
+# endif
+
+# ifndef NO_OBNOXIOUS_TWO_LETTER_CONVENIENCE_MACROS_PLEASE
+#  define FC(str) FMT_COMPILE(str)
+# endif
+
+#else // not defined __cplusplus
 
 # ifndef thread_local
 #  if defined(_MSC_VER)
@@ -117,10 +108,12 @@
 #  endif
 # endif
 
-# if defined __GNUC__
+# if defined __GNUC__ || defined __clang__
 #  define NORETURN __attribute__((__noreturn__))
 # elif defined _MSC_VER
 #  define NORETURN __declspec(noreturn)
+# elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  define NORETURN _Noreturn
 # else
 #  define NORETURN
 # endif
@@ -129,29 +122,61 @@
 
 #if defined __GNUC__ || defined __clang__
 # define NOINLINE __attribute__((__noinline__))
+# ifndef __always_inline
+#  define __always_inline __attribute__((__always_inline__)) __inline__
+# endif
+# ifndef __forceinline
+#  define __forceinline __always_inline
+# endif
 #elif defined _MSC_VER
 # define NOINLINE __declspec(noinline)
 #else
 # define NOINLINE
+# define __forceinline __inline
 #endif
 
 /*--------------------------------------------------------------------------------------*/
 
 #ifndef __WORDSIZE
-# if SIZE_MAX == UINT64_MAX
+# if SIZE_MAX == ULLONG_MAX
 #  define __WORDSIZE 64
-# elif SIZE_MAX == UINT32_MAX
+# elif SIZE_MAX == UINT_MAX
 #  define __WORDSIZE 32
-# elif SIZE_MAX == UINT16_MAX
+# elif SIZE_MAX == SHRT_MAX
 #  define __WORDSIZE 16
 # else
-#  error "No PDP-11s allowed. Sorry."
+#  error "I have no useful warning message to give here. You know what you did."
 # endif
 #endif
 
-#define P00_HELPER_PASTE_2(a1, a2) a1 ## a2                          //NOLINT(cppcoreguidelines-macro-usage)
-#define P99_PASTE_2(a1, a2)     P00_HELPER_PASTE_2(a1, a2)           //NOLINT(cppcoreguidelines-macro-usage)
-#define P99_PASTE_3(a1, a2, a3) P99_PASTE_2(P99_PASTE_2(a1, a2), a3) //NOLINT(cppcoreguidelines-macro-usage)
+#define P00_HELPER_PASTE_2(a1, a2) a1 ## a2
+#define P00_PASTE_2(a1, a2)        P00_HELPER_PASTE_2(a1, a2)
+
+#define P99_PASTE_0(...)          __VA_ARGS__
+#define P99_PASTE_1(...)          __VA_ARGS__
+#define P99_PASTE_2(...)          P00_PASTE_2(__VA_ARGS__)
+#define P99_PASTE_3(a1, a2, ...)  P99_PASTE_2(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_4(a1, a2, ...)  P99_PASTE_3(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_5(a1, a2, ...)  P99_PASTE_4(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_6(a1, a2, ...)  P99_PASTE_5(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_7(a1, a2, ...)  P99_PASTE_6(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_8(a1, a2, ...)  P99_PASTE_7(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_9(a1, a2, ...)  P99_PASTE_8(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_10(a1, a2, ...) P99_PASTE_9(P99_PASTE_2(a1, a2), __VA_ARGS__)
+
+#define P00_NUM_ARGS_b(_0a, _0b, _2, _3, _4, _5, _6, _7, _8, _9, _10, ...) _10
+#define P00_NUM_ARGS_a(...) P00_NUM_ARGS_b(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0, 0)
+#define P00_NUM_ARGS(...)   P00_NUM_ARGS_a(__VA_ARGS__)
+#define P00_PASTE_a(n)      P00_PASTE_2(P99_PASTE_, n)
+#define P00_PASTE(...)      P00_PASTE_a(P00_NUM_ARGS(__VA_ARGS__))
+
+#define P99_PASTE(...) P00_PASTE(__VA_ARGS__)(__VA_ARGS__)
+
+#define P00_PASTE_TEST_1(a, b, c, ...) P99_PASTE(a, b, c, __VA_ARGS__)
+#if P99_PASTE(0, x, A, F, 5, 1, 0, U, L, L) != 0xAF510ULL || P00_PASTE_TEST_1(0, x, F, F, 0, 0, U) != 0xFF00U
+# error "Your C pre-processor is broken or non-conformant. Cannot continue."
+#endif
+#undef P00_PASTE_TEST_1
 
 #if !defined __BEGIN_DECLS || !defined __END_DECLS
 # ifdef __cplusplus
@@ -163,11 +188,11 @@
 # endif
 #endif
 
-#define SIZE_C        P99_PASTE_3(UINT, __WORDSIZE, _C) //NOLINT(cppcoreguidelines-macro-usage)
-#define SSIZE_C       P99_PASTE_3(INT,  __WORDSIZE, _C) //NOLINT(cppcoreguidelines-macro-usage)
-#define SLS(s)        ("" s ""), (sizeof(s))            //NOLINT(cppcoreguidelines-macro-usage)
-#define LSTRCPY(d, s) memcpy((d), SLS(s))               //NOLINT(cppcoreguidelines-macro-usage)
-#define eprintf(...)  fprintf(stderr, __VA_ARGS__)      //NOLINT(cppcoreguidelines-macro-usage)
+#define SIZE_C        P99_PASTE_3(UINT, __WORDSIZE, _C)
+#define SSIZE_C       P99_PASTE_3(INT,  __WORDSIZE, _C)
+#define SLS(s)        ("" s ""), (sizeof(s))
+#define LSTRCPY(d, s) memcpy((d), SLS(s))
+#define eprintf(...)  fprintf(stderr, __VA_ARGS__)
 
 #if defined _WIN64 && !defined PATH_MAX
 # if WDK_NTDDI_VERSION >= NTDDI_WIN10_RS1
@@ -179,35 +204,40 @@
 
 #if defined __GNUC__ || defined __clang__
 # define FUNCTION_NAME __PRETTY_FUNCTION__
+#elif defined _MSC_VER
+# define FUNCTION_NAME __FUNCTION__
 #else
-# if defined _MSC_VER
-#  define FUNCTION_NAME __FUNCTION__
-# else
-#  define FUNCTION_NAME __func__
-# endif
+# define FUNCTION_NAME __func__
 #endif
 
 
 /*--------------------------------------------------------------------------------------*/
 
-#define USEC2SECOND (1000000UL)    /*     1,000,000 - one million */
-#define NSEC2SECOND (1000000000UL) /* 1,000,000,000 - one billion */
-
-#define TIMESPEC_FROM_DOUBLE(FLT) \
-        { (uintmax_t)(FLT), (uintmax_t)(((double)((FLT) - (double)((uintmax_t)(FLT)))) * (double)NSEC2SECOND) }
-
-#define TIMESPEC_FROM_SECOND_FRACTION(i, d) \
-        { (uintmax_t)(i), (uintmax_t)(NSEC2SECOND / ((uintmax_t)(d))) }
-
-#if 0
-#define TIMESPEC_FROM_DOUBLE(STS, FLT)              \
-        ((void)( (STS)->tv_sec  = (uintmax_t)(FLT), \
-                 (STS)->tv_nsec = (uintmax_t)(((double)((FLT) - (double)((uintmax_t)(FLT)))) * (double)NSEC2SECOND) ))
-
-#define TIMESPEC_FROM_SECOND_FRACTION(STS, i, d) \
-        ((void)( (STS)->tv_sec  = (uintmax_t)(i), \
-                 (STS)->tv_nsec =  (uintmax_t)(NSEC2SECOND / ((uintmax_t)(d))) ))
+#ifdef __cplusplus
+# define USEC2SECOND UINTMAX_C(1'000'000)     /*     1,000,000 - one million */
+# define NSEC2SECOND UINTMAX_C(1'000'000'000) /* 1,000,000,000 - one billion */
+#else
+# define USEC2SECOND UINTMAX_C(1000000)    /*     1,000,000 - one million */
+# define NSEC2SECOND UINTMAX_C(1000000000) /* 1,000,000,000 - one billion */
 #endif
+
+#define BIGFLT double
+
+#define TIMESPEC_FROM_DOUBLE(FLT)                                          \
+      { (uintmax_t)((BIGFLT)(FLT)),                                        \
+            (uintmax_t)(((BIGFLT)((BIGFLT)(FLT) -                          \
+                                  (BIGFLT)((uintmax_t)((BIGFLT)(FLT))))) * \
+                        (BIGFLT)NSEC2SECOND) }
+
+#undef BIGFLT
+
+#define TIMESPEC_FROM_SECOND_FRACTION(seconds, numerator, denominator)               \
+      {                                                                              \
+            (uintmax_t)(seconds),                                                    \
+            (uintmax_t)((denominator) == 0 ? UINTMAX_C(0)                            \
+                                           : (((uintmax_t)(numerator)*NSEC2SECOND) / \
+                                              (uintmax_t)(denominator)))             \
+      }
 
 /****************************************************************************************/
 #endif // macros.h

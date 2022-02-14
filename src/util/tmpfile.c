@@ -14,14 +14,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _MSC_VER
-# define restrict __restrict
-#endif
-
 #ifdef DUMB_TEMPNAME_NUM_CHARS
 # define NUM_RANDOM_CHARS DUMB_TEMPNAME_NUM_CHARS
 #else
-# define NUM_RANDOM_CHARS 16
+# define NUM_RANDOM_CHARS 6
 #endif
 
 #ifdef _WIN32
@@ -41,13 +37,14 @@
 # define CHAR_IS_FILESEP(ch) ((ch) == '/')
 #endif
 
-#define RAND() cxx_random_engine_get_random_val()
+#define RAND() cxx_random_engine_get_random_val_32()
 
 static char *get_random_chars(char *buf);
+static bool  file_exists(char const *fname);
 
 /*======================================================================================*/
 
-char *
+size_t
 braindead_tempname(_Notnull_   char       *restrict const buf,
                    _Notnull_   char const *restrict const dir,
                    _Maybenull_ char const *restrict const prefix,
@@ -56,6 +53,7 @@ braindead_tempname(_Notnull_   char       *restrict const buf,
       /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
        * so this is about the best way I can think of to do this. Here's hoping the
        * compiler is smart enough to work out what's going on. */
+
       size_t len = strlen(dir);
       memcpy(buf, dir, len + 1);
 
@@ -70,16 +68,22 @@ braindead_tempname(_Notnull_   char       *restrict const buf,
             ptr += len;
       }
 
-      ptr = get_random_chars(ptr);
-
-      if (suffix) {
+      char *const backup_ptr = ptr;
+      if (suffix)
             len = strlen(suffix);
-            memcpy(ptr, suffix, len);
-            ptr += len;
-      }
 
-      *ptr = '\0';
-      return buf;
+      do {
+            ptr = get_random_chars(backup_ptr);
+
+            if (suffix) {
+                  memcpy(ptr, suffix, len);
+                  ptr += len;
+            }
+
+            *ptr = '\0';
+      } while (file_exists(buf));
+
+      return ptr - buf - SIZE_C(1);
 }
 
 static char *
@@ -90,11 +94,20 @@ get_random_chars(char *buf)
       for (int i = 0; i < NUM_RANDOM_CHARS; ++i) {
             uint32_t const tmp = RAND();
 
-            if ((tmp & 0x0F) < 2)
+            if ((tmp & 0x0F) < 2U)
                   *ptr++ = (char)((RAND() % 10) + '0');
             else
                   *ptr++ = (char)((RAND() % 26) + ((tmp & 1) ? 'A' : 'a'));
       }
 
       return ptr;
+}
+
+static bool
+file_exists(char const *fname)
+{
+      struct stat st;
+      errno = 0;
+      stat(fname, &st);
+      return errno != ENOENT;
 }

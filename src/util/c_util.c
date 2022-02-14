@@ -6,6 +6,10 @@
 #    undef vsnprintf
 #  endif
 
+/*
+ * Laziest possible asprintf implementation. But it works, assuming (v)snprintf conforms
+ * to C99. Microsoft's current one is supposed to so I won't bother checking.
+ */
 int
 asprintf(_Notnull_ char **destp,
          _Notnull_ _Printf_format_string_ char const *__restrict fmt,
@@ -22,7 +26,7 @@ asprintf(_Notnull_ char **destp,
             va_end(ap2);
       }
 
-      *destp = malloc(len + 1LLU);
+      *destp = malloc(len + SIZE_C(1));
       if (!*destp)
             err(1, "malloc");
       vsprintf(*destp, fmt, ap1);
@@ -32,8 +36,18 @@ asprintf(_Notnull_ char **destp,
 }
 #endif
 
-char const *
-my_strerror(errno_t const errval, char *buf, size_t const buflen)
+
+#if defined __GNUC__
+  /* This also works with clang. */
+# pragma GCC diagnostic push
+# pragma GCC diagnostic error "-Wint-conversion"
+# define DIAG_POP() _Pragma("GCC diagnostic pop")
+#else
+# define DIAG_POP()
+#endif
+
+_Check_return_ char const *
+my_strerror(errno_t const errval, _Notnull_ char *buf, size_t const buflen)
 {
       char const *estr;
 
@@ -41,10 +55,11 @@ my_strerror(errno_t const errval, char *buf, size_t const buflen)
       strerror_s(buf, buflen, errval);
       estr = buf;
 #elif defined HAVE_STRERROR_R
-# if defined __GNU_LIBRARY__ && defined _GNU_SOURCE
+# if defined __GLIBC__ && defined _GNU_SOURCE && defined __USE_GNU
       estr = strerror_r(errval, buf, buflen);
 # else
-      strerror_r(errval, buf, buflen);
+      int const r = strerror_r(errval, buf, buflen);
+      (void)r;
       estr = buf;
 # endif
 #else
@@ -53,3 +68,26 @@ my_strerror(errno_t const errval, char *buf, size_t const buflen)
 
       return estr;
 }
+
+DIAG_POP()
+
+#define MINOF(a, b) (((a) < (b)) ? (a) : (b))
+#define MAXOF(a, b) (((a) > (b)) ? (a) : (b))
+
+#ifndef HAVE_STRLCPY
+extern size_t emlsp_strlcpy(_Notnull_ char       *restrict dst,
+                            _Notnull_ char const *restrict src,
+                            size_t const                   size)
+{
+      /* Do it the stupid way. It's, frankly, probably faster anyway. */
+      size_t const slen = strlen(src);
+
+      if (size) {
+            size_t const len = MINOF(slen, size - SIZE_C(1));
+            memcpy(dst, src, len);
+            dst[len] = '\0';
+      }
+
+      return slen;  // Does not include NUL.
+}
+#endif

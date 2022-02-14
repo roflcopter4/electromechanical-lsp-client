@@ -1,6 +1,7 @@
-#pragma once
+// ReSharper disable CppInconsistentNaming
 #ifndef HGUARD_d_UTIL_H_
 #define HGUARD_d_UTIL_H_
+#pragma once
 
 #include "Common.hh"
 
@@ -19,7 +20,7 @@
 # endif
 # define ATTRIBUTE_PRINTF(...)
 #endif
-#define CSTR_RESTRICT char const *__restrict
+#define CSTR_RESTRICT char const *restrict
 #define FORMAT_STR    PRINTF_SAL CSTR_RESTRICT
 
 #if defined __cplusplus
@@ -46,8 +47,11 @@ my_err_throw(int           status,
 } // namespace util
 } // namespace emlsp
 
-#  define err(EVAL, ...)  util::my_err_throw((EVAL), true,  __FILE__, __LINE__, FUNCTION_NAME __VA_OPT__(,) __VA_ARGS__)
-#  define errx(EVAL, ...) util::my_err_throw((EVAL), false, __FILE__, __LINE__, FUNCTION_NAME __VA_OPT__(,) __VA_ARGS__)
+#define err(EVAL, ...)  ::util::my_err_throw((EVAL), true,  __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
+#define errx(EVAL, ...) ::util::my_err_throw((EVAL), false, __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
+
+#define err_nothrow(EVAL, ...)  my_err_((EVAL), true,  __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
+#define errx_nothrow(EVAL, ...) my_err_((EVAL), false, __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
 
 #else // defined __cplusplus
 

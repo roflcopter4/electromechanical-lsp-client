@@ -3,20 +3,19 @@
 #include "util/util.hh"
 
 inline namespace emlsp {
-namespace except {
+namespace util::except {
 
 class not_implemented final : public std::logic_error
 {
-    private:
       std::string text_;
 
       not_implemented(std::string const &message, char const *function)
           : std::logic_error("Not Implemented")
       {
             text_ = message + " : " + function;
-      };
+      }
 
-      not_implemented(const char *message, const char *function)
+      not_implemented(char const *message, char const *function)
           : not_implemented(std::string(message), function)
       {}
 
@@ -24,16 +23,23 @@ class not_implemented final : public std::logic_error
       not_implemented() : not_implemented("Feature not yet implememented", FUNCTION_NAME)
       {}
 
-      explicit not_implemented(const char *message)
+      explicit not_implemented(char const *message)
           : not_implemented(message, FUNCTION_NAME)
       {}
 
-      explicit not_implemented(const std::string &message)
+      explicit not_implemented(std::string const &message)
           : not_implemented(message, FUNCTION_NAME)
       {}
 
-      ND char const *what() const noexcept override { return text_.c_str(); }
+      explicit not_implemented(std::string_view const &message)
+          : not_implemented(std::string{message.data(), message.size()}, FUNCTION_NAME)
+      {}
+
+      ND char const *what() const noexcept override
+      {
+            return text_.c_str();
+      }
 };
 
-} // namespace except
+} // namespace util::except
 } // namespace emlsp

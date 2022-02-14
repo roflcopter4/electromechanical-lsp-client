@@ -3,19 +3,20 @@
 
 #include "c_util.h"
 
-#define SHUTUPGCC __attribute__((__unused__)) ssize_t n =
+#define SHUTUPGCC __attribute__((__unused__)) \
+      ssize_t const P99_PASTE(show_stacktrace_macro_variable_, __COUNTER__, _, __LINE__) =
 
 #ifdef HAVE_EXECINFO_H
 #  include <execinfo.h>
-#define SHOW_STACKTRACE()                              \
-      __extension__({                                  \
-            void  *arr[128];                           \
-            size_t num = backtrace(arr, 128);          \
-            (void)write(2, SLS("<<< FATAL ERROR >>>\n" \
-                               "    STACKTRACE:\n"));  \
-            backtrace_symbols_fd(arr, num, 2);         \
-            (void)write(2, "\n", 1);                   \
-            fsync(2);                                  \
+#define SHOW_STACKTRACE()                                  \
+      __extension__({                                      \
+            void     *arr[128];                            \
+            int const num = backtrace(arr, 128);           \
+            SHUTUPGCC write(2, SLS("<<< FATAL ERROR >>>\n" \
+                                   "    STACKTRACE:\n"));  \
+            backtrace_symbols_fd(arr, num, 2);             \
+            SHUTUPGCC write(2, "\n", 1);                   \
+            fsync(2);                                      \
       })
 #else
 #  define SHOW_STACKTRACE(...)
@@ -73,14 +74,14 @@ my_err_(int  const           status,
 }
 
 void
-my_warn_(bool const           print_err,
-         bool const           force,
-         char const *restrict file,
-         int  const           line,
-         char const *restrict func,
-         _Printf_format_string_ _Notnull_
-         char const *restrict format,
-         ...)
+my_warn_(       bool const           print_err,
+         UNUSED bool const           force,
+                char const *restrict file,
+                int  const           line,
+                char const *restrict func,
+                _Printf_format_string_ _Notnull_
+                char const *restrict format,
+                ...)
 {
 #ifdef NDEBUG
       if (!force)

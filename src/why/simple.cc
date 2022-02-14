@@ -8,7 +8,7 @@
 #include <type_traits>
 #include <uv.h>
 
-#include <uvw.hpp>
+// #include <uvw.hpp>
 
 inline namespace emlsp {
 namespace event {
@@ -32,7 +32,7 @@ struct callback_data
 };
 
 // using client_t = ipc::lsp::unix_socket_client<userdata *>;
-using client_t = ipc::lsp::pipe_client<userdata *>;
+using client_t = ipc::lsp::pipe_client<ipc::loops::libevent, userdata *>;
 // using client_t = ipc::base_client<ipc::lsp::unix_socket_connection, rapidjson::Document, userdata *>;
 
 struct userdata {
@@ -51,6 +51,7 @@ struct message_data {
 };
 
 
+#if 0
 void uvw_poll_callback (uvw::PollEvent const &ev, uvw::PollHandle &handle)
 {
       if (ev.flags & uvw::details::UVPollEvent::READABLE) {
@@ -69,6 +70,7 @@ void uvw_poll_callback (uvw::PollEvent const &ev, uvw::PollHandle &handle)
             client->condition().notify_one();
       }
 }
+#endif
 
 static void
 event_loop_io_cb(uv_poll_t *handle, UNUSED int const status, int const events)
@@ -113,12 +115,14 @@ event_loop_io_cb(uv_poll_t *handle, UNUSED int const status, int const events)
       }
 }
 
+#if 0
 static void *
 pthread_shim(void *vdata)
 {
       uv_run(static_cast<uv_loop_t *>(vdata), UV_RUN_DEFAULT);
       pthread_exit(nullptr);
 }
+#endif
 
 NOINLINE void lets_do_this(std::filesystem::path const &fname)
 {
@@ -309,7 +313,7 @@ event_loop_io_cb(uv_poll_t *handle, UNUSED int const status, int const events)
 }
 #endif
 
-static void 
+static void
 event_loop_stop_uv_handles(userdata *data)
 {
 #ifndef _WIN32

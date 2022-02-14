@@ -1,29 +1,40 @@
-#ifndef HGUARD_d_COMMON_HH_
-#define HGUARD_d_COMMON_HH_
+#ifndef HGUARD__COMMON_HH_
+#define HGUARD__COMMON_HH_ //NOLINT
 #pragma once
 /****************************************************************************************/
+
+// #define _GLIBCXX_ASSERTIONS 1
+// #define _GLIBCXX_PARALLEL 1
+// #define _GLIBCXX_PARALLEL_ASSERTIONS 1
+#undef NDEBUG
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
-
-#include "util/macros.h"
+#ifdef USE_JEMALLOC
+#  define JEMALLOC_NO_DEMANGLE 1
+#  include <jemalloc/jemalloc.h>
+#endif
 
 /*--------------------------------------------------------------------------------------*/
 
 #ifdef __cplusplus
 
+# include <assert.h>
 # include "pch.hh"
 
+inline namespace emlsp {
 using namespace std::literals;
+#if FMT_USE_USER_DEFINED_LITERALS
 using namespace fmt::literals;
+#endif
+} // namespace emlsp
 
 #else // not C++
 
 # include <assert.h>
 # include <ctype.h>
 # include <errno.h>
-# include <fcntl.h>
 # include <inttypes.h>
 # include <limits.h>
 # include <stdarg.h>
@@ -37,7 +48,7 @@ using namespace fmt::literals;
 # include <fcntl.h>
 # include <sys/stat.h>
 
-# if defined DOSISH
+# if defined _WIN32
 #  define WIN32_LEAN_AND_MEAN 1
 #  include <Windows.h>
 #  include <winsock2.h>
@@ -59,6 +70,8 @@ using namespace fmt::literals;
 
 /*--------------------------------------------------------------------------------------*/
 
+#include "util/macros.h"
+
 #ifdef HAVE_THREADS_H
 # include <threads.h>
 #else
@@ -70,6 +83,7 @@ using namespace fmt::literals;
 #ifdef __cplusplus
 # include "util/util.hh"
 #else
+/* nothing */
 #endif
 
 #include "util/initializer_hack.h"

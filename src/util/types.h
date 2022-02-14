@@ -1,9 +1,9 @@
 #pragma once
-#ifndef HGUARD_d_TYPES_H_
-#define HGUARD_d_TYPES_H_
+#ifndef HGUARD__TYPES_H_
+#define HGUARD__TYPES_H_
 /****************************************************************************************/
 
-#ifdef DOSISH
+#ifdef _WIN32
 #  define MSG_EOR 0
 typedef SOCKET socket_t; //NOLINT(modernize-use-using)
 typedef errno_t error_t; //NOLINT(modernize-use-using)

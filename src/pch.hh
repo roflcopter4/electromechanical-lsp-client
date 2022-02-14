@@ -1,11 +1,10 @@
 #pragma once
 #ifndef HGUARD__PCH_HH_
-#define HGUARD__PCH_HH_
+#define HGUARD__PCH_HH_ //NOLINT
 
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
-#include "util/macros.h"
 
 #if 0
 #include <any>
@@ -84,6 +83,7 @@
 #include <cassert>
 #include <cerrno>
 #include <cinttypes>
+#include <climits>
 #include <csignal>
 #include <cstdarg>
 #include <cstdint>
@@ -93,8 +93,10 @@
 
 /*--------------------------------------------------------------------------------------*/
 
-#if defined DOSISH
-#  define WIN32_LEAN_AND_MEAN 1
+#if defined _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN 1
+#  endif
 #  include <Windows.h>
 #  include <winsock2.h>
 
@@ -117,18 +119,37 @@
 
 #include <fmt/core.h>
 
-#include <fmt/compile.h>
 #include <fmt/format-inl.h>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
+
+//#include <fmt/args.h>
+#include <fmt/chrono.h>
+//#include <fmt/color.h>
+#include <fmt/compile.h>
+//#include <fmt/locale.h>
+//#include <fmt/os.h>
+#include <fmt/ostream.h>
 #include <fmt/printf.h>
+//#include <fmt/ranges.h>
+#include <fmt/xchar.h>
+
+#include <asio.hpp>
+#include <msgpack.hpp>
+
+#include <glib.h>
+#include <glib/gwin32.h>
+
+#include <gio/gio.h>
+#include <gio-win32-2.0/gio/gwin32inputstream.h>
+#include <gio-win32-2.0/gio/gwin32outputstream.h>
 
 
+#if 0
 #ifdef NDEBUG
 #  define RAPIDJSON_ASSERT(x)
 #  define RAPIDJSON_NOEXCEPT_ASSERT(x)
 #else
-#  define RAPIDJSON_ASSERT_THROWS
+#  define RAPIDJSON_ASSERT_THROWS 1
 #  define RAPIDJSON_NOEXCEPT_ASSERT(x) assert(x)
 #  define RAPIDJSON_ASSERT(x)                                    \
       do {                                                       \
@@ -137,9 +158,12 @@
             }                                                    \
       } while (0)
 #endif
+#endif
 
-//#include "rapid.hh"
-#include <rapidjson/rapidjson.h>
+#include "rapid.hh"
+// #include <rapidjson/rapidjson.h>
+
+#include "util/formatters.hh"
 
 /****************************************************************************************/
 #endif

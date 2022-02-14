@@ -1,6 +1,6 @@
-#ifndef HGUARD__RAPID_HH_
-#define HGUARD__RAPID_HH_
 #pragma once
+#ifndef HGUARD__RAPID_HH_
+#define HGUARD__RAPID_HH_ //NOLINT
 /****************************************************************************************/
 
 #include "Common.hh"
@@ -40,6 +40,9 @@ using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
 template<typename T>
 concept NonStringRef = !std::convertible_to<T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
 
+/*
+ * Dumbass wrapper.
+ */
 template <typename Allocator = rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator>>
 class rapid_doc
 {
@@ -57,8 +60,10 @@ class rapid_doc
 
       ~rapid_doc() = default;
 
-      DELETE_COPY_CTORS(rapid_doc);
-      DELETE_MOVE_CTORS(rapid_doc);
+      rapid_doc(rapid_doc const &) = delete;
+      rapid_doc &operator=(rapid_doc const &) = delete;
+      rapid_doc(rapid_doc &&) noexcept        = delete;
+      rapid_doc &operator=(rapid_doc &&) noexcept = delete;
 
       rapidjson::Document &doc()   { return doc_; }
       rapidjson::Value    *cur()   { return cur_; }
@@ -108,7 +113,7 @@ class rapid_doc
       template <NonStringRef ...Types>
       void add_member(Types &&...args)
       {
-            cur_->AddMember(args..., al_);
+            cur_->AddMember(std::forward<Types>(args)..., al_);
       }
 
       /*--------------------------------------------------------------------------------*/
@@ -121,7 +126,7 @@ class rapid_doc
       template <NonStringRef T>
       void add_value(T &val)
       {
-            cur_->PushBack(val, al_);
+            cur_->PushBack(std::move(val), al_);
       }
 
       template <NonStringRef T>
@@ -148,7 +153,7 @@ class rapid_doc
       void set_value(rapidjson::Type const ty)
       {
             cur_->PushBack(rapidjson::Value(ty), al_);
-            cur_ = &(*cur_)[cur_->Size() - SIZE_C(1)];
+            cur_ = &(*cur_)[cur_->Size() - 1ULL];
       }
 
       /*--------------------------------------------------------------------------------*/
@@ -172,7 +177,7 @@ class rapid_doc
       {
             cur_->PushBack(rapidjson::Value(ty), al_);
             stack_.push(cur_);
-            cur_ = &(*cur_)[cur_->Size() - SIZE_C(1)];
+            cur_ = &cur_->GetArray()[cur_->Size() - 1ULL];
       }
 
       void pop(size_t n = 1)

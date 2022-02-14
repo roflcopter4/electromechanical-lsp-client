@@ -12,7 +12,7 @@ namespace ipc::lsp::data {
 static constexpr char const initialization_message[] =
 R"({
     "jsonrpc": "2.0",
-    "id": 1,
+    "id": 0,
     "method": "initialize",
     "params": {
          "capabilities": {
@@ -38,6 +38,9 @@ R"({
                      "codeDescriptionSupport": true,
                      "dataSupport": true
                  },
+                 "typeDefinition": {
+                     "linkSupport": true
+                 },
                   "codeLens": {
                      "dynamicRegistration": true
                  }
@@ -57,15 +60,15 @@ R"({
          },
          "processId": %d,
          "rootUri": "%s",
-         "trace": "off"
+         "trace": "verbose"
     }
 })";
 
 
 std::string
-init_msg(std::string const &root)
+init_msg(char const *root)
 {
-      return fmt::sprintf(FMT_STRING(initialization_message), getpid(), root.c_str());
+      return fmt::sprintf(FMT_STRING(initialization_message), getpid(), root);
 }
 
 
@@ -164,5 +167,5 @@ R"({
 
 
 
-} // namespace ipc::lsp::data 
+} // namespace ipc::lsp::data
 } // namespace emlsp

@@ -1,6 +1,6 @@
+#pragma once
 #ifndef HGUARD__IPC__LSP___CONNECTION_HH_
 #define HGUARD__IPC__LSP___CONNECTION_HH_ //NOLINT
-#pragma once
 
 #include "Common.hh"
 #include "ipc/base_connection.hh"
@@ -18,33 +18,26 @@ namespace detail {} // namespace detail
 /**
  * TODO: Documentation
  */
-#if 0
-template <typename ConnectionImpl,
-         typename std::enable_if<std::is_base_of<ipc::detail::base_connection_interface,
-                                                 ConnectionImpl>::value, bool>::type = true>
-template <ipc::ConnectionImplVariant ConnectionImpl>
-#endif
-
 template <typename ConnectionImpl>
 #ifndef __TAG_HIGHLIGHT__
-      requires (ipc::ConnectionImplVariant<ConnectionImpl>)
+      requires (ipc::detail::IsConnectionImplVariant<ConnectionImpl>)
 #endif
-class base_connection : public ipc::base_connection<ConnectionImpl>
+class connection : public ipc::base_connection<ConnectionImpl>
 {
 #ifdef __INTELLISENSE__
       static constexpr ssize_t discard_buffer_size = SSIZE_C(16383);
 #else
       static constexpr ssize_t discard_buffer_size = SSIZE_C(65536);
 #endif
-      using base = ipc::base_connection<ConnectionImpl>;
+      using base_type = ipc::base_connection<ConnectionImpl>;
 
     public:
       using connection_type = ConnectionImpl;
       // using base::connection;
-      using base::pid;
-      using base::raw_read;
-      using base::raw_write;
-      using base::spawn_connection;
+      using base_type::pid;
+      using base_type::raw_read;
+      using base_type::raw_write;
+      using base_type::spawn_connection;
 
     private:
       ND size_t get_content_length()
@@ -56,7 +49,7 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
             size_t  len;
             uint8_t ch;
 
-            (void)raw_read(buf, 16, 0x100); // Discard
+            (void)raw_read(buf, 16, MSG_WAITALL); // Discard
             (void)raw_read(&ch, 1, MSG_WAITALL);
             while (::isdigit(ch)) {
                   *ptr++ = static_cast<char>(ch);
@@ -75,7 +68,7 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
                   }
                   (void)raw_read(&ch, 1, MSG_WAITALL);
                   if (ch != '\n') [[unlikely]]
-                        goto fail;
+                        goto fail; //NOLINT
                   (void)raw_read(buf, 2, MSG_WAITALL);
                   if (::strncmp(buf, "\r\n", 2) == 0) [[likely]]
                         break;
@@ -96,13 +89,13 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
              * 64 bit integer will fit in this buffer along with the format. */
             char buf[60];
             int  buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", len);
-            raw_write(buf, buflen);
+            raw_write(buf, static_cast<size_t>(buflen));
       }
 
     /*------------------------------------------------------------------------------------*/
     public:
-      base_connection() = default;
-      ~base_connection() override = default;
+      connection() = default;
+      ~connection() override = default;
 
       /**
        * \brief Read an rpc message into a buffer contained in a std::string.
@@ -113,7 +106,7 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
             auto msg = std::string(len + 1, '\0');
 
             UNUSED auto const nread = raw_read(msg.data(), len, MSG_WAITALL);
-            assert(nread == len);
+            assert(static_cast<size_t>(nread) == len);
 
             return msg;
       }
@@ -128,7 +121,7 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
             util::resize_vector_hack(msg, len + 1);
 
             UNUSED auto const nread = raw_read(msg.data(), len, MSG_WAITALL);
-            assert(nread == len);
+            assert(static_cast<size_t>(nread) == len);
 
             msg[len] = '\0';
             return msg;
@@ -147,7 +140,7 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
             *buf     = new char[len + 1];
 
             UNUSED auto const nread = raw_read(*buf, len, MSG_WAITALL);
-            assert(nread == len);
+            assert(static_cast<size_t>(nread) == len);
 
             (*buf)[len] = '\0';
             return len;
@@ -210,16 +203,16 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
        */
       size_t discard_message() override
       {
-            ssize_t const len = get_content_length();
-            char          msg[discard_buffer_size];
+            auto const len = static_cast<ssize_t>(get_content_length());
+            char       msg[discard_buffer_size];
 
             for (auto n = len; n > 0; n -= discard_buffer_size) {
                   auto        const toread = std::min(n, discard_buffer_size);
-                  UNUSED auto const nread  = raw_read(msg, toread, MSG_WAITALL);
+                  UNUSED auto const nread  = raw_read(msg, static_cast<size_t>(toread), MSG_WAITALL);
                   assert(nread == toread);
             }
 
-            return len;
+            return static_cast<size_t>(len);
       }
 
       __attribute__((nonnull)) void
@@ -247,9 +240,9 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
             raw_write(msg.data(), msg.size() - SIZE_C(1));
       }
 
-      void write_message(rapidjson::Document &doc)
+      void write_message(rapidjson::Document const &doc)
       {
-            doc.AddMember("jsonrpc", "2.0", doc.GetAllocator());
+            // doc.AddMember("jsonrpc", "2.0", doc.GetAllocator());
             rapidjson::MemoryBuffer ss;
             rapidjson::Writer       writer(ss);
             doc.Accept(writer);
@@ -267,17 +260,12 @@ class base_connection : public ipc::base_connection<ConnectionImpl>
       }
 #endif
 
-      DELETE_COPY_CTORS(base_connection);
-      DEFAULT_MOVE_CTORS(base_connection);
+      DELETE_COPY_CTORS(connection);
+      DEFAULT_MOVE_CTORS(connection);
 };
 
-
-using unix_socket_connection = base_connection<ipc::detail::unix_socket_connection_impl>;
-using pipe_connection        = base_connection<ipc::detail::pipe_connection_impl>;
-#ifdef _WIN32
-using named_pipe_connection  = base_connection<ipc::detail::win32_named_pipe_impl>;
-#endif
-
+using unix_socket_connection = connection<ipc::detail::unix_socket_connection_impl>;
+using pipe_connection        = connection<ipc::detail::pipe_connection_impl>;
 
 /****************************************************************************************/
 } // namespace ipc::lsp
