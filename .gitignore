@@ -39,3 +39,5 @@ MSVC/
 out/
 .vs/
 .cache/
+junk/
+*.bak

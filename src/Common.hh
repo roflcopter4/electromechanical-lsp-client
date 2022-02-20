@@ -3,9 +3,9 @@
 #pragma once
 /****************************************************************************************/
 
-// #define _GLIBCXX_ASSERTIONS 1
-// #define _GLIBCXX_PARALLEL 1
-// #define _GLIBCXX_PARALLEL_ASSERTIONS 1
+#define _GLIBCXX_ASSERTIONS 1
+#define _GLIBCXX_PARALLEL 1
+#define _GLIBCXX_PARALLEL_ASSERTIONS 1
 #undef NDEBUG
 
 #ifdef HAVE_CONFIG_H
@@ -19,6 +19,9 @@
 /*--------------------------------------------------------------------------------------*/
 
 #ifdef __cplusplus
+
+#define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (1<<23)
+// #define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (8)
 
 # include <assert.h>
 # include "pch.hh"

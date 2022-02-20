@@ -1,14 +1,17 @@
 #include "Common.hh"
 #include "util/c_util.h"
 
+#define MINOF(a, b) (((a) < (b)) ? (a) : (b))
+#define MAXOF(a, b) (((a) > (b)) ? (a) : (b))
+
 #ifndef HAVE_ASPRINTF
-#  if !defined __MINGW32__ && !defined __MINGW64__ && defined vsnprintf
-#    undef vsnprintf
-#  endif
+# if !defined __MINGW32__ && !defined __MINGW64__ && defined vsnprintf
+#  undef vsnprintf
+# endif
 
 /*
- * Laziest possible asprintf implementation. But it works, assuming (v)snprintf conforms
- * to C99. Microsoft's current one is supposed to so I won't bother checking.
+ * Laziest possible asprintf implementation. But it works, assuming (v)snprintf
+ * conforms to C99. Microsoft's current one is supposed to so I won't bother checking.
  */
 int
 asprintf(_Notnull_ char **destp,
@@ -71,13 +74,11 @@ my_strerror(errno_t const errval, _Notnull_ char *buf, size_t const buflen)
 
 DIAG_POP()
 
-#define MINOF(a, b) (((a) < (b)) ? (a) : (b))
-#define MAXOF(a, b) (((a) > (b)) ? (a) : (b))
 
 #ifndef HAVE_STRLCPY
 extern size_t emlsp_strlcpy(_Notnull_ char       *restrict dst,
                             _Notnull_ char const *restrict src,
-                            size_t const                   size)
+                                      size_t const         size)
 {
       /* Do it the stupid way. It's, frankly, probably faster anyway. */
       size_t const slen = strlen(src);

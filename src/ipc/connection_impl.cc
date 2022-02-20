@@ -10,6 +10,14 @@
 # define SOCK_CLOEXEC 0
 #endif
 
+#ifdef _WIN32
+# define ERRNO WSAGetLastError()
+# define ERR(n, t) win32::error_exit_wsa(L ## t)
+#else
+# define ERRNO errno
+# define ERR(n, t) err(n, t)
+#endif
+
 #define AUTOC auto const
 
 inline namespace emlsp {
@@ -17,7 +25,258 @@ namespace ipc::detail {
 /****************************************************************************************/
 
 
+static void
+check_executable(char const *exe)
+{
+      return;
+      std::error_code e;
+      auto st = std::filesystem::status(exe, e);
+
+      if (e)
+            throw(std::runtime_error(
+                fmt::format(FC("Cannot execute file {}: {}"), exe, e)));
+      if (!(static_cast<unsigned>(st.permissions()) & 0111U))
+            throw(std::runtime_error(
+                fmt::format(FC("File {} is not executable"), exe)));
+}
+
+/*--------------------------------------------------------------------------------------*/
+
+ssize_t
+pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
+{
+      ssize_t total = 0;
+
+      if (flags & MSG_WAITALL) {
+            ssize_t n;
+            do {
+                  if (read_ == (-1)) [[unlikely]]
+                        throw except::connection_closed();
+                  n = ::read(read_, static_cast<char *>(buf) + total,
+                             static_cast<size_t>(nbytes - total));
+            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+      } else {
+            if (read_ == (-1)) [[unlikely]]
+                  throw except::connection_closed();
+            total = ::read(read_, buf, static_cast<size_t>(nbytes));
+      }
+
+      return static_cast<ssize_t>(total);
+}
+
+ssize_t
+pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+{
+      ssize_t total = 0;
+      ssize_t n;
+
+      do {
+            if (write_ == (-1)) [[unlikely]]
+                  throw except::connection_closed();
+            n = ::write(write_, static_cast<char const *>(buf) + total,
+                        static_cast<size_t>(nbytes - total));
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
+
+void pipe_connection_impl::close()
+{
+      if (read_ > 2)
+            ::close(read_);
+      if (write_ > 2)
+            ::close(write_);
+      read_  = (-1);
+      write_ = (-1);
+}
+
+/****************************************************************************************/
+
+int
+ersatz_socketpair(int const family, int const type, int const protocol, _Notnull_ socket_t fd[2])
+{
+      /* This code is originally from Tor.  Used with permission. */
+      /* ... and then stolen from libevent2, without permission.  */
+
+      /* This socketpair does not work when localhost is down. So
+       * it's really not the same thing at all. But it's close enough
+       * for now, and really, when localhost is down sometimes, we
+       * have other problems too.
+       */
 #ifdef _WIN32
+# define EVERR(e) (WSA##e)
+# define EVUTIL_SOCKET_ERROR() WSAGetLastError()
+#else
+# define EVERR(e) (e)
+# define EVUTIL_SOCKET_ERROR() errno
+#endif
+#define EVUTIL_SET_SOCKET_ERROR(val) (errno = (val))
+
+      socklen_t size;
+      intptr_t  listener;
+      intptr_t  connector   = -1;
+      intptr_t  acceptor    = -1;
+      int       saved_errno = -1;
+      bool      family_test = family != AF_INET6;
+
+#ifdef AF_UNIX
+      family_test = family_test && (family != AF_UNIX);
+#endif
+
+      if (protocol || family_test) {
+            EVUTIL_SET_SOCKET_ERROR(EVERR(EAFNOSUPPORT));
+            return -1;
+      }
+      if (!fd) {
+            EVUTIL_SET_SOCKET_ERROR(EVERR(EINVAL));
+            return -1;
+      }
+
+      listener = static_cast<intptr_t>(socket(AF_INET6, type, 0));
+      if (listener < 0)
+            return -1;
+
+      struct sockaddr_in6 listen_addr  = {};
+      struct sockaddr_in6 connect_addr = {};
+
+      listen_addr.sin6_addr   = IN6ADDR_LOOPBACK_INIT;
+      listen_addr.sin6_port   = 0;
+      listen_addr.sin6_family = AF_INET6;
+
+      if (bind(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&listen_addr), sizeof(listen_addr)) == -1)
+            goto tidy_up_and_fail;
+
+      if (listen(static_cast<socket_t>(listener), 1) == -1)
+            goto tidy_up_and_fail;
+
+      connector = static_cast<intptr_t>(socket(AF_INET6, type, 0));
+      if (connector < 0)
+            goto tidy_up_and_fail;
+
+      /* We want to find out the port number to connect to.  */
+      size = sizeof(connect_addr);
+      if (getsockname(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
+            goto tidy_up_and_fail;
+      if (size != sizeof(connect_addr))
+            goto abort_tidy_up_and_fail;
+
+      if (connect(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr), sizeof(connect_addr)) == -1)
+            goto tidy_up_and_fail;
+
+      size     = sizeof(listen_addr);
+      acceptor = static_cast<intptr_t>(accept(static_cast<socket_t>(listener),
+                                              reinterpret_cast<sockaddr *>(&listen_addr), &size));
+
+      if (acceptor < 0)
+            goto tidy_up_and_fail;
+      if (size != sizeof(listen_addr))
+            goto abort_tidy_up_and_fail;
+
+      /* Now check we are talking to ourself by matching port
+       * and host on the two sockets. */
+      if (getsockname(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
+            goto tidy_up_and_fail;
+
+      if (sizeof(connect_addr) != size ||
+          listen_addr.sin6_family != connect_addr.sin6_family ||
+          listen_addr.sin6_port != connect_addr.sin6_port ||
+          ::memcmp(&listen_addr.sin6_addr, &connect_addr.sin6_addr, sizeof(listen_addr.sin6_addr)) != 0)
+      {
+            goto abort_tidy_up_and_fail;
+      }
+
+      ::util::close_descriptor(listener);
+      fd[0] = static_cast<socket_t>(connector);
+      fd[1] = static_cast<socket_t>(acceptor);
+
+      return 0;
+
+abort_tidy_up_and_fail:
+      saved_errno = EVERR(ECONNABORTED);
+tidy_up_and_fail:
+      if (saved_errno < 0)
+            saved_errno = EVUTIL_SOCKET_ERROR();
+      if (listener != -1)
+            emlsp::util::close_descriptor(listener);
+      if (connector != -1)
+            emlsp::util::close_descriptor(connector);
+      if (acceptor != -1)
+            emlsp::util::close_descriptor(acceptor);
+
+      EVUTIL_SET_SOCKET_ERROR(saved_errno);
+      return -1;
+#undef EVERR
+}
+
+
+socket_t
+fuck_my_ass(char *servername, struct addrinfo *info)
+{
+      char const *server   = servername;
+      char       *servport = strchr(servername, ':');
+      if (!servport)
+            errx(1, "no port identified");
+
+      *servport++ = '\0';
+      socket_t sd = -1;
+
+      struct in_addr   in4_addr{};
+      struct in6_addr  in6_addr{};
+      struct addrinfo  hints{};
+      struct addrinfo *res = nullptr;
+
+      hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
+      hints.ai_socktype = SOCK_STREAM;
+
+      int rc = inet_pton(AF_INET, server, &in4_addr);
+
+      /* valid IPv4 text address? */
+      if (rc == 1) {
+            hints.ai_family = AF_INET;
+            hints.ai_flags |= AI_NUMERICHOST;
+      } else {
+            rc = inet_pton(AF_INET6, server, &in6_addr);
+
+            /* valid IPv6 text address? */
+            if (rc == 1) {
+                  hints.ai_family = AF_INET6;
+                  hints.ai_flags |= AI_NUMERICHOST;
+            }
+      }
+
+      do {
+            rc = getaddrinfo(server, servport, &hints, &res);
+            if (rc != 0) {
+                  warnx("Host not found --> %s", gai_strerror(rc));
+                  if (rc == EAI_FAIL)
+                        ERR(1, "getaddrinfo() failed");
+                  break;
+            }
+
+            sd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+            if (sd == static_cast<socket_t>(-1))
+                  ERR(1, "socket() failed");
+
+            /* TODO Consider actually iterating through the list here? */
+            rc = connect(sd, res->ai_addr, res->ai_addrlen);
+            if (rc < 0)
+                  ERR(1, "connect()");
+            if (info)
+                  memcpy(info, res, sizeof(struct addrinfo));
+      } while (false);
+
+      if (res != nullptr)
+            freeaddrinfo(res);
+
+      return sd;
+}
+
+
+/*======================================================================================*/
+#ifdef _WIN32
+/*======================================================================================*/
+
+
 namespace win32 {
 
 # define READ_FD     0
@@ -209,7 +468,6 @@ start_process_with_socket_wrapper(socket_info *info, int *errval)
 
 } // namespace win32
 
-#endif // defined _WIN32
 
 /****************************************************************************************/
 /* Unix Socket Connection */
@@ -218,13 +476,14 @@ procinfo_t
 unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
       throw_if_initialized(typeid(*this));
+      check_executable(argv[0]);
 
       if (listener_ == static_cast<socket_t>(-1)) {
-            path_     = util::get_temporary_filename("sock.").string();
+            if (path_.empty())
+                  path_ = util::get_temporary_filename(nullptr, ".sock").string();
             listener_ = open_new_socket();
       }
 
-#ifdef _WIN32
       int  errval = 0;
       auto info = win32::socket_info{path_, win32::protect_argv(argc, argv),
                                      listener_, {}, {}, get_err_handle(), {}};
@@ -233,10 +492,10 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
 
       sockaddr_un con_addr = {};
       int         len      = sizeof(con_addr);
-      AUTOC acceptor       = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+      acceptor_            = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
 
-      if (!acceptor || acceptor == static_cast<uintptr_t>(-1))
-            err(1, "accept()");
+      if (!acceptor_ || acceptor_ == static_cast<uintptr_t>(-1))
+            util::win32::error_exit_wsa("accept()");
 
       start_thread.join();
       if (errval != 0)
@@ -246,40 +505,6 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
 
       procinfo_t const *pid_ptr = &info.pid;
 
-#else // Not Windows
-
-      procinfo_t pid;
-      err_fd_ = get_err_handle();
-
-      if ((pid = ::fork()) == 0) {
-            socket_t dsock = connect_to_socket();
-            ::dup2(dsock, STDOUT_FILENO);
-            ::dup2(dsock, STDIN_FILENO);
-            ::close(dsock);
-            assert(argv[0] != nullptr);
-
-            if (err_fd_ > 2) {
-                  ::dup2(err_fd_, 2);
-                  ::close(err_fd_);
-            }
-
-            ::execvp(argv[0], const_cast<char **>(argv));
-            err(1, "exec failed");
-      }
-
-      socket_t connected_sock;
-      {
-            sockaddr_un con_addr{};
-            socklen_t   len = sizeof(con_addr);
-            connected_sock  = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
-            if (connected_sock == (-1))
-                  err(1, "accept");
-      }
-
-      procinfo_t const *pid_ptr = &pid;
-#endif
-
-      acceptor_ = acceptor;
       set_to_initialized();
       return *pid_ptr;
 }
@@ -298,25 +523,19 @@ unix_socket_connection_impl::open_new_socket()
 
       socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
-#ifdef _WIN32
       if (auto const e = ::WSAGetLastError(); e != 0)
-            err(1, "socket(): %d", e);
-#else
-      if (connection_sock == (-1))
-           err(1, "socket");
-      int tmp = ::fcntl(connection_sock, F_GETFL);
-      ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
-#endif
+            util::win32::error_exit_explicit(L"socket()", e);
 
       AUTOC ret = ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
       if (ret == (-1)) {
+            util::win32::error_exit_wsa(L"bind()");
             auto const e = fmt::system_error(errno, "bind() @({}:{})", __FILE__, __LINE__);
             std::cerr << e.what() << std::endl;
             abort();
       }
            // err(1, "bind");
       if (::listen(connection_sock, 0) == (-1))
-           err(1, "listen");
+           util::win32::error_exit_wsa(L"listen");
 
       return connection_sock;
 }
@@ -326,37 +545,32 @@ unix_socket_connection_impl::connect_to_socket()
 {
       socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
-#ifdef _WIN32
       if (auto const e = ::WSAGetLastError(); e != 0)
-            err(1, "socket(): %d", e);
-#else
-      if (data_sock == (-1))
-           err(1, "socket");
-      int tmp = ::fcntl(data_sock, F_GETFL);
-      ::fcntl(data_sock, F_SETFL, tmp | O_CLOEXEC);
-#endif
+            util::win32::error_exit_wsa("socket(): %d", e);
 
       AUTOC ret = ::connect(connector, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
       if (ret == (-1))
-            err(1, "connect");
+            util::win32::error_exit_wsa("connect");
 
       return connector;
 }
 
 /*--------------------------------------------------------------------------------------*/
 
-#ifdef HAVE_SOCKETPAIR
+# ifdef HAVE_SOCKETPAIR
+
+// Maybe someday windows will someday get socketpair()?...
 
 procinfo_t
 socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
       throw_if_initialized(typeid(*this));
+      check_executable(argv[0]);
 
       procinfo_t pid;
       acceptor_ = open_new_socket();
-      err_fd_       = get_err_handle();
+      err_fd_   = get_err_handle();
 
-# ifdef _WIN32 // Maybe someday windows will get socketpair()?...
       auto const cmdline = win32::protect_argv(argc, argv);
       socket_t   dsock   = connect_to_socket();
 
@@ -381,25 +595,6 @@ socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char *
 
       pid = info.pid;
 
-# else // Not Windows
-
-      if ((pid = ::fork()) == 0) {
-            socket_t dsock = connect_to_socket();
-            ::dup2(dsock, STDOUT_FILENO);
-            ::dup2(dsock, STDIN_FILENO);
-            ::close(dsock);
-            assert(argv[0] != nullptr);
-
-            if (err_fd_ > 2) {
-                  ::dup2(err_fd_, 2);
-                  ::close(err_fd_);
-            }
-
-            ::execvp(argv[0], const_cast<char **>(argv));
-            err(1, "exec failed");
-      }
-#endif
-
       set_to_initialized();
       return pid;
 }
@@ -418,16 +613,17 @@ socketpair_connection_impl::connect_to_socket()
       return fds_[1]; /* ugh */
 }
 
-#endif
+# endif
 
 /*--------------------------------------------------------------------------------------*/
 /* Pipe Connection */
 
-#ifdef _WIN32
-
 procinfo_t
 pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 {
+      throw_if_initialized(typeid(*this));
+      check_executable(argv[0]);
+
       int pipefds[2];
       procinfo_t pid{};
 
@@ -451,130 +647,8 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
       return pid;
 }
 
-#else // Not Windows
-
-# define READ_FD  (0)
-# define WRITE_FD (1)
-
-static void
-open_pipe(int fds[2])
-{
-# ifdef HAVE_PIPE2
-      if (::pipe2(fds, O_CLOEXEC) == (-1))
-            err(1, "pipe2()");
-# else
-      int flg;
-      if (::pipe(fds) == (-1))
-            err(1, "pipe()");
-      for (int i = 0; i < 2; ++i) {
-            if ((flg = ::fcntl(fds[i], F_GETFL)) == (-1))
-                  err(3 + i, "fcntl(F_GETFL)");
-            if (::fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
-                  err(5 + i, "fcntl(F_SETFL)");
-      }
-# endif
-# ifdef __linux__ /* Can't do this on the BSDs. */
-      if (::fcntl(fds[0], F_SETPIPE_SZ, 16384) == (-1))
-            err(2, "fcntl(F_SETPIPE_SZ)");
-# endif
-}
-
-procinfo_t
-pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
-{
-      throw_if_initialized(typeid(*this));
-
-      int        fds[2][2];
-      procinfo_t pid;
-
-      err_fd_ = get_err_handle();
-
-      open_pipe(fds[0]);
-      open_pipe(fds[1]);
-
-      if ((pid = fork()) == 0) {
-            if (::dup2(fds[0][READ_FD], STDIN_FILENO) == (-1))
-                  err(1, "dup2() failed\n");
-            if (::dup2(fds[1][WRITE_FD], STDOUT_FILENO) == (-1))
-                  err(1, "dup2() failed\n");
-            if (err_fd_ > 2) {
-                  if (::dup2(err_fd_, STDERR_FILENO) == (-1))
-                        err(1, "dup2() failed\n");
-                  ::close(err_fd_);
-            }
-
-            ::close(fds[0][0]);
-            ::close(fds[0][1]);
-            ::close(fds[1][0]);
-            ::close(fds[1][1]);
-
-            if (::execvp(argv[0], argv) == (-1))
-                  err(1, "exec() failed\n");
-      }
-
-      ::close(fds[0][READ_FD]);
-      ::close(fds[1][WRITE_FD]);
-      if (err_fd_ > 2)
-            ::close(err_fd_);
-
-      write_ = fds[0][WRITE_FD];
-      read_  = fds[1][READ_FD];
-
-      set_to_initialized();
-      return pid;
-}
-
-#endif // ifdef WIN32
-
-void pipe_connection_impl::close()
-{
-      if (read_ > 2)
-            ::close(read_);
-      if (write_ > 2)
-            ::close(write_);
-      read_  = (-1);
-      write_ = (-1);
-}
-
-ssize_t
-pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
-{
-      ssize_t total = 0;
-
-      if (flags & MSG_WAITALL) {
-            ssize_t n;
-            do {
-                  if (read_ == (-1)) [[unlikely]]
-                        throw except::connection_closed();
-                  n = ::read(read_, static_cast<char *>(buf) + total, static_cast<size_t>(nbytes - total));
-            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
-      } else {
-            if (read_ == (-1)) [[unlikely]]
-                  throw except::connection_closed();
-            total = ::read(read_, buf, static_cast<size_t>(nbytes));
-      }
-
-      return static_cast<ssize_t>(total);
-}
-
-ssize_t
-pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
-{
-      ssize_t total = 0;
-      ssize_t n;
-
-      do {
-            if (write_ == (-1)) [[unlikely]]
-                  throw except::connection_closed();
-            n = ::write(write_, static_cast<char const *>(buf) + total, static_cast<size_t>(nbytes - total));
-      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
-
-      return total;
-}
-
 /*--------------------------------------------------------------------------------------*/
 
-#ifdef _WIN32
 # ifdef WIN32_USE_PIPE_IMPL
 
 static void
@@ -627,6 +701,7 @@ procinfo_t
 win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
 {
       throw_if_initialized(typeid(*this));
+      check_executable(argv[0]);
 
       {
             char buf[PATH_MAX + 1];
@@ -716,7 +791,541 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, int const fl
 }
 
 # endif
-#endif
+
+
+/*======================================================================================*/
+/*======================================================================================*/
+#else // !defined _Win32
+/*======================================================================================*/
+/*======================================================================================*/
+
+// using int (*ipc::detail::socket_connection_base_impl::connect_to_socket)
+
+template<typename T>
+static procinfo_t
+unix_spawn_connection_common(T self, int const err_fd, UNUSED size_t const argc, char **argv)
+{
+      // check_executable(argv[0]);
+      pid_t const this_id = getpid();
+      procinfo_t  pid;
+      
+      if ((pid = ::fork()) == 0) {
+            socket_t dsock = self->get_connected_socket();
+            ::dup2(dsock, STDOUT_FILENO);
+            ::dup2(dsock, STDIN_FILENO);
+            ::close(dsock);
+            assert(argv[0] != nullptr);
+
+            if (err_fd > 2) {
+                  ::dup2(err_fd, 2);
+                  ::close(err_fd);
+            }
+
+            ::execvp(argv[0], const_cast<char **>(argv));
+            warnx("execvp() failed");
+            fflush(stderr);
+            kill(this_id, SIGABRT);
+            err_nothrow(1, "aborting");
+      }
+
+      return pid;
+}
+
+
+/****************************************************************************************/
+/* Unix Socket Connection */
+
+procinfo_t
+unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this));
+
+      if (listener_ == static_cast<socket_t>(-1)) {
+            if (path_.empty())
+                  path_ = util::get_temporary_filename(nullptr, ".sock").string();
+            listener_ = open_new_socket();
+      }
+
+      err_fd_ = get_err_handle();
+      procinfo_t pid = unix_spawn_connection_common(this, err_fd_, argc, argv);
+
+      {
+            sockaddr_un con_addr{};
+            socklen_t   len = sizeof(con_addr);
+            acceptor_  = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+            if (acceptor_ == (-1))
+                  err(1, "accept");
+      }
+
+      set_to_initialized();
+      return pid;
+}
+
+socket_t
+unix_socket_connection_impl::open_new_socket()
+{
+      if (path_.length() + 1 > sizeof(addr_.sun_path))
+            throw std::logic_error(
+                fmt::format(FC("The file path \"{}\" (len: {}) is too large to "
+                               "fit into a UNIX socket address (size: {})"),
+                            path_, path_.size()+1, sizeof(addr_.sun_path)));
+
+      memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
+      addr_.sun_family = AF_UNIX;
+
+      socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+      if (connection_sock == (-1))
+           err(1, "socket");
+      int tmp = ::fcntl(connection_sock, F_GETFL);
+      ::fcntl(connection_sock, F_SETFL, tmp | O_CLOEXEC);
+
+      AUTOC ret = ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
+      if (ret == (-1)) {
+           // err(1, "bind");
+            auto const e = fmt::system_error(errno, "bind() @({}:{})", __FILE__, __LINE__);
+            std::cerr << e.what() << std::endl;
+            abort();
+      }
+
+      if (::listen(connection_sock, 0) == (-1))
+           err(1, "listen");
+
+      return connection_sock;
+}
+
+socket_t
+unix_socket_connection_impl::connect_to_socket()
+{
+      socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+      if (connector == (-1))
+           err(1, "socket");
+      int const tmp = ::fcntl(connector, F_GETFL);
+      ::fcntl(connector, F_SETFL, tmp | O_CLOEXEC);
+
+      AUTOC ret =
+          ::connect(connector, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
+      if (ret == (-1))
+            err(1, "connect");
+
+      return connector;
+}
+
+/*--------------------------------------------------------------------------------------*/
+
+# ifdef HAVE_SOCKETPAIR
+
+procinfo_t
+socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
+{
+      using std::filesystem::perms;
+      throw_if_initialized(typeid(*this));
+
+      acceptor_ = open_new_socket();
+      err_fd_   = get_err_handle();
+      procinfo_t pid = unix_spawn_connection_common(this, err_fd_, argc, argv);
+
+      set_to_initialized();
+      return pid;
+}
+
+socket_t
+socketpair_connection_impl::open_new_socket()
+{
+      if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds_) == (-1))
+            err(1, "socketpair()");
+      return fds_[0];
+}
+
+socket_t
+socketpair_connection_impl::connect_to_socket()
+{
+      return fds_[1]; /* ugh */
+}
+
+# endif
+
+
+/*--------------------------------------------------------------------------------------*/
+/* Pipe Connection */
+
+# define READ_FD  (0)
+# define WRITE_FD (1)
+
+static void
+open_pipe(int fds[2])
+{
+# ifdef HAVE_PIPE2
+      if (::pipe2(fds, O_CLOEXEC) == (-1))
+            err(1, "pipe2()");
+# else
+      int flg;
+      if (::pipe(fds) == (-1))
+            err(1, "pipe()");
+      for (int i = 0; i < 2; ++i) {
+            if ((flg = ::fcntl(fds[i], F_GETFL)) == (-1))
+                  err(3 + i, "fcntl(F_GETFL)");
+            if (::fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
+                  err(5 + i, "fcntl(F_SETFL)");
+      }
+# endif
+# ifdef __linux__ /* Can't do this on the BSDs. */
+      if (::fcntl(fds[0], F_SETPIPE_SZ, 16384) == (-1))
+            err(2, "fcntl(F_SETPIPE_SZ)");
+# endif
+}
+
+procinfo_t
+pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
+{
+      throw_if_initialized(typeid(*this));
+      check_executable(argv[0]);
+
+      int        fds[2][2];
+      procinfo_t pid;
+
+      err_fd_ = get_err_handle();
+
+      open_pipe(fds[0]);
+      open_pipe(fds[1]);
+
+      if ((pid = fork()) == 0) {
+            if (::dup2(fds[0][READ_FD], STDIN_FILENO) == (-1))
+                  err(1, "dup2() failed\n");
+            if (::dup2(fds[1][WRITE_FD], STDOUT_FILENO) == (-1))
+                  err(1, "dup2() failed\n");
+            if (err_fd_ > 2) {
+                  if (::dup2(err_fd_, STDERR_FILENO) == (-1))
+                        err(1, "dup2() failed\n");
+                  ::close(err_fd_);
+            }
+
+            ::close(fds[0][0]);
+            ::close(fds[0][1]);
+            ::close(fds[1][0]);
+            ::close(fds[1][1]);
+
+            if (::execvp(argv[0], argv) == (-1))
+                  err(1, "exec() failed\n");
+      }
+
+      ::close(fds[0][READ_FD]);
+      ::close(fds[1][WRITE_FD]);
+      if (err_fd_ > 2)
+            ::close(err_fd_);
+
+      write_ = fds[0][WRITE_FD];
+      read_  = fds[1][READ_FD];
+
+      set_to_initialized();
+      return pid;
+}
+
+/*======================================================================================*/
+#endif // defined _WIN32
+/*======================================================================================*/
+
+
+/*======================================================================================*/
+/* Inet Connection */
+
+
+static int lazy_getsockname(socket_t listener, sockaddr *addr, socklen_t const size)
+{
+      socklen_t size_local = size;
+      int ret  = ::getsockname(listener, addr, &size_local);
+      if (ret != 0 || size != size_local)
+            ERR(1, "getsockname()");
+
+      return 0;
+}
+
+static
+socket_t open_new_inet_socket(sockaddr *addr, socklen_t const size, int const type)
+{
+      socket_t listener = ::socket(type, SOCK_STREAM, 0);
+      if (static_cast<intptr_t>(listener) < 0)
+            ERR(1, "socket()");
+
+      int ret = ::bind(listener, addr, size);
+      if (ret == -1)
+            ERR(1, "bind()");
+
+      ret = ::listen(listener, 1);
+      if (ret == (-1))
+            ERR(1, "listen()");
+
+      /* We want to find out the port number. */
+      // lazy_getsockname(listener, addr, size);
+      return listener;
+}
+
+static socket_t
+connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int type)
+{
+      socket_t connector = ::socket(type, SOCK_STREAM, 0);
+      if (static_cast<intptr_t>(connector) < 0)
+            ERR(1, "socket()");
+
+      int ret = ::connect(connector, reinterpret_cast<sockaddr const *>(addr), size);
+      if (ret == -1)
+            ERR(1, "connect()");
+
+      return connector;
+}
+
+
+/*--------------------------------------------------------------------------------------*/
+/* Either */
+
+
+procinfo_t
+inet_any_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+{
+      connect_to_socket();
+      socklen_t size = addr_length_;
+      acceptor_ = accept(listener_, addr_, &size);
+
+      if (static_cast<intptr_t>(acceptor_) < 0 || size != addr_length_)
+            ERR(1, "accept");
+
+      // fmt::print(stderr, FC("Spawning connection on {:X}\n"), __builtin_bswap32((reinterpret_cast<sockaddr_in *>(addr_))->sin_addr.s_addr));
+      err_fd_ = get_err_handle();
+      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
+      ::util::close_descriptor(connector_);
+      set_to_initialized();
+      return ret;
+}
+
+socket_t
+inet_any_socket_connection_impl::open_new_socket()
+{
+      if (!addr_init_) {
+            addr_length_      = sizeof(sockaddr_in6);
+            type_             = AF_INET6;
+            auto *addr        = (sockaddr_in6 *)calloc(1, addr_length_); // NOLINT
+            addr->sin6_addr   = IN6ADDR_LOOPBACK_INIT;
+            addr->sin6_family = type_; // Default to ipv6 I guess
+            addr->sin6_port   = 0;
+            addr_             = reinterpret_cast<sockaddr *>(addr);
+            addr_init_        = true;
+      }
+
+      listener_ = open_new_inet_socket(addr_, addr_length_, type_);
+
+      memset(addr_, 0, addr_length_);
+      lazy_getsockname(listener_, addr_, addr_length_);
+      addr_init_ = true;
+
+      return listener_;
+}
+
+socket_t
+inet_any_socket_connection_impl::connect_to_socket()
+{
+      if (static_cast<intptr_t>(listener_) > 0) {
+            if (!addr_init_) {
+                  lazy_getsockname(listener_, addr_, addr_length_);
+                  type_      = 0;
+                  addr_init_ = true;
+            }
+            /* else { nothing to do, listener is open and addr_ is set up. } */
+      } else {
+            listener_ = open_new_socket();
+      }
+
+      connector_ = connect_to_inet_socket(addr_, addr_length_, type_);
+      addr_init_ = true;
+      return connector_;
+}
+
+
+void inet_any_socket_connection_impl::assign_addr_from_addrinfo(addrinfo *info)
+{
+      if (addr_)
+            free(addr_); //NOLINT
+      type_ = info->ai_family;
+      addr_length_ = info->ai_addrlen;
+      addr_ = static_cast<sockaddr *>(calloc(1, addr_length_)); //NOLINT
+      memcpy(addr_, info->ai_addr, info->ai_addrlen);
+      addr_init_ = true;
+}
+
+
+int inet_any_socket_connection_impl::resolve(char const *server_name, char const *port)
+{
+      auto *info = ::util::ipc::resolve_addr(server_name, port);
+      if (!info)
+            return (-1);
+      assign_addr_from_addrinfo(info);
+      freeaddrinfo(info);
+      return 0;
+}
+
+
+int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
+{
+#define BAD_ADDRESS(ipver)      \
+      throw std::runtime_error( \
+          fmt::format(FC("Invalid IPv" ipver " address \"{}\""), server_and_port));
+
+      char buf[48];
+      char const *server;
+      char const *port;
+
+      if (server_and_port[0] == '[') {
+            /* IPv6 address, in brackets, hopefully with port. */
+            if (*(server = server_and_port + 1) != '[')
+                  BAD_ADDRESS("6");
+            if (!(port = strchr(server, ']')))
+                  BAD_ADDRESS("6");
+            size_t const size = port - server - 1;
+            if (size > SIZE_C(39) || port[1] != ':' || !isdigit(port[2]))
+                  BAD_ADDRESS("6");
+
+            memcpy(buf, server, size);
+            buf[size] = '\0';
+            server    = buf;
+            port     += 2;
+      } else {
+            port              = strchr(server_and_port, ':');
+            size_t const size = port - server_and_port;
+            memcpy(buf, server_and_port, size);
+            buf[size] = '\0';
+            server    = buf;
+
+            /* Ensure it's valid, and that the colon is the only one in the string in
+             * case we've been given a bare IPv6 address. */
+            if (!port || !isdigit(port[1]) || strchr(port + 1, ':'))
+                  BAD_ADDRESS("4");
+            ++port;
+      }
+
+      return resolve(server, port);
+#undef BAD_ADDRESS
+}
+
+
+/*--------------------------------------------------------------------------------------*/
+/* IPv4 only */
+
+
+procinfo_t
+inet_ipv4_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+{
+      connect_to_socket();
+      socklen_t size = sizeof(addr_);
+      acceptor_ = accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
+
+      if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+            ERR(1, "accept");
+
+      err_fd_ = get_err_handle();
+      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
+      shutdown(listener_, 2);
+      ::util::close_descriptor(connector_);
+      set_to_initialized();
+      return ret;
+}
+
+socket_t
+inet_ipv4_socket_connection_impl::open_new_socket()
+{
+      if (!addr_init_) {
+            memset(&addr_, 0, sizeof(addr_));
+            addr_.sin_addr.s_addr = INADDR_LOOPBACK; //__bswap_constant_32(INADDR_LOOPBACK);
+            addr_.sin_family      = AF_INET;
+            addr_.sin_port        = 0;
+      }
+
+      listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                        sizeof(addr_), AF_INET);
+      memset(&addr_, 0, sizeof(addr_));
+      lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+      addr_init_ = true;
+
+      return listener_;
+}
+
+socket_t
+inet_ipv4_socket_connection_impl::connect_to_socket()
+{
+      if (static_cast<intptr_t>(listener_) > 0) {
+            if (!addr_init_) {
+                  lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_),
+                                   sizeof(addr_));
+                  addr_init_ = true;
+            }
+            /* else { nothing to do, listener is open and addr_ is set up. } */
+      } else {
+            listener_ = open_new_socket();
+      }
+
+      connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                          sizeof(addr_), AF_INET);
+      return connector_;
+}
+
+
+/*--------------------------------------------------------------------------------------*/
+/* IPv6 only */
+
+
+procinfo_t
+inet_ipv6_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+{
+      connect_to_socket();
+      socklen_t size = sizeof(addr_);
+      acceptor_ = accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
+
+      if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+            ERR(1, "accept");
+
+      err_fd_ = get_err_handle();
+      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
+      ::util::close_descriptor(connector_);
+      set_to_initialized();
+      return ret;
+}
+
+socket_t
+inet_ipv6_socket_connection_impl::open_new_socket()
+{
+      if (!addr_init_) {
+            memset(&addr_, 0, sizeof(addr_));
+            addr_.sin6_addr   = IN6ADDR_LOOPBACK_INIT;
+            addr_.sin6_family = AF_INET6;  // Default to ipv6 I guess
+            addr_.sin6_port   = 0;
+      }
+
+      listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                        sizeof(addr_), AF_INET6);
+      memset(&addr_, 0, sizeof(addr_));
+      lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+      addr_init_ = true;
+
+      return listener_;
+}
+
+socket_t
+inet_ipv6_socket_connection_impl::connect_to_socket()
+{
+      if (static_cast<intptr_t>(listener_) > 0) {
+            if (!addr_init_) {
+                  lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_),
+                                   sizeof(addr_));
+                  addr_init_ = true;
+            }
+            /* else { nothing to do, listener is open and addr_ is set up. } */
+      } else {
+            listener_ = open_new_socket();
+      }
+
+      connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                          sizeof(addr_), AF_INET6);
+      return connector_;
+}
 
 
 /****************************************************************************************/

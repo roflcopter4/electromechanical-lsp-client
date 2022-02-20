@@ -46,6 +46,16 @@ class cleanup_c
       std::stack<std::filesystem::path> delete_list_{};
       std::recursive_mutex              mut_{};
 
+      template <typename ...Types>
+      static constexpr void dbg_log(Types ...args)
+      {
+#ifdef NDEBUG
+            (void)args...;
+#else
+            fmt::print(stderr, std::forward<Types>(args)...);
+#endif
+      }
+
     public:
       void push(std::filesystem::path const &path_arg)
       {
@@ -57,7 +67,7 @@ class cleanup_c
             mut_.unlock();
       }
 
-      std::filesystem::path &get_path()
+      std::filesystem::path const &get_path() &
       {
             mut_.lock();
             if (tmp_path_ == "")
@@ -72,13 +82,15 @@ class cleanup_c
             try {
                   while (!delete_list_.empty()) {
                         auto const &value = delete_list_.top();
-#ifndef NDEBUG
-                        fmt::print(stderr, FC("\nRemoving path '{}'\n"), value.string());
-#endif
-                        std::error_code e;
-                        std::filesystem::remove(value, e);
-                        if (e)
-                              fmt::print(stderr, "Failed to remove file '{}': \"{}\"\n", value, e);
+                        dbg_log(FC("\nRemoving path '{}'\n"), value.string());
+
+                        if (exists(value)) {
+                              std::error_code e;
+                              std::filesystem::remove(value, e);
+                              if (e)
+                                    dbg_log(FC("Failed to remove file '{}': \"{}\"\n"),
+                                            value, e);
+                        }
                         delete_list_.pop();
                   }
                   fflush(stderr);
@@ -116,7 +128,7 @@ class cleanup_c
 #endif
       }
 
-      ~cleanup_c()
+      ~cleanup_c() noexcept
       {
             try {
                   do_cleanup();
@@ -208,7 +220,7 @@ get_temporary_filename(char const *prefix, char const *suffix)
 namespace ipc {
 
 socket_t
-open_new_socket(char const *const path)
+open_new_unix_socket(char const *const path)
 {
       struct sockaddr_un addr = {};
       size_t const       len  = util::strlcpy(addr.sun_path, path);
@@ -245,7 +257,7 @@ open_new_socket(char const *const path)
 }
 
 socket_t
-connect_to_socket(sockaddr_un const *addr)
+connect_to_unix_socket(sockaddr_un const *addr)
 {
       auto const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
@@ -270,7 +282,7 @@ connect_to_socket(sockaddr_un const *addr)
 }
 
 socket_t
-connect_to_socket(char const *const path)
+connect_to_unix_socket(char const *const path)
 {
       sockaddr_un  addr{};
       size_t const len = util::strlcpy(addr.sun_path, path);
@@ -282,8 +294,55 @@ connect_to_socket(char const *const path)
                                         "fit into a UNIX socket address (max size: {})"),
                             path, len + 1, sizeof(addr.sun_path)));
 
-      return connect_to_socket(&addr);
+      return connect_to_unix_socket(&addr);
 }
+
+
+addrinfo *
+resolve_addr(char const *server, char const *port)
+{
+#ifdef _WIN32
+# define ERR(n, t) win32::error_exit_wsa(L ## t)
+#else
+# define ERR(n, t) err(n, t)
+#endif
+
+      struct in_addr   in4_addr{};
+      struct in6_addr  in6_addr{};
+      struct addrinfo  hints{};
+      struct addrinfo *res = nullptr;
+
+      hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
+      hints.ai_socktype = SOCK_STREAM;
+
+      int rc = inet_pton(AF_INET, server, &in4_addr);
+
+      /* valid IPv4 text address? */
+      if (rc == 1) {
+            hints.ai_family = AF_INET;
+            hints.ai_flags |= AI_NUMERICHOST;
+      } else {
+            rc = inet_pton(AF_INET6, server, &in6_addr);
+
+            /* valid IPv6 text address? */
+            if (rc == 1) {
+                  hints.ai_family = AF_INET6;
+                  hints.ai_flags |= AI_NUMERICHOST;
+            }
+      }
+
+      rc = getaddrinfo(server, port, &hints, &res);
+      if (rc != 0) {
+            warnx("Host not found for ('%s') and ('%s') --> %s", server, port, gai_strerror(rc));
+            if (rc == EAI_FAIL)
+                  ERR(1, "getaddrinfo() failed");
+      }
+
+      return res;
+
+#undef ERR
+}
+
 
 } // namespace ipc
 
@@ -292,26 +351,28 @@ connect_to_socket(char const *const path)
 extern "C" uint32_t cxx_random_device_get_random_val(void)
       __attribute__((__visibility__("hidden")));
 
-static std::random_device rand_device;
-static std::mt19937       rand_engine_32(rand_device());
-static std::mt19937_64    rand_engine_64(static_cast<uint64_t>(rand_device()) << 32 |
-                                         static_cast<uint64_t>(rand_device()));
 
 extern "C" unsigned
 cxx_random_device_get_random_val(void)
 {
+      static std::random_device rand_device;
       return rand_device();
 }
 
 extern "C" uint32_t
 cxx_random_engine_get_random_val_32(void)
 {
+      static std::mt19937 rand_engine_32(cxx_random_device_get_random_val());
       return rand_engine_32();
 }
 
 extern "C" uint64_t
 cxx_random_engine_get_random_val_64(void)
 {
+      static std::ranlux48 rand_engine_64(
+          (static_cast<uint64_t>(cxx_random_device_get_random_val()) << 32) |
+          static_cast<uint64_t>(cxx_random_device_get_random_val()));
+
       return rand_engine_64();
 }
 
@@ -364,7 +425,6 @@ my_err_throw(UNUSED int const     status,
 {
       int const e = errno;
       std::string buf;
-      ::mtx_lock(&util_c_error_write_mutex);
 
       buf += fmt::format(FC("\033[1;31m" "Exception at:"
                             "\033[0m"    " `{}:{}' - func `{}':\n  "
@@ -388,7 +448,6 @@ my_err_throw(UNUSED int const     status,
       if (print_err)
             buf += fmt::format(FMT_COMPILE("`  (errno {}: `{}')"), e, errstr);
 
-      ::mtx_unlock(&util_c_error_write_mutex);
       throw std::runtime_error(buf);
 }
 
@@ -453,6 +512,14 @@ close_descriptor(SOCKET &fd)
       fd = static_cast<SOCKET>(-1);
 }
 
+void
+close_descriptor(intptr_t &fd)
+{
+      if (static_cast<intptr_t>(fd) > 0)
+            closesocket(fd);
+      fd = static_cast<SOCKET>(-1);
+}
+
 size_t
 available_in_fd(SOCKET const s) noexcept(false)
 {
@@ -463,6 +530,16 @@ available_in_fd(SOCKET const s) noexcept(false)
 
       return value;
 }
+#else
+
+void
+close_descriptor(intptr_t &fd)
+{
+      if (fd > 0)
+            close(static_cast<int>(fd));
+      fd = static_cast<int>(-1);
+}
+
 #endif
 
 void
@@ -474,6 +551,8 @@ close_descriptor(int &fd)
 }
 
 
+/*--------------------------------------------------------------------------------------*/
+
 #define WIN32_ERRMSG "The ioctl() function is not available for non-sockets on this platform."
 
 #if defined _WIN32 && !defined __clang__
@@ -482,7 +561,6 @@ __attribute__((__error__(WIN32_ERRMSG)))
 size_t available_in_fd(UNUSED int const s) noexcept(false)
 {
 #ifdef _WIN32
-      //DeviceIoControl(nullptr, 0, nullptr, 0, nullptr, 0, nullptr, nullptr);
       throw except::not_implemented(P99_PASTE_2(WIN32_ERRMSG, s));
 #else
       int value  = 0;
@@ -495,6 +573,19 @@ size_t available_in_fd(UNUSED int const s) noexcept(false)
 }
 
 #undef WIN32_ERRMSG
+
+
+uintmax_t
+xatoi(char const *const str, const bool strict)
+{
+      char           *endptr;
+      uintmax_t const val = strtoumax(str, &endptr, 0);
+
+      if ((endptr == str) || (strict && *endptr != '\0'))
+            errx(30, "Invalid integer \"%s\".\n", str);
+
+      return val;
+}
 
 
 /****************************************************************************************/

@@ -7,10 +7,13 @@
 
 #include "ipc/base_connection.hh"
 
+
 inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
 
+
+namespace asio = boost::asio;
 
 class base_loop_interface
 {
@@ -41,9 +44,9 @@ class dumb_loop_impl
 
 namespace framework {
 
-class actor;
 
 /* Used to identify the sender and recipient of messages. */
+class actor;
 
 
 /* Base class for all registered message handlers. */
@@ -62,13 +65,13 @@ class message_handler_base
 
 
 /* Base class for a handler for a specific message type. */
-template <typename Message>
+template <class Message>
 class message_handler : public message_handler_base
 {
     public:
-      /* NOTE: This commment was in the original code I "borrowed" this from and I'll
-       *       leave it here to properly shame it. It's... painful...
-       * Handle an incoming message. */
+      /* NOTE: This commment was in the original code I "borrowed" this from and
+       *       I'll leave it here to properly shame it. It's... painful... */
+      /* Handle an incoming message. */
       virtual void handle_message(Message msg, actor *from) = 0;
 
       message_handler()           = default;
@@ -80,7 +83,7 @@ class message_handler : public message_handler_base
 
 
 /* Concrete message handler for a specific message type. */
-template <typename Actor, typename Message>
+template <class Actor, class Message>
 class method_ptr_message_handler : public message_handler<Message>
 {
     public:
@@ -90,11 +93,13 @@ class method_ptr_message_handler : public message_handler<Message>
             actor_(a)
       {}
 
+
       /* Used to determine which message handlers receive an incoming message. */
       ND std::type_info const &message_id() const override
       {
             return typeid(Message);
       }
+
 
       /* Handle an incoming message. */
       void handle_message(Message msg, actor *from) override
@@ -102,11 +107,13 @@ class method_ptr_message_handler : public message_handler<Message>
             (actor_->*function_)(std::move(msg), from);
       }
 
+
       /* Determine whether the message handler represents the specified function. */
       ND bool is_function(void (Actor::*methodp)(Message, actor *)) const
       {
             return methodp == function_;
       }
+
 
     private:
       void (Actor::*function_)(Message, actor *);
@@ -127,13 +134,11 @@ class actor
       virtual ~actor() = default;
 
       /* Obtain the actor's address for use as a message sender or recipient. */
-      actor *address()
-      {
-            return this;
-      }
+      actor *address() { return this; }
+
 
       /* Send a message from one actor to another. */
-      template <typename Message>
+      template <class Message>
       void send(Message msg, actor *from)
       {
             // Execute the message handler in the context of the target's executor.
@@ -145,25 +150,27 @@ class actor
             );
       }
 
+
     protected:
       /* Construct the actor to use the specified executor for all message handlers. */
       explicit actor(asio::any_io_executor const &e) : executor_(e)
       {}
 
+
       /* Register a handler for a specific message type. Duplicates are permitted. */
-      template <typename Actor, typename Message>
+      template <class Actor, class Message>
       void register_handler(void (Actor::*methodp)(Message, actor *))
       {
             using mh_type = method_ptr_message_handler<Actor, Message>;
-            handlers_.emplace_back(
-                std::make_shared<mh_type>(methodp, dynamic_cast<Actor *>(this)));
+            handlers_.emplace_back(std::make_shared<mh_type>(methodp, dynamic_cast<Actor *>(this)));
       }
 
+
       /* Deregister a handler. Removes only the first matching handler. */
-      template <typename Actor, typename Message>
+      template <class Actor, class Message>
       void deregister_handler(void (Actor::*methodp)(Message, actor *))
       {
-            const std::type_info &id = typeid(Message);
+            auto const &id = typeid(Message);
 
             for (auto iter = handlers_.begin(); iter != handlers_.end(); ++iter)
             {
@@ -179,22 +186,24 @@ class actor
             }
       }
 
+
       // Send a message from within a message handler.
-      template <typename Message>
+      template <class Message>
       void tail_send(Message msg, actor *to)
       {
             // Execute the message handler in the context of the target's executor.
             asio::defer(to->executor_,
-                        [to, from = this, msg = std::move(msg)]
+                        [to, from = this, msg = std::move(msg)] () mutable -> void
                         {
-                              to->call_handler(std::move(msg), from);
+                             to->call_handler(std::move(msg), from);
                         }
             );
       }
 
+
     private:
       /* Find the matching message handlers, if any, and call them. */
-      template <typename Message>
+      template <class Message>
       void call_handler(Message msg, actor *from)
       {
             const std::type_info &message_id = typeid(Message);
@@ -207,6 +216,7 @@ class actor
             }
       }
 
+
     public:
       DEFAULT_COPY_CTORS(actor);
       DEFAULT_MOVE_CTORS(actor);
@@ -217,7 +227,7 @@ class actor
 
 
 /* A concrete actor that allows synchronous message retrieval. */
-template <typename Message>
+template <class Message>
 class receiver : public actor
 {
       std::mutex              mutex_;
@@ -230,22 +240,24 @@ class receiver : public actor
             register_handler(&receiver::message_handler);
       }
 
+
       /* Block until a message has been received. */
       Message wait()
       {
-            std::unique_lock<std::mutex> lock(mutex_);
+            auto lock = std::unique_lock<std::mutex>(mutex_);
             condition_.wait(lock, [this] { return !message_queue_.empty(); });
 
-            Message msg(std::move(message_queue_.front()));
+            auto msg = Message(std::move(message_queue_.front()));
             message_queue_.pop_front();
             return msg;
       }
+
 
     private:
       /* Handle a new message by adding it to the queue and waking a waiter. */
       void message_handler(Message msg, UNUSED actor *from)
       {
-            std::lock_guard<std::mutex> lock(mutex_);
+            auto lock = std::lock_guard<std::mutex>{mutex_};
             message_queue_.emplace_back(std::move(msg));
             condition_.notify_one();
       }
@@ -254,11 +266,15 @@ class receiver : public actor
 
 class member : public actor
 {
+      actor *next_{};
+      actor *caller_{};
+
     public:
       explicit member(asio::any_io_executor const &e) : actor(e)
       {
             register_handler(&member::init_handler);
       }
+
 
     private:
       void init_handler(actor *next, actor *from)
@@ -269,6 +285,7 @@ class member : public actor
             register_handler(&member::token_handler);
             deregister_handler(&member::init_handler);
       }
+
 
       void token_handler(int token, UNUSED actor *from)
       {
@@ -282,14 +299,11 @@ class member : public actor
 
             tail_send(msg, to);
       }
-
-      actor *next_{};
-      actor *caller_{};
 };
 
 
-
 } // namespace framework
+
 
 
 /****************************************************************************************/

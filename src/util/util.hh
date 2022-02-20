@@ -48,6 +48,7 @@ ND size_t available_in_fd(SOCKET s) noexcept(false);
 #endif
 
 void      close_descriptor(int &fd);
+void      close_descriptor(intptr_t &fd);
 ND size_t available_in_fd(int s) noexcept(false);
 
 /*--------------------------------------------------------------------------------------*/
@@ -94,9 +95,10 @@ ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2)
 
 namespace ipc {
 
-extern socket_t open_new_socket(char const *path);
-extern socket_t connect_to_socket(char const *path);
-extern socket_t connect_to_socket(sockaddr_un const *addr);
+extern socket_t  open_new_unix_socket(char const *path);
+extern socket_t  connect_to_unix_socket(char const *path);
+extern socket_t  connect_to_unix_socket(sockaddr_un const *addr);
+extern addrinfo *resolve_addr(char const *server, char const *port);
 
 } // namespace ipc
 

@@ -81,6 +81,7 @@ endif()
 ## Library search ##
 #####################################################################################################
 
+# add_subdirectory("contrib/uvw")
 
 list(APPEND CMAKE_MODULE_PATH
      "${CMAKE_SOURCE_DIR}/cmake"
@@ -108,6 +109,7 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package (Threads REQUIRED)
 find_package (Libevent REQUIRED)
+find_package (Boost REQUIRED)
 
 if (MSVC)
 	find_package (pthreads REQUIRED)
@@ -127,6 +129,7 @@ endif()
 if (USE_JEMALLOC)
     find_package (Jemalloc)
 endif()
+
 
 ###############################################################################
 # Symbol and header checks
@@ -214,12 +217,12 @@ if (SANITIZE)
 endif()
 
 set (BASE ${WARNS} ${MARCH_SETTING} ${SANIT}
-          -pipe -fdiagnostics-color=always
-#          -mprefer-vector-width=512
+    -pipe -fdiagnostics-color=always
+    -mprefer-vector-width=512
 )
           
 set (CFLAGS_DEBUG_COMMON
-     -Og -g -UNDEBUG -D_FORTIFY_SOURCE=2
+     -O0 -g -UNDEBUG -D_FORTIFY_SOURCE=2
      -Wextra -Wpedantic -Wformat -U_FORTIFY_SOURCE
 )
 set (CFLAGS_RELWITHDEBINFO_COMMON
@@ -227,7 +230,7 @@ set (CFLAGS_RELWITHDEBINFO_COMMON
      -Wextra -ftree-vectorize -Wextra -U_FORTIFY_SOURCE
 )
 set (CFLAGS_RELEASE_COMMON
-     -Ofast -ftree-vectorize -g3
+     -Ofast -ftree-vectorize -g
      -DNDEBUG -U_FORTIFY_SOURCE
 )
 
@@ -271,33 +274,38 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
         set (LTO_STR -flto=full
-            #         -fwhole-program-vtables
-            #         -fvirtual-function-elimination
+                     -fwhole-program-vtables
+                     -fvirtual-function-elimination
             #         -fsplit-lto-unit
             )
-        #set (LTO_LINK_STR -Wl,--lto-O3 -Wl,--lto-whole-program-visibility ${LTO_STR})
+
+        set (LTO_LINK_STR -Wl,--lto-O3 -Wl,--lto-whole-program-visibility ${LTO_STR})
 
         #set (LTO_STR -flto=full)
-        set (LTO_LINK_STR ${LTO_STR} -g3
-            -Wl,-Xlink=-mllvm:-march=native
-            -Wl,-Xlink=-mllvm:--aggressive-ext-opt
-            -Wl,-Xlink=-mllvm:--extra-vectorizer-passes
-            -Wl,-Xlink=-mllvm:--exhaustive-register-search
-            -Wl,-Xlink=-mllvm:--enable-unsafe-fp-math
-            -Wl,-Xlink=-mllvm:--optimize-regalloc
-            -Wl,-Xlink=-mllvm:--scalar-evolution-use-expensive-range-sharpening
-            -Wl,-Xlink=-mllvm:--slp-max-vf=0
-            -Wl,-Xlink=-mllvm:--slp-vectorize-hor
-            -Wl,-Xlink=-mllvm:--whole-program-visibility
-            -Wl,-Xlink=-mllvm:--x86-indirect-branch-tracking
-            -Wl,-Xlink=-mllvm:--interleave-loops
-            -Wl,-Xlink=-mllvm:--ir-outliner
-            -Wl,-Xlink=-mllvm:--enable-post-misched
-            -Wl,-Xlink=-mllvm:--enable-nontrivial-unswitch
-            -Wl,-Xlink=-mllvm:--enable-nonnull-arg-prop
-        )
+        # set (LTO_LINK_STR ${LTO_STR} -g3
+        #     -Wl,-Xlink=-mllvm:-march=native
+        #     -Wl,-Xlink=-mllvm:--aggressive-ext-opt
+        #     -Wl,-Xlink=-mllvm:--extra-vectorizer-passes
+        #     -Wl,-Xlink=-mllvm:--exhaustive-register-search
+        #     -Wl,-Xlink=-mllvm:--enable-unsafe-fp-math
+        #     -Wl,-Xlink=-mllvm:--optimize-regalloc
+        #     -Wl,-Xlink=-mllvm:--scalar-evolution-use-expensive-range-sharpening
+        #     -Wl,-Xlink=-mllvm:--slp-max-vf=0
+        #     -Wl,-Xlink=-mllvm:--slp-vectorize-hor
+        #     -Wl,-Xlink=-mllvm:--whole-program-visibility
+        #     -Wl,-Xlink=-mllvm:--x86-indirect-branch-tracking
+        #     -Wl,-Xlink=-mllvm:--interleave-loops
+        #     -Wl,-Xlink=-mllvm:--ir-outliner
+        #     -Wl,-Xlink=-mllvm:--enable-post-misched
+        #     -Wl,-Xlink=-mllvm:--enable-nontrivial-unswitch
+        #     -Wl,-Xlink=-mllvm:--enable-nonnull-arg-prop
+        # )
     else()
-        set (LTO_STR -flto=full -fwhole-program-vtables -fvirtual-function-elimination -fsplit-lto-unit)
+        set (LTO_STR -flto=full
+                     -fwhole-program-vtables
+                     #-fvirtual-function-elimination
+                     # -fsplit-lto-unit
+                     -g1 -gdwarf-5)
         set (LTO_LINK_STR -Wl,--lto-whole-program-visibility ${LTO_STR})
     endif()
 
@@ -361,12 +369,12 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
          -Wsuggest-attribute=cold -Wsuggest-attribute=malloc
          -Wattributes -fdiagnostics-show-option
     )
-    set (BASE ${BASE} ${WARNS} -fPIC -fpie -g3 -gdwarf-5)
+    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5)
     set (LTO_STR "-flto -fuse-linker-plugin")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frtti -std=gnu++20")
 
     string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
-        #-rdynamic
+        -rdynamic
         -fuse-ld=bfd -Wl,-O3
         ${LTO_STR}
     )
@@ -439,6 +447,8 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 add_executable(lsp-thing
     src/main.cc
     src/rapid.cc
+    src/sukitup.cc
+    src/dothemsg.cc
 
     src/libevent.cc
     #src/killme.cc
@@ -491,7 +501,7 @@ add_executable(lsp-thing
 )
 
 #if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
-if (NOT MINGW AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+if (TRUE OR ((NOT MINGW) AND (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
    target_precompile_headers(lsp-thing
        PRIVATE
        $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
@@ -508,9 +518,10 @@ set_property(TARGET lsp-thing APPEND PROPERTY COMPILE_FLAGS "${_glib_cflags}")
 set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
              ${CMAKE_CURRENT_BINARY_DIR}
              ${CMAKE_SOURCE_DIR}/src
-             ${CMAKE_SOURCE_DIR}/contrib/asio_trunc
+             # ${CMAKE_SOURCE_DIR}/contrib/asio_trunc
              ${CMAKE_SOURCE_DIR}/contrib/rapidjson/include
              ${CMAKE_SOURCE_DIR}/contrib/uvw/src
+             ${CMAKE_SOURCE_DIR}/contrib/uvw/jpcre2/src
              ${fmt_INCLUDE_DIRECTORIES}
              ${LIBEVENT_INCLUDE_DIRS}
              ${LIBUV_INCLUDE_DIRS}
@@ -564,12 +575,17 @@ if(NOT HAVE_THREADS_H)
                  "${CMAKE_SOURCE_DIR}/contrib/tinycthread/source")
 endif()
 
-#####################################################################################################
+# set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
+#              "${CMAKE_SOURCE_DIR}/contrib/uvw/include")
+
+#----------------------------------------------------------------------------------------------------
 
 target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
 	${LIBEVENT_LIBRARIES}
     Threads::Threads
+    -luv -ltbb
+    # uvw::uvw
     #-levent_core
     #-lunistring
     #-ljsoncpp -ljsonrpccpp-client -ljsonrpccpp-common -ljsonrpccpp-stub -ljsonrpccpp-server
@@ -583,7 +599,7 @@ if (NOT MSVC)
     )
 endif()
 
-#####################################################################################################
+#----------------------------------------------------------------------------------------------------
 
 if (NOT Libevent_FOUND)
     if (MSVC)

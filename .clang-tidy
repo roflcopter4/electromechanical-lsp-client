@@ -1,4 +1,0 @@
-# Checks: '*,-*-braces-around-statements,-*-no-recursion,-*-signed-bitwise,-*DeprecatedOrUnsafeBufferHandling,-*avoid-goto,-*avoid-magic-numbers,-*c++98-compat,-*disabled-macro-expansion,-*else-after-return,-*gnu-statement-expression,-*gnu-zero-variadic-macro-arguments,-*init-variables,-*isolate-declaration,-*no-assembler,-*readability-magic-numbers,-*readability-identifier-length,-*todo*,-android*,-concurrency-mt-unsafe,-llvm-header-guard,-llvmlibc*,-altera-unroll-loops,-altera-struct-pack-align,-altera-id-dependent-backward-branch,-*fuchsia*,-modernize-use-trailing-return-type,-bugprone-easily-swappable-parameters,-bugprone-reserved-identifier,-cert-dcl37-c,-cert-dcl51-cpp'
-
-
-#InheritParentConfig: true

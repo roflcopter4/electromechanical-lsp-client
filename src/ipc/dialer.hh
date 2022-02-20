@@ -44,7 +44,7 @@ class basic_dialer
 
       virtual void close() = 0;
 
-    protected:
+      // FIXME This should probably be protected
       ND ConnectionImpl       &impl()       & { return impl_; }
       ND ConnectionImpl const &impl() const & { return impl_; }
 };
@@ -175,7 +175,6 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
     public:
       using this_type = std_streams_dialer;
       using base_type = basic_dialer<connection_impl_type>;
-      using base_type::connection_impl_type;
 
       std_streams_dialer()
       {
@@ -198,11 +197,14 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 
 namespace dialers {
 
-using spawn_unix_socket = ipc::spawn_dialer<ipc::detail::unix_socket_connection_impl>;
-using spawn_pipe        = ipc::spawn_dialer<ipc::detail::pipe_connection_impl>;
-using std_streams       = ipc::std_streams_dialer;
+using pipe             = ipc::spawn_dialer<ipc::detail::pipe_connection_impl>;
+using std_streams      = ipc::std_streams_dialer;
+using inet_ipv4_socket = ipc::spawn_dialer<ipc::detail::inet_ipv4_socket_connection_impl>;
+using inet_ipv6_socket = ipc::spawn_dialer<ipc::detail::inet_ipv6_socket_connection_impl>;
+using inet_socket      = ipc::spawn_dialer<ipc::detail::inet_any_socket_connection_impl>;
+using unix_socket      = ipc::spawn_dialer<ipc::detail::unix_socket_connection_impl>;
 #ifdef HAVE_SOCKETPAIR
-using spawn_socketpair  = ipc::spawn_dialer<ipc::detail::socketpair_connection_impl>;
+using socketpair       = ipc::spawn_dialer<ipc::detail::socketpair_connection_impl>;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using spawn_win32_named_pipe  = ipc::spawn_dialer<ipc::detail::win32_named_pipe_impl>;
@@ -214,4 +216,4 @@ using spawn_win32_named_pipe  = ipc::spawn_dialer<ipc::detail::win32_named_pipe_
 /****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp
-#endif // connection.hh
+#endif // dialer.hh

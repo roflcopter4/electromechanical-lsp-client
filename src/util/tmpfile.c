@@ -83,7 +83,7 @@ braindead_tempname(_Notnull_   char       *restrict const buf,
             *ptr = '\0';
       } while (file_exists(buf));
 
-      return ptr - buf - SIZE_C(1);
+      return ptr - buf;
 }
 
 static char *

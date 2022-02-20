@@ -12,29 +12,22 @@ inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
 
-#define TEMPLATE_BS_FULL typename ConnectionType, typename MsgType, typename UserDataType = void *
-#define TEMPLATE_BS      typename ConnectionType, typename MsgType, typename UserDataType
-#define TEMPLATE_TYPE_BS ConnectionType, MsgType, UserDataType
-#define TEMPLATE_ALIAS_BS \
-      using connection_type = ConnectionType; \
-      using message_type    = MsgType; \
-      using user_data_type  = UserDataType
-#define TEMPLATE_BASE_ALIAS_BS \
-      using connection_type = typename base_type::connection_type; \
-      using message_type    = typename base_type::message_type; \
-      using user_data_type  = typename base_type::user_data_type
 
-/*======================================================================================*/
-
-template <typename LoopVariant, TEMPLATE_BS_FULL>
-      REQUIRES (IsLoopVariant<LoopVariant>)
+template <class LoopVariant, class ConnectionType,
+          class MsgType, class UserDataType = void *>
+REQUIRES(IsLoopVariant<LoopVariant>)
 class base_loop_template
 {
+      using this_type = base_loop_template<LoopVariant, ConnectionType,
+                                           MsgType, UserDataType>;
+
     public:
-      using this_type    = base_loop_template<LoopVariant, TEMPLATE_TYPE_BS>;
-      using client_type  = base_client<LoopVariant, TEMPLATE_TYPE_BS>;
-      using loop_variant = LoopVariant;
-      TEMPLATE_ALIAS_BS;
+      using client_type     = base_client<LoopVariant, ConnectionType,
+                                          MsgType, UserDataType>;
+      using connection_type = ConnectionType;
+      using loop_variant    = LoopVariant;
+      using message_type    = MsgType;
+      using user_data_type  = UserDataType;
 
       friend client_type;
 
@@ -48,22 +41,26 @@ class base_loop_template
       {}
 };
 
-template <typename LoopVariant, TEMPLATE_BS_FULL>
-class base_loop : public base_loop_template<LoopVariant, TEMPLATE_TYPE_BS>
+template <class LoopVariant, class ConnectionType,
+          class MsgType, class UserDataType = void *>
+class base_loop
+    : public base_loop_template<LoopVariant, ConnectionType, MsgType, UserDataType>
 {};
+
 
 /*--------------------------------------------------------------------------------------*/
 
-template <typename ConnectionType, typename MsgType, typename UserDataType>
-class base_loop<loops::libevent, TEMPLATE_TYPE_BS>
-    : public base_loop_template<loops::libevent, TEMPLATE_TYPE_BS>
+
+template <class ConnectionType, class MsgType, class UserDataType>
+class base_loop<loops::libevent, ConnectionType, MsgType, UserDataType>
+    : public base_loop_template<loops::libevent, ConnectionType, MsgType, UserDataType>
 {
     public:
       using loop_variant = loops::libevent;
 
     private:
-      using this_type   = base_loop<loop_variant, TEMPLATE_TYPE_BS>;
-      using base_type   = base_loop_template<loop_variant, TEMPLATE_TYPE_BS>;
+      using this_type   = base_loop<loop_variant, ConnectionType, MsgType, UserDataType>;
+      using base_type   = base_loop_template<loop_variant, ConnectionType, MsgType, UserDataType>;
       using client_type = typename base_type::client_type;
 
       using base_type::client_;
@@ -76,15 +73,14 @@ class base_loop<loops::libevent, TEMPLATE_TYPE_BS>
       std::atomic_flag start_flag_ = {};
 
     public:
-      TEMPLATE_BASE_ALIAS_BS;
+      using connection_type = typename base_type::connection_type;
+      using message_type    = typename base_type::message_type;
+      using user_data_type  = typename base_type::user_data_type;
 
       explicit base_loop(client_type *client) : base_type(client)
       {
             event_config *cfg = ::event_config_new();
             ::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
-#ifdef _WIN32
-            ::event_config_set_flag(cfg, EVENT_BASE_FLAG_STARTUP_IOCP);
-#endif
             base = ::event_base_new_with_config(cfg);
             ::event_config_free(cfg);
       }
@@ -92,20 +88,20 @@ class base_loop<loops::libevent, TEMPLATE_TYPE_BS>
       ~base_loop()
       {
             ::event_base_free(base);
-            base     = nullptr;
-            started_ = false;
+            this->base     = nullptr;
+            this->started_ = false;
       }
 
       void start(event_callback_fn const cb)
       {
-            thrd_    = std::thread{startup_wrapper, this, cb};
-            started_ = true;
+            this->thrd_    = std::thread{startup_wrapper, this, cb};
+            this->started_ = true;
       }
 
       void loopbreak()
       {
             ::event_base_loopbreak(base);
-            thrd_.join();
+            this->thrd_.join();
       }
 
     private:
@@ -141,13 +137,16 @@ class base_loop<loops::libevent, TEMPLATE_TYPE_BS>
             if (start_flag_.test_and_set())
                   return;
 
-            event *rd_handle = ::event_new(base, client_->raw_descriptor(), EV_READ|EV_PERSIST, cb, this);
+            event *rd_handle = ::event_new(base, this->client_->raw_descriptor(),
+                                           EV_READ | EV_PERSIST, cb, this);
             ::event_add(rd_handle, &tv);
 
             for (;;) {
                   uint64_t const n = iter.fetch_add(1);
-                  fmt::print(FMT_COMPILE("\033[1;35mHERE IN {}, iter number {}\033[0m\n"),
+                  fflush(stderr);
+                  fmt::print(stderr, FC("\033[1;35mHERE IN {}, iter number {}\033[0m\n"),
                              FUNCTION_NAME, n);
+                  fflush(stderr);
 
                   if (::event_base_loop(base, 0) == 1) [[unlikely]] {
                         fmt::print(stderr, "\033[1;31mERROR: No registered events!\033[0m\n");
@@ -164,30 +163,34 @@ class base_loop<loops::libevent, TEMPLATE_TYPE_BS>
       DEFAULT_MOVE_CTORS(base_loop);
 };
 
+
 /*--------------------------------------------------------------------------------------*/
 
+
 // TODO
-template <TEMPLATE_BS>
-      REQUIRES ((false))
-class base_loop<loops::asio, TEMPLATE_TYPE_BS>
-      : public base_loop_template<loops::asio, TEMPLATE_TYPE_BS>
+template <class ConnectionType, class MsgType, class UserDataType>
+      REQUIRES((false))
+class base_loop<loops::asio, ConnectionType, MsgType, UserDataType>
+    : public base_loop_template<loops::asio, ConnectionType, MsgType, UserDataType>
 {
 };
 
+
 /*--------------------------------------------------------------------------------------*/
 
+
 // FIXME: BROKEN!
-template <TEMPLATE_BS>
-      REQUIRES ((false))
-class base_loop<loops::libuv, TEMPLATE_TYPE_BS>
-      : public base_loop_template<loops::libuv, TEMPLATE_TYPE_BS>
+template <class ConnectionType, class MsgType, class UserDataType>
+      REQUIRES((false))
+class base_loop<loops::libuv, ConnectionType, MsgType, UserDataType>
+    : public base_loop_template<loops::libuv, ConnectionType, MsgType, UserDataType>
 {
     public:
       using loop_variant = loops::libuv;
 
     private:
-      using this_type   = base_loop<loop_variant, TEMPLATE_TYPE_BS>;
-      using base_type   = base_loop_template<loop_variant, TEMPLATE_TYPE_BS>;
+      using this_type   = base_loop<loop_variant, ConnectionType, MsgType, UserDataType>;
+      using base_type   = base_loop_template<loop_variant, ConnectionType, MsgType, UserDataType>;
       using client_type = typename base_type::client_type;
       using base_type::client_;
       using base_type::thrd_;
@@ -198,7 +201,9 @@ class base_loop<loops::libuv, TEMPLATE_TYPE_BS>
       using base_type::started_;
 
     public:
-      TEMPLATE_BASE_ALIAS_BS;
+      using connection_type = typename base_type ::connection_type;
+      using message_type    = typename base_type ::message_type;
+      using user_data_type  = typename base_type ::user_data_type;
 
       uv_loop_t   loop_handle{};
       uv_poll_t   poll_handle{};
@@ -289,12 +294,12 @@ class base_loop<loops::libuv, TEMPLATE_TYPE_BS>
 
             // uv_run(&loop_handle, UV_RUN_DEFAULT);
             // thrd_ = std::thread{uv_run, &loop_handle, UV_RUN_DEFAULT};
-            started_ = true;
+            this->started_ = true;
       }
 
       void stop()
       {
-            stop_uv_handles(client_);
+            stop_uv_handles(this->client_);
             // pthread_kill(thrd_.native_handle(), SIGUSR1);
             // thrd_.join();
 #if 0
@@ -338,7 +343,7 @@ class base_loop<loops::libuv, TEMPLATE_TYPE_BS>
 
 
 #if 0
-template <typename ConnectionType, typename MsgType>
+template <class ConnectionType, class MsgType>
 class basic_event_loop
 {
       using this_type = basic_event_loop<ConnectionType, MsgType>;

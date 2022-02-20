@@ -3,6 +3,7 @@
 #include "charconv.hh"
 
 #include <unistr.h>
+
 #undef uint8_t
 #undef uint16_t
 #undef uint32_t
@@ -20,7 +21,7 @@ NORETURN static void
 conversion_error(errno_t const e, int const from, int const to)
 {
       char errbuf[128];
-      auto eptr = my_strerror(e, errbuf, 128);
+      auto const *eptr = my_strerror(e, errbuf, 128);
 
       /* This ought to be evaluated to a constant string at compile time. */
       throw std::runtime_error(
@@ -196,17 +197,19 @@ char8_to_wide(char8_t const *ws, size_t const len)
 #if defined WCHAR_IS_U16
       using uint_type = uint16_t;
       static constexpr int numbits = 16;
+      auto const func = &::u8_to_u16;
 #elif defined WCHAR_IS_U32
       using uint_type = uint32_t;
-      static constexpr int numbits = 32:
+      static constexpr int numbits = 32;
+      auto const func = &::u8_to_u32;
 #endif
 
       std::wstring str;
       size_t      resultlen = len + SIZE_C(1);
       str.reserve(resultlen);
 
-      AUTOC *result = u8_to_u16(reinterpret_cast<uint8_t const *>(ws), len,
-                                reinterpret_cast<uint_type *>(str.data()), &resultlen);
+      AUTOC *result = func(reinterpret_cast<uint8_t const *>(ws), len,
+                           reinterpret_cast<uint_type *>(str.data()), &resultlen);
       if (!result)
             conversion_error(errno, 8, numbits);
 
@@ -265,114 +268,116 @@ char32_to_wide(char32_t const *ws, size_t const len)
 
 
 /****************************************************************************************/
+/* charconv is the wrapper for all this junk */
+/****************************************************************************************/
 
 
 /*--------------------------------------------------------------------------------------*/
 /* The fundemental types: char and wchar_t. */
 
 template <> std::string
-charconv<char, wchar_t>(wchar_t const *orig, size_t const codepoints)
+charconv<char, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
-      return detail::char16_to_char(reinterpret_cast<char16_t const *>(orig), codepoints);
+      return detail::char16_to_char(reinterpret_cast<char16_t const *>(orig), length);
 #else
-      return detail::char32_to_char(reinterpret_cast<char32_t const *>(orig), codepoints);
+      return detail::char32_to_char(reinterpret_cast<char32_t const *>(orig), length);
 #endif
 }
 
 template <> std::wstring
-charconv<wchar_t, char>(char const *orig, size_t const codepoints)
+charconv<wchar_t, char>(char const *orig, size_t const length)
 {
-      return detail::char8_to_wide(reinterpret_cast<char8_t const *>(orig), codepoints);
+      return detail::char8_to_wide(reinterpret_cast<char8_t const *>(orig), length);
 }
 
 /*--------------------------------------------------------------------------------------*/
 /* Conversions to and from char (excluding wchar_t). */
 
 template <> std::string
-charconv<char, char8_t>(char8_t const *orig, size_t const codepoints)
+charconv<char, char8_t>(char8_t const *orig, size_t const length)
 {
-      return std::string{reinterpret_cast<char const *>(orig), codepoints};
+      return std::string{reinterpret_cast<char const *>(orig), length};
 }
 
 template <> std::string
-charconv<char, char16_t>(char16_t const *orig, size_t const codepoints)
+charconv<char, char16_t>(char16_t const *orig, size_t const length)
 {
-      return detail::char16_to_char(orig, codepoints);
+      return detail::char16_to_char(orig, length);
 }
 
 template <> std::string
-charconv<char, char32_t>(char32_t const *orig, size_t const codepoints)
+charconv<char, char32_t>(char32_t const *orig, size_t const length)
 {
-      return detail::char32_to_char(orig, codepoints);
+      return detail::char32_to_char(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char>(char const *orig, size_t const codepoints)
+charconv<char8_t, char>(char const *orig, size_t const length)
 {
-      return std::u8string{reinterpret_cast<char8_t const *>(orig), codepoints};
+      return std::u8string{reinterpret_cast<char8_t const *>(orig), length};
 }
 
 template <> std::u16string
-charconv<char16_t, char>(char const *orig, size_t const codepoints)
+charconv<char16_t, char>(char const *orig, size_t const length)
 {
-      return detail::char8_to_char16(reinterpret_cast<char8_t const *>(orig), codepoints);
+      return detail::char8_to_char16(reinterpret_cast<char8_t const *>(orig), length);
 }
 
 template <> std::u32string
-charconv<char32_t, char>(char const *orig, size_t const codepoints)
+charconv<char32_t, char>(char const *orig, size_t const length)
 {
-      return detail::char8_to_char32(reinterpret_cast<char8_t const *>(orig), codepoints);
+      return detail::char8_to_char32(reinterpret_cast<char8_t const *>(orig), length);
 }
 
 /*--------------------------------------------------------------------------------------*/
 /* Conversions to and from wchar_t (excluding char). */
 
 template <> std::wstring
-charconv<wchar_t, char8_t>(char8_t const *orig, size_t const codepoints)
+charconv<wchar_t, char8_t>(char8_t const *orig, size_t const length)
 {
-      return detail::char8_to_wide(orig, codepoints);
+      return detail::char8_to_wide(orig, length);
 }
 
 template <> std::wstring
-charconv<wchar_t, char16_t>(char16_t const *orig, size_t const codepoints)
+charconv<wchar_t, char16_t>(char16_t const *orig, size_t const length)
 {
-      return detail::char16_to_wide(orig, codepoints);
+      return detail::char16_to_wide(orig, length);
 }
 
 template <> std::wstring
-charconv<wchar_t, char32_t>(char32_t const *orig, size_t const codepoints)
+charconv<wchar_t, char32_t>(char32_t const *orig, size_t const length)
 {
-      return detail::char32_to_wide(orig, codepoints);
+      return detail::char32_to_wide(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, wchar_t>(wchar_t const *orig, size_t const codepoints)
+charconv<char8_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
-      return detail::char16_to_char8(reinterpret_cast<char16_t const *>(orig), codepoints);
+      return detail::char16_to_char8(reinterpret_cast<char16_t const *>(orig), length);
 #else
-      return detail::char32_to_char8(reinterpret_cast<char32_t const *>(orig), codepoints);
+      return detail::char32_to_char8(reinterpret_cast<char32_t const *>(orig), length);
 #endif
 }
 
 template <> std::u16string
-charconv<char16_t, wchar_t>(wchar_t const *orig, size_t const codepoints)
+charconv<char16_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
-      return std::u16string{reinterpret_cast<char16_t const *>(orig), codepoints};
+      return std::u16string{reinterpret_cast<char16_t const *>(orig), length};
 #else
-      return detail::char32_to_char16(reinterpret_cast<char32_t const *>(orig), codepoints);
+      return detail::char32_to_char16(reinterpret_cast<char32_t const *>(orig), length);
 #endif
 }
 
 template <> std::u32string
-charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const codepoints)
+charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
-      return detail::char16_to_char32(reinterpret_cast<char16_t const *>(orig), codepoints);
+      return detail::char16_to_char32(reinterpret_cast<char16_t const *>(orig), length);
 #else
-      return std::u32string{reinterpret_cast<char32_t const *>(orig), codepoints};
+      return std::u32string{reinterpret_cast<char32_t const *>(orig), length};
 #endif
 }
 
@@ -380,72 +385,72 @@ charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const codepoints)
 /* The rest. */
 
 template <> std::u16string
-charconv<char16_t, char8_t>(char8_t const *orig, size_t const codepoints)
+charconv<char16_t, char8_t>(char8_t const *orig, size_t const length)
 {
-      return detail::char8_to_char16(orig, codepoints);
+      return detail::char8_to_char16(orig, length);
 }
 
 template <> std::u32string
-charconv<char32_t, char8_t>(char8_t const *orig, size_t const codepoints)
+charconv<char32_t, char8_t>(char8_t const *orig, size_t const length)
 {
-      return detail::char8_to_char32(orig, codepoints);
+      return detail::char8_to_char32(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char16_t>(char16_t const *orig, size_t const codepoints)
+charconv<char8_t, char16_t>(char16_t const *orig, size_t const length)
 {
-      return detail::char16_to_char8(orig, codepoints);
+      return detail::char16_to_char8(orig, length);
 }
 
 template <> std::u32string
-charconv<char32_t, char16_t>(char16_t const *orig, size_t const codepoints)
+charconv<char32_t, char16_t>(char16_t const *orig, size_t const length)
 {
-      return detail::char16_to_char32(orig, codepoints);
+      return detail::char16_to_char32(orig, length);
 }
 
 template <> std::u16string
-charconv<char16_t, char32_t>(char32_t const *orig, size_t const codepoints)
+charconv<char16_t, char32_t>(char32_t const *orig, size_t const length)
 {
-      return detail::char32_to_char16(orig, codepoints);
+      return detail::char32_to_char16(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char32_t>(char32_t const *orig, size_t const codepoints)
+charconv<char8_t, char32_t>(char32_t const *orig, size_t const length)
 {
-      return detail::char32_to_char8(orig, codepoints);
+      return detail::char32_to_char8(orig, length);
 }
 
 /*--------------------------------------------------------------------------------------*/
 /* What the hell; why not. */
 
 template <> std::string
-charconv<char, char>(char const *orig, size_t const codepoints)
+charconv<char, char>(char const *orig, size_t const length)
 {
-      return std::string{orig, codepoints};
+      return std::string{orig, length};
 }
 
 template <> std::wstring
-charconv<wchar_t, wchar_t>(wchar_t const *orig, size_t const codepoints)
+charconv<wchar_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
-      return std::wstring{orig, codepoints};
+      return std::wstring{orig, length};
 }
 
 template <> std::u8string
-charconv<char8_t, char8_t>(char8_t const *orig, size_t const codepoints)
+charconv<char8_t, char8_t>(char8_t const *orig, size_t const length)
 {
-      return std::u8string{orig, codepoints};
+      return std::u8string{orig, length};
 }
 
 template <> std::u16string
-charconv<char16_t, char16_t>(char16_t const *orig, size_t const codepoints)
+charconv<char16_t, char16_t>(char16_t const *orig, size_t const length)
 {
-      return std::u16string{orig, codepoints};
+      return std::u16string{orig, length};
 }
 
 template <> std::u32string
-charconv<char32_t, char32_t>(char32_t const *orig, size_t const codepoints)
+charconv<char32_t, char32_t>(char32_t const *orig, size_t const length)
 {
-      return std::u32string{orig, codepoints};
+      return std::u32string{orig, length};
 }
 
 

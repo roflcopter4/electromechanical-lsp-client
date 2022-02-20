@@ -11,6 +11,7 @@
 #include <event2/listener.h>
 #include <event2/thread.h>
 
+#include <uv.h>
 
 #ifdef timespec
 #  undef timespec
@@ -202,6 +203,7 @@ read_cb_2(UNUSED socket_t sock, short const flags, void *userdata) // NOLINT(goo
       }
 }
 
+/*--------------------------------------------------------------------------------------*/
 
 NOINLINE void
 testing02(std::filesystem::path const &fname)
@@ -326,11 +328,14 @@ write_msg(std::unique_ptr<T> const &conn, ipc::json::rapid_doc<> &wrap)
 }
 
 
+/*--------------------------------------------------------------------------------------*/
+
+
 NOINLINE void
 testing03(std::filesystem::path const &fname)
 {
-      using conn_type = ipc::connections::spawn_default;
-      //using conn_type = ipc::connections::spawn_pipe;
+      //using conn_type = ipc::connections::spawn_default;
+      using conn_type = ipc::connections::pipe;
       //using conn_type = ipc::connections::spawn_win32_named_pipe;
 
       //AUTOC fname_uri = /*"file://"s +*/ fix_backslashes(fname.string());
@@ -385,67 +390,165 @@ testing03(std::filesystem::path const &fname)
       std::this_thread::sleep_for(100ms);
       dispose_msg<conn_type>(con);
       dispose_msg<conn_type>(con);
-      fflush(stderr);
+      (void)fflush(stderr);
       fmt::print(stderr, FC("Finished waiting!\n"));
-      fflush(stderr);
 }
 
-static void how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::spawn_unix_socket> const &client);
+/*--------------------------------------------------------------------------------------*/
+
+static void how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::unix_socket> const &client);
 
 NOINLINE void
-testing04(std::filesystem::path const &fname)
+testing04()
 {
-      constexpr auto fname_uri = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32\\src\\libevent.cc)"sv;
-      constexpr auto proj_path = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32)"sv;
+      using conn_type = ipc::connections::inet_socket;
 
-      event_enable_debug_mode();
-      evthread_enable_lock_debugging();
-      event_enable_debug_logging(EVENT_DBG_ALL);
-      evthread_use_windows_threads();
-      //evthread_use_pthreads();
+      // constexpr auto fname_uri = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32\\src\\libevent.cc)"sv;
+      // constexpr auto proj_path = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32)"sv;
+
+      UNUSED static constexpr auto fname_uri = R"(file://home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
+      UNUSED static constexpr auto proj_path = R"(file://home/bml/files/Projects/sigh-elm)"sv;
+      UNUSED static constexpr auto raw_fname = R"(/home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
+
+      // event_enable_debug_mode();
+      // evthread_enable_lock_debugging();
+      // event_enable_debug_logging(EVENT_DBG_ALL);
+      // evthread_use_windows_threads();
+      evthread_use_pthreads();
+
       event_base *base;
-      auto con = ipc::connections::spawn_unix_socket::new_unique();
+      auto        con = conn_type::new_unique();
+      con->impl().resolve("127.0.0.1:59231");
+
       //con->set_stderr_fd ( GetStdHandle(STD_OUTPUT_HANDLE));
-      con->spawn_connection_l(R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
-                              "--pch-storage=memory", "--log=verbose", "--clang-tidy");
+      // con->spawn_connection_l(R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
+      //                         "--pch-storage=memory", "--log=verbose", "--clang-tidy");
+
+      con->spawn_connection_l("clangd", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--sync");
 
 
       {
-            //event_config *cfg = ::event_config_new();
-            //::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
+            event_config *cfg = ::event_config_new();
+            ::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
 #ifdef _WIN32
             //::event_config_set_flag(cfg, EVENT_BASE_FLAG_STARTUP_IOCP);
 #endif
-            //base = ::event_base_new_with_config(cfg);
-            base = ::event_base_new();
+            base = ::event_base_new_with_config(cfg);
             if (!base)
-                  util::win32::error_exit(L"Who fucking knows");
-            //::event_config_free(cfg);
+                  err(1, "who knows");
+            ::event_config_free(cfg);
       }
 
       bufferevent *evb = bufferevent_socket_new(base, con->raw_descriptor(), BEV_OPT_THREADSAFE);
       assert(evb != nullptr);
-      bufferevent_enable(evb, EV_READ | EV_WRITE);
 
+      ::bufferevent_setcb(
+          evb,
+          [](UNUSED bufferevent *bufev, UNUSED void *data) {
+                fmt::print(stderr, FC("Read callback called?\n"));
+                (void)fflush(stderr);
+          },
+          [](UNUSED bufferevent *bufev, UNUSED void *data) {
+                fmt::print(stderr, FC("Write callback called?\n"));
+                (void)fflush(stderr);
+          },
+          // [](UNUSED bufferevent *, UNUSED short [>NOLINT(google-runtime-int)<], UNUSED void *) {},
+          nullptr,
+          nullptr);
+
+
+      void *(*loop_routine)(void *) = {[] (void *arg) -> void *
       {
-            //AUTOC init = ipc::lsp::data::init_msg(("file:/"s + fix_backslashes(fname.parent_path().parent_path().string())).c_str());
-            AUTOC init = ipc::lsp::data::init_msg(fname_uri.data());
-            char buf[60];
-            auto buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", init.size());
+            auto *evbuf  = static_cast<bufferevent *>(arg);
+            auto *evbase = ::bufferevent_get_base(evbuf);
 
-            bufferevent_write(evb, buf, buflen);
-            bufferevent_write(evb, init.data(), init.size());
-            bufferevent_flush(evb, EV_WRITE, BEV_FLUSH);
+            for (;;) {
+                  static std::atomic_uint64_t iter = UINT64_C(0);
+                  ::bufferevent_enable(evbuf, EV_READ | EV_WRITE);
 
+                  uint64_t const n = iter.fetch_add(1);
+                  fmt::print(stderr, FC("\033[1;35mHERE IN '{}`, iter number {}\033[0m\n"), FUNCTION_NAME, n);
+
+                  ::event_base_loop(evbase, 0);
+                  std::this_thread::sleep_for(10ms);
+                  //if (::event_base_loop(evbase, 0) == 1) [[unlikely]] {
+                  //      fmt::print(stderr, "\033[1;31mERROR: No registered events!\033[0m\n");
+                  //      break;
+                  //}
+                  if (::event_base_got_break(evbase)) [[unlikely]] {
+                        fmt::print(stderr, "\033[1;33mBreaking from the loop...\033[0m\n");
+                        break;
+                  }
+            }
+
+            ::pthread_exit(nullptr);
+      }};
+
+      pthread_t thrd;
+      ::pthread_create(&thrd, nullptr, loop_routine, evb);
+
+      auto const dispose = [evb]() {
             constexpr auto slptm = 2500ms;
             std::this_thread::sleep_for(slptm);
             std::string rd;
             rd.reserve(65536);
-            buflen = bufferevent_read(evb, rd.data(), rd.max_size());
+            size_t const buflen = bufferevent_read(evb, rd.data(), rd.max_size());
             util::resize_string_hack(rd, buflen);
 
-            fmt::print(stderr, FC("\n\nRead {} bytes <<_EOF_\n{}\n_EOF_\n\n"), buflen, rd);
+            fmt::print(stderr, FC("\n\n\033[0;33mRead {} bytes <<_EOF_\n{}\n_EOF_\033[0m\n\n"), buflen, rd);
+      };
+      auto const writemsg = [evb](ipc::json::rapid_doc<> & wrap) {
+            rapidjson::MemoryBuffer ss;
+            rapidjson::Writer       writer(ss);
+            wrap.doc().Accept(writer);
+
+            char  buf[60];
+            AUTOC buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", ss.GetSize());
+
+            (void)fflush(stderr);
+            fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}{}\033[1;33m\n_eof_\033[0m\n"),
+                        ss.GetSize() + buflen, std::string_view(buf, buflen),
+                        std::string_view{ss.GetBuffer(), ss.GetSize()});
+            (void)fflush(stderr);
+            ::bufferevent_write(evb, buf, buflen);
+            ::bufferevent_write(evb, ss.GetBuffer(), ss.GetSize());
+            ::bufferevent_flush(evb, EV_WRITE, BEV_FLUSH);
+      };
+
+      {
+            //AUTOC init = ipc::lsp::data::init_msg(("file:/"s + fix_backslashes(fname.parent_path().parent_path().string())).c_str());
+
+            AUTOC init = ipc::lsp::data::init_msg(fname_uri.data());
+            char buf[60];
+            auto buflen = static_cast<size_t>(::sprintf(buf, "Content-Length: %zu\r\n\r\n", init.size()));
+
+            ::bufferevent_write(evb, buf, buflen);
+            ::bufferevent_write(evb, init.data(), init.size());
+            ::bufferevent_flush(evb, EV_WRITE, BEV_FLUSH);
+
+            dispose();
       }
+      {
+            AUTOC contentvec = util::slurp_file(raw_fname);
+            ipc::json::rapid_doc wrap;
+            wrap.add_member("jsonrpc", "2.0");
+            wrap.add_member("method", "textDocument/didOpen");
+            wrap.set_member("params");
+            wrap.set_member("textDocument");
+            wrap.add_member("uri",  rapidjson::Value ( fname_uri.data(),  static_cast<rapidjson::SizeType>(fname_uri.size()) ) );
+            wrap.add_member("text", rapidjson::Value { contentvec.data(), static_cast<rapidjson::SizeType>(contentvec.size() - SIZE_C(1)) } );
+            wrap.add_member("version", 1);
+            wrap.add_member("languageId", "cpp");
+
+            writemsg(wrap);
+            dispose();
+      }
+
+      ::event_base_loopbreak(base);
+      ::pthread_join(thrd, nullptr);
+      ::bufferevent_disable(evb, EV_READ|EV_WRITE);
+      ::bufferevent_free(evb);
+      ::event_base_free(base);
 }
 
 
@@ -456,7 +559,7 @@ dumb_callback(UNUSED evutil_socket_t sock, short const flags, void *userdata) //
 }
 
 static void
-how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::spawn_unix_socket> const &client)
+how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::unix_socket> const &client)
 {
       static constexpr timeval tv = {.tv_sec = 0, .tv_usec = 100'000} /* 1/10 seconds */;
       static std::atomic_uint64_t iter = UINT64_C(0);
@@ -483,10 +586,87 @@ how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::spawn_unix
 
 /****************************************************************************************/
 
+
 namespace util {
 
-static int
-ersatz_socketpair(int family, int type, int protocol, _Notnull_ socket_t fd[2]);
+extern socket_t fuck_my_ass(char *servername);
+extern int socketpair       (int family, int type, int protocol, _Notnull_ socket_t fd[2]);
+extern int ersatz_socketpair(int family, int type, int protocol, _Notnull_ socket_t fd[2]);
+
+
+socket_t fuck_my_ass(char *servername)
+{
+      char const *server   = servername;
+      char       *servport = strchr(servername, ':');
+      if (!servport)
+            errx(1, "no port identified");
+      *servport++ = '\0';
+
+      socket_t sd = -1;
+      int      rc;
+
+      struct in6_addr  serveraddr = {};
+      struct addrinfo  hints      = {};
+      struct addrinfo *res        = nullptr;
+
+      do {
+            memset(&serveraddr, 0, sizeof(serveraddr));
+            memset(&hints, 0, sizeof(hints));
+            hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
+            hints.ai_family   = AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+
+            rc = inet_pton(AF_INET, server, &serveraddr);
+
+            /* valid IPv4 text address? */
+            if (rc == 1) {
+                  hints.ai_family = AF_INET;
+                  hints.ai_flags |= AI_NUMERICHOST;
+            } else {
+                  rc = inet_pton(AF_INET, server, &serveraddr);
+
+                  /* valid IPv6 text address? */
+                  if (rc == 1) {
+                        hints.ai_family = AF_INET6;
+                        hints.ai_flags |= AI_NUMERICHOST;
+                  }
+            }
+
+            rc = getaddrinfo(server, servport, &hints, &res);
+            if (rc != 0) {
+                  warnx("Host not found --> %s", gai_strerror(rc));
+                  if (rc == EAI_FAIL)
+                        err(1, "getaddrinfo() failed");
+                  break;
+            }
+
+            sd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+            if (sd == static_cast<socket_t>(-1)) {
+                  err(1, "socket() failed");
+                  // err(1, "connect() %s", gai_strerror(WSAGetLastError()));
+                  break;
+            }
+
+            rc = connect(sd, res->ai_addr, res->ai_addrlen);
+            if (rc < 0) {
+                  /*****************************************************************/
+                  /* Note: the res is a linked list of addresses found for server. */
+                  /* If the connect() fails to the first one, subsequent addresses */
+                  /* (if any) in the list can be tried if required.               */
+                  /*****************************************************************/
+                  // err(1, "connect() %s", gai_strerror(WSAGetLastError()));
+                  err(1, "connect()");
+                  break;
+            }
+      } while (false);
+
+
+      if (res != nullptr)
+            freeaddrinfo(res);
+      return sd;
+}
+
+
 
 
 int
@@ -496,129 +676,216 @@ socketpair(int const          family,
            _Notnull_ socket_t fd[2])
 {
 #ifdef HAVE_SOCKETPAIR
-	return ::socketpair(family, type, protocol, fd);
+      return ::socketpair(family, type, protocol, fd);
 #elif defined _WIN32
-	return ersatz_socketpair(family, type, protocol, fd);
+      return ersatz_socketpair(family, type, protocol, fd);
 #else
-# error "Impossible error"
+#error "Impossible error"
 #endif
 }
 
 
-static int
-ersatz_socketpair(int const          family,
-                  int const          type,
-                  int const          protocol,
-                  _Notnull_ socket_t fd[2])
+int
+ersatz_socketpair(int const family, int const type, int const protocol, _Notnull_ socket_t fd[2])
 {
-	/* This code is originally from Tor.  Used with permission. */
-        /* ... and then stolen from libevent2, without permission.  */
+      /* This code is originally from Tor.  Used with permission. */
+      /* ... and then stolen from libevent2, without permission.  */
 
-	/* This socketpair does not work when localhost is down. So
-	 * it's really not the same thing at all. But it's close enough
-	 * for now, and really, when localhost is down sometimes, we
-	 * have other problems too.
-	 */
+      /* This socketpair does not work when localhost is down. So
+       * it's really not the same thing at all. But it's close enough
+       * for now, and really, when localhost is down sometimes, we
+       * have other problems too.
+       */
 #ifdef _WIN32
-# define ERR(e) WSA##e
+#define ERR(e) WSA##e
 #else
-# define ERR(e) e
+#define ERR(e) e
 #endif
-	struct sockaddr_in listen_addr;
-	struct sockaddr_in connect_addr;
 
-        socklen_t size;
-	intptr_t  listener;
-        intptr_t  connector   = -1;
-        intptr_t  acceptor    = -1;
-        int       saved_errno = -1;
-        bool      family_test = family != AF_INET;
+      socklen_t size;
+      intptr_t  listener;
+      intptr_t  connector   = -1;
+      intptr_t  acceptor    = -1;
+      int       saved_errno = -1;
+      bool      family_test = family != AF_INET6;
 
 #ifdef AF_UNIX
-	family_test = family_test && (family != AF_UNIX);
+      family_test = family_test && (family != AF_UNIX);
 #endif
-	if (protocol || family_test) {
-		EVUTIL_SET_SOCKET_ERROR(ERR(EAFNOSUPPORT));
-		return -1;
-	}
-	if (!fd) {
-		EVUTIL_SET_SOCKET_ERROR(ERR(EINVAL));
-		return -1;
-	}
 
-	listener = static_cast<intptr_t>(socket(AF_INET, type, 0));
-	if (listener < 0)
-		return -1;
+      if (protocol || family_test) {
+            EVUTIL_SET_SOCKET_ERROR(ERR(EAFNOSUPPORT));
+            return -1;
+      }
+      if (!fd) {
+            EVUTIL_SET_SOCKET_ERROR(ERR(EINVAL));
+            return -1;
+      }
 
-	memset(&listen_addr, 0, sizeof(listen_addr));
-        listen_addr.sin_family      = AF_INET;
-        listen_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        listen_addr.sin_port        = 0; /* kernel chooses port. */
+      listener = static_cast<intptr_t>(socket(AF_INET6, type, 0));
+      if (listener < 0)
+            return -1;
 
-	if (bind(listener, reinterpret_cast<sockaddr *>(&listen_addr), sizeof(listen_addr)) == -1)
-		goto tidy_up_and_fail;
-	if (listen(listener, 1) == -1)
-		goto tidy_up_and_fail;
+      struct sockaddr_in6 listen_addr  = {};
+      struct sockaddr_in6 connect_addr = {};
 
-	connector = static_cast<intptr_t>(socket(AF_INET, type, 0));
-	if (connector < 0)
-		goto tidy_up_and_fail;
+      listen_addr.sin6_addr   = IN6ADDR_LOOPBACK_INIT;
+      listen_addr.sin6_port   = 0;
+      listen_addr.sin6_family = AF_INET6;
 
-	memset(&connect_addr, 0, sizeof(connect_addr));
 
-	/* We want to find out the port number to connect to.  */
-	size = sizeof(connect_addr);
-	if (getsockname(listener, reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
-		goto tidy_up_and_fail;
-	if (size != sizeof (connect_addr))
-		goto abort_tidy_up_and_fail;
-	if (connect(connector, reinterpret_cast<sockaddr *>(&connect_addr), sizeof(connect_addr)) == -1)
-		goto tidy_up_and_fail;
+      if (bind(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&listen_addr),
+               sizeof(listen_addr)) == -1)
+            goto tidy_up_and_fail;
 
-	size     = sizeof(listen_addr);
-	acceptor = static_cast<intptr_t>(accept(listener, reinterpret_cast<sockaddr *>(&listen_addr), &size));
+      if (listen(static_cast<socket_t>(listener), 1) == -1)
+            goto tidy_up_and_fail;
 
-	if (acceptor < 0)
-		goto tidy_up_and_fail;
-	if (size != sizeof(listen_addr))
-		goto abort_tidy_up_and_fail;
+      connector = static_cast<intptr_t>(socket(AF_INET6, type, 0));
+      if (connector < 0)
+            goto tidy_up_and_fail;
 
-	/* Now check we are talking to ourself by matching port
-         * and host on the two sockets.	 */
-	if (getsockname(connector, reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
-		goto tidy_up_and_fail;
-        if (size != sizeof(connect_addr) ||
-            listen_addr.sin_family != connect_addr.sin_family ||
-            listen_addr.sin_addr.s_addr != connect_addr.sin_addr.s_addr ||
-            listen_addr.sin_port != connect_addr.sin_port)
-	{
-		goto abort_tidy_up_and_fail;
-        }
+      /* We want to find out the port number to connect to.  */
+      size = sizeof(connect_addr);
+      if (getsockname(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&connect_addr),
+                      &size) == -1)
+            goto tidy_up_and_fail;
+      if (size != sizeof(connect_addr))
+            goto abort_tidy_up_and_fail;
 
-	closesocket(listener);
-	fd[0] = connector;
-	fd[1] = acceptor;
+      if (connect(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr),
+                  sizeof(connect_addr)) == -1)
+            goto tidy_up_and_fail;
 
-	return 0;
+      size     = sizeof(listen_addr);
+      acceptor = static_cast<intptr_t>(accept(static_cast<socket_t>(listener),
+                                              reinterpret_cast<sockaddr *>(&listen_addr), &size));
 
- abort_tidy_up_and_fail:
-	saved_errno = ERR(ECONNABORTED);
- tidy_up_and_fail:
-	if (saved_errno < 0)
-		saved_errno = EVUTIL_SOCKET_ERROR();
-	if (listener != -1)
-		closesocket(listener);
-	if (connector != -1)
-		closesocket(connector);
-	if (acceptor != -1)
-		closesocket(acceptor);
+      if (acceptor < 0)
+            goto tidy_up_and_fail;
+      if (size != sizeof(listen_addr))
+            goto abort_tidy_up_and_fail;
 
-	EVUTIL_SET_SOCKET_ERROR(saved_errno);
-	return -1;
+      /* Now check we are talking to ourself by matching port
+       * and host on the two sockets. */
+      if (getsockname(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr),
+                      &size) == -1)
+            goto tidy_up_and_fail;
+
+      if (sizeof(connect_addr) != size || listen_addr.sin6_family != connect_addr.sin6_family ||
+          listen_addr.sin6_port != connect_addr.sin6_port ||
+          ::memcmp(&listen_addr.sin6_addr, &connect_addr.sin6_addr,
+                   sizeof(listen_addr.sin6_addr)) != 0) {
+            goto abort_tidy_up_and_fail;
+      }
+
+      ::util::close_descriptor(listener);
+      fd[0] = static_cast<socket_t>(connector);
+      fd[1] = static_cast<socket_t>(acceptor);
+
+      return 0;
+
+abort_tidy_up_and_fail:
+      saved_errno = ERR(ECONNABORTED);
+tidy_up_and_fail:
+      if (saved_errno < 0)
+            saved_errno = EVUTIL_SOCKET_ERROR();
+      if (listener != -1)
+            ::util::close_descriptor(listener);
+      if (connector != -1)
+            ::util::close_descriptor(connector);
+      if (acceptor != -1)
+            ::util::close_descriptor(acceptor);
+
+      EVUTIL_SET_SOCKET_ERROR(saved_errno);
+      return -1;
 #undef ERR
 }
 
 } // namespace util
+
+
+/*--------------------------------------------------------------------------------------*/
+
+#define ASSERT_THROW(expr) ((expr) ? errx(1, "Assertion failed \"%s\"", #expr) : ((void)0))
+
+static void *stupid_wrapper(void *varg)
+{
+      // auto *handle = static_cast<uvw::TCPHandle *>(varg);
+
+      // handle->write((char *)SLS("Hello there moran\n"));
+
+      pthread_exit(nullptr);
+}
+
+NOINLINE void testing05()
+{
+      // auto loop = uvw::Loop::getDefault();
+      // // auto other = uvw::Loop::create();
+      // auto listener  = loop->resource<uvw::TCPHandle>();
+      // auto connector = loop->resource<uvw::TCPHandle>();
+      // auto acceptor = loop->resource<uvw::TCPHandle>();
+      // listener->init();
+      // connector->init();
+      // acceptor->init();
+      // listener->bind<uvw::IPv6>("127.0.0.1", 50101U);
+      // listener->listen();
+      // connector->connect<uvw::IPv4>("127.0.0.1", 50101U);
+      // listener->accept(*acceptor);
+
+      ASSERT_THROW(evthread_use_pthreads());
+
+      auto loop = std::make_unique<uv_loop_t>();
+      uv_loop_init(loop.get());
+
+      // loop->run<uvw::Loop::Mode::ONCE>();
+
+      // fmt::print(stderr, FC("{} - {} - {}\n"), listener->fd(), connector->fd(), acceptor->fd());
+
+      // std::thread thrd{[&connector](){
+      //       connector->read();
+      //       // other->run<uvw::Loop::Mode::ONCE>();
+      // }};
+
+      // pthread_t tid;
+      // pthread_create(&tid, nullptr, stupid_wrapper, connector.get());
+
+      // acceptor->read();
+      // pthread_join(tid, nullptr);
+
+      int     fds[2];
+      ssize_t ret;
+#if 0
+      auto *loop  = event_base_new();
+      auto *evdns = evdns_base_new(loop, 1);
+
+      ret = evdns_base_nameserver_ip_add(evdns, "127.0.0.1:55000");
+      assert(ret == 0);
+
+      struct sockaddr_in addr{};
+
+      ret = evdns_base_get_nameserver_addr(evdns, 0, reinterpret_cast<struct sockaddr *>(&addr), sizeof addr);
+      fmt::print(stderr, "Ret is {}\n", ret);
+#endif
+
+      ret = util::ersatz_socketpair(AF_INET6, SOCK_STREAM, 0, fds);
+
+
+#if 0
+      assert(ret == 0);
+      ret = send(fds[0], SLS("hello"), 0);
+      assert(ret > 0);
+      ret = recv(fds[1], buf, 64, 0);
+      assert(ret > 0);
+
+      fmt::print(stderr, FC("{} - {} - {}\n"), fds[0], fds[1], std::string_view{buf, static_cast<size_t>(ret)});
+
+      close(fds[0]);
+      close(fds[1]);
+#endif
+}
+
+
 
 
 /****************************************************************************************/

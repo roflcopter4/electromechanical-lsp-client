@@ -41,7 +41,7 @@ my_err_throw(int           status,
              CSTR_RESTRICT func,
              FORMAT_STR    format,
              ...)
-      ATTRIBUTE_PRINTF(6, 7) __attribute__((__nonnull__(6)));
+      __attribute__((__nonnull__(6)));
 
 
 } // namespace util

@@ -205,19 +205,19 @@ template <typename DialerVariant>
       REQUIRES (IsDialerVariant<DialerVariant>)
 class basic_connection : public DialerVariant
 {
-      typedef int const    cint;
-      typedef size_t const csize_t;
+      using cint    = const int;
+      using csize_t = const size_t;
 
       using this_type = basic_connection<DialerVariant>;
       using base_type = DialerVariant;
-      using base_type::impl;
-
-      basic_connection() = default;
 
     public:
       using dialer_type          = DialerVariant;
       using connection_impl_type = typename dialer_type::connection_impl_type;
+      // FIXME This should probably be private
+      using base_type::impl;
 
+      basic_connection()           = default;
       ~basic_connection() override = default;
 
       DELETE_COPY_CTORS(basic_connection);
@@ -241,19 +241,23 @@ class basic_connection : public DialerVariant
       ssize_t raw_write(std::string_view const &buf, cint flags) { return raw_write(buf.data(), buf.size(), flags); }
 
       ND auto raw_descriptor() const { return this->impl().fd(); }
+      ND auto available()      const { return this->impl().available(); }
 };
 
 
 namespace connections {
 
-using spawn_unix_socket = basic_connection<dialers::spawn_unix_socket>;
-using spawn_pipe        = basic_connection<dialers::spawn_pipe>;
-using std_streams       = basic_connection<dialers::std_streams>;
+using pipe             = basic_connection<dialers::pipe>;
+using std_streams      = basic_connection<dialers::std_streams>;
+using unix_socket      = basic_connection<dialers::unix_socket>;
+using inet_ipv4_socket = basic_connection<dialers::inet_ipv4_socket>;
+using inet_ipv6_socket = basic_connection<dialers::inet_ipv6_socket>;
+using inet_socket      = basic_connection<dialers::inet_socket>;
 #ifdef HAVE_SOCKETPAIR
-using spawn_socketpair  = basic_connection<dialers::spawn_socketpair>;
-using spawn_default     = spawn_socketpair;
+using socketpair       = basic_connection<dialers::socketpair>;
+using Default          = socketpair;
 #else
-using spawn_default = spawn_unix_socket;
+using Default          = unix_socket;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using spawn_win32_named_pipe  = basic_connection<dialers::spawn_win32_named_pipe>;
@@ -262,7 +266,12 @@ using spawn_win32_named_pipe  = basic_connection<dialers::spawn_win32_named_pipe
 } // namespace connections
 
 
+template <typename T>
+concept IsBasicConnectionVariant =
+    std::derived_from<T, basic_connection<typename T::dialer_type>>;
+
+
 /****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp
-#endif // connection.hh
+#endif // base_connection.hh

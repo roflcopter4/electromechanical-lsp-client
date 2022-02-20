@@ -4,47 +4,13 @@
 #define HGUARD__IPC__CONNECTION_IMPL_HH_ //NOLINT
 
 #include "Common.hh"
-#include "util/exceptions.hh"
+#include "ipc/misc.hh"
 
 #define WIN32_USE_PIPE_IMPL
 
 inline namespace emlsp {
-namespace ipc {
+namespace ipc::detail {
 /****************************************************************************************/
-
-
-namespace except {
-
-class connection_closed final : public std::runtime_error
-{
-      std::string text_;
-      connection_closed(std::string const &message, char const *function)
-          : std::runtime_error("Connection closed")
-      {
-            text_ = message + " : "s + function;
-      }
-      connection_closed(char const *message, char const *function)
-          : connection_closed(std::string(message), function)
-      {}
-    public:
-      connection_closed() : connection_closed("Connection closed"s, FUNCTION_NAME)
-      {}
-      explicit connection_closed(char const *message)
-          : connection_closed(message, FUNCTION_NAME)
-      {}
-      explicit connection_closed(std::string const &message)
-          : connection_closed(message, FUNCTION_NAME)
-      {}
-      ND char const *what() const noexcept override { return text_.c_str(); }
-};
-
-} // namespace except
-
-
-/****************************************************************************************/
-
-
-namespace detail {
 
 #ifdef _WIN32
 using procinfo_t = PROCESS_INFORMATION;
@@ -52,7 +18,12 @@ using procinfo_t = PROCESS_INFORMATION;
 using procinfo_t = pid_t;
 #endif
 
-/*--------------------------------------------------------------------------------------*/
+/****************************************************************************************/
+/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃  ┌───────────────────────────────────────────────┐                               ┃
+   ┃  │Base interface for an automatic ipc connection.│                               ┃
+   ┃  └───────────────────────────────────────────────┘                               ┃
+   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
 template <typename DescriptorType>
 class base_connection_interface
@@ -68,16 +39,20 @@ class base_connection_interface
     public:
       using descriptor_type = DescriptorType;
 
+    private:
+      bool initialized_   = false;
+      bool open_listener_ = true;
+
     protected:
-      enum class sink_type {
+      enum class sink_type : uint8_t {
             DEFAULT,
             DEVNULL,
             FILENAME,
             FD
       } err_sink_type_ = sink_type::DEFAULT;
 
-      std::string         fname_  = {};
       err_descriptor_type err_fd_ = invalidate_err_handle();
+      std::string         fname_  = {};
 
 #ifdef _WIN32
       static constexpr char dev_null[] = "NUL";
@@ -86,9 +61,6 @@ class base_connection_interface
 #endif
       static constexpr int default_read_flags  = MSG_WAITALL;
       static constexpr int default_write_flags = 0;
-
-    private:
-      bool initialized_ = false;
 
     public:
       base_connection_interface() = default;
@@ -104,10 +76,10 @@ class base_connection_interface
       operator=(base_connection_interface &&) noexcept = default;
 
       base_connection_interface(base_connection_interface &&other) noexcept
-          : err_sink_type_ (other.err_sink_type_)
-          , fname_ (std::move(other.fname_))
+          : initialized_ (other.initialized_)
+          , err_sink_type_ (other.err_sink_type_)
           , err_fd_ (other.err_fd_)
-          , initialized_ (other.initialized_)
+          , fname_ (std::move(other.fname_))
       {
             other.err_sink_type_ = sink_type::DEFAULT;
             other.err_fd_        = invalidate_err_handle();
@@ -139,6 +111,8 @@ class base_connection_interface
             err_sink_type_ = sink_type::FILENAME;
       }
 
+      void should_open_listener(bool const val) { open_listener_ = val; }
+
       virtual ssize_t read(void *buf, ssize_t nbytes)        { return read (buf, nbytes, default_read_flags); }
       virtual ssize_t write(void const *buf, ssize_t nbytes) { return write(buf, nbytes, default_write_flags); }
 
@@ -154,6 +128,7 @@ class base_connection_interface
 
     protected:
       ND err_descriptor_type get_err_handle();
+      ND bool should_open_listener() const { return open_listener_; }
 
       void set_to_initialized() { initialized_ = true; }
 
@@ -168,11 +143,18 @@ class base_connection_interface
       }
 };
 
+
 template <typename T>
 concept IsConnectionImplVariant =
     std::derived_from<T, detail::base_connection_interface<typename T::descriptor_type>>;
 
-/*--------------------------------------------------------------------------------------*/
+
+/****************************************************************************************/
+/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃  ┌──────────────────────────────────────────────────┐                            ┃
+   ┃  │Derivative interface for socket based connections.│                            ┃
+   ┃  └──────────────────────────────────────────────────┘                            ┃
+   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
 template <typename AddrType>
 class socket_connection_base_impl : public base_connection_interface<socket_t>
@@ -187,14 +169,14 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
       bool should_close_listener_ = true;
 
     protected:
-      socket_t listener_ = static_cast<socket_t>(-1);
-      socket_t acceptor_ = static_cast<socket_t>(-1);
-      AddrType addr_     = {};
-
-      virtual socket_t open_new_socket()   = 0;
-      virtual socket_t connect_to_socket() = 0;
+      socket_t listener_  = static_cast<socket_t>(-1);
+      socket_t connector_ = static_cast<socket_t>(-1);
+      socket_t acceptor_  = static_cast<socket_t>(-1);
+      AddrType addr_      = {};
 
     public:
+      using addr_type = AddrType;
+
       socket_connection_base_impl() = default;
       explicit socket_connection_base_impl(socket_t const sock)
             : acceptor_(sock)
@@ -205,25 +187,25 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
             close();
       }
 
-      virtual void set_listener(socket_t sock, AddrType const &addr) = 0;
-      bool        &should_close_listnener() &       { return should_close_listener_; }
-      bool const  &should_close_listnener() const & { return should_close_listener_; }
-
       DELETE_COPY_CTORS(socket_connection_base_impl);
       socket_connection_base_impl &
       operator=(socket_connection_base_impl &&) noexcept = default;
 
       socket_connection_base_impl(socket_connection_base_impl &&other) noexcept
-          : base_type(std::move(other)),
-            listener_(other.listener_),
-            acceptor_(other.acceptor_),
-            addr_(std::move(other.addr_))
+          : base_type (std::move(other)),
+            listener_ (other.listener_),
+            acceptor_ (other.acceptor_),
+            addr_ (std::move(other.addr_))
       {
             other.listener_ = static_cast<socket_t>(-1);
             other.acceptor_ = static_cast<socket_t>(-1);
       }
 
       //--------------------------------------------------------------------------------
+
+      virtual void    set_listener(socket_t sock, AddrType const &addr) = 0;
+      bool           &should_close_listnener() &       { return should_close_listener_; }
+      ND bool const  &should_close_listnener() const & { return should_close_listener_; }
 
       using base_type::read;
       using base_type::write;
@@ -243,15 +225,21 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
       }
 
       ND virtual AddrType const &addr() const & { return addr_; }
+
+      virtual socket_t open_new_socket()      = 0;
+      virtual socket_t connect_to_socket()    = 0;
+      virtual socket_t get_connected_socket() = 0;
 };
+
+
+/*======================================================================================*/
+
 
 class unix_socket_connection_impl final : public socket_connection_base_impl<sockaddr_un>
 {
-    public:
       using this_type = unix_socket_connection_impl;
       using base_type = socket_connection_base_impl<sockaddr_un>;
 
-    private:
       std::string path_;
 
     public:
@@ -263,6 +251,12 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
             should_close_listnener() = false;
             this->listener_ = sock;
             this->addr_     = addr;
+      }
+
+      void set_address(std::string path)
+      {
+            throw_if_initialized(typeid(*this));
+            path_ = std::move(path);
       }
 
       DELETE_COPY_CTORS(unix_socket_connection_impl);
@@ -278,19 +272,23 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
 
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
-    private:
+      ND auto const &path() const & { return path_; }
+
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
+      socket_t get_connected_socket() override { return connect_to_socket(); }
 };
+
+
+/*======================================================================================*/
+
 
 #ifdef HAVE_SOCKETPAIR
 class socketpair_connection_impl final : public socket_connection_base_impl<sockaddr_un>
 {
-    public:
       using this_type = socketpair_connection_impl;
       using base_type = socket_connection_base_impl<sockaddr_un>;
 
-    private:
       socket_t fds_[2] = {-1, -1};
 
     public:
@@ -298,7 +296,7 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
       ~socketpair_connection_impl() override = default;
 
       [[deprecated("Don't use this function. It will just crash. On purpose.")]]
-      void set_listener(socket_t sock, sockaddr_un const &addr) override
+      void set_listener(socket_t /*sock*/, sockaddr_un const & /*addr*/) override
       {
             throw std::logic_error(
                 "This function makes no sense at all for this type of socket.");
@@ -311,7 +309,7 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
       socketpair_connection_impl(socketpair_connection_impl &&other) noexcept
           : base_type(std::move(other))
       {
-            ::memcpy(fds_, other.fds_, sizeof(fds_));
+            memcpy(fds_, other.fds_, sizeof(fds_));
             other.fds_[0] = (-1);
             other.fds_[1] = (-1);
       }
@@ -320,27 +318,156 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
-    private:
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
+      socket_t get_connected_socket() override { return connect_to_socket(); }
 };
 #endif
 
+
+/*======================================================================================*/
+/* TCP/IP */
+
+
+template <typename AddrType>
+      REQUIRES (IsInetSockaddr<AddrType>)
+class inet_socket_connection_base_impl : public socket_connection_base_impl<AddrType>
+{
+      using this_type = inet_socket_connection_base_impl;
+      using base_type = socket_connection_base_impl<AddrType>;
+
+    protected:
+      bool      addr_init_ = false;
+      socket_t  connector_ = static_cast<socket_t>(-1);
+
+    public:
+      inet_socket_connection_base_impl()            = default;
+       ~inet_socket_connection_base_impl() override = default;
+
+      DELETE_COPY_CTORS(inet_socket_connection_base_impl);
+      DEFAULT_MOVE_CTORS(inet_socket_connection_base_impl);
+
+    //----------------------------------------------------------------------------------
+
+      void set_listener(socket_t const sock, AddrType const &addr) override
+      {
+            this->should_close_listnener() = true;
+            this->listener_ = sock;
+            this->addr_     = addr;
+      }
+
+      socket_t get_connected_socket() override { return connector_; }
+};
+
 /*--------------------------------------------------------------------------------------*/
+/* Either */
+
+class inet_any_socket_connection_impl final
+    : public inet_socket_connection_base_impl<sockaddr *>
+{
+      using this_type = inet_any_socket_connection_impl;
+      using base_type = socket_connection_base_impl<addr_type>;
+
+      socklen_t addr_length_ = 0;
+      int       type_        = AF_UNSPEC;
+
+    public:
+      inet_any_socket_connection_impl() 
+      {
+            addr_ = nullptr;
+      }
+
+      ~inet_any_socket_connection_impl() override
+      {
+            free(this->addr_); //NOLINT
+      }
+
+      DEFAULT_MOVE_CTORS(inet_any_socket_connection_impl);
+      DELETE_COPY_CTORS(inet_any_socket_connection_impl);
+
+      socket_t open_new_socket()   override;
+      socket_t connect_to_socket() override;
+
+      int resolve(char const *server_name, char const *port);
+      int resolve(char const *server_and_port);
+
+      void address_info(struct addrinfo *info)
+      {
+            assign_addr_from_addrinfo(info);
+      }
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+
+    private:
+      void set_listener(socket_t const /*sock*/, sockaddr *const & /*addr*/) override
+      {}
+
+      void assign_addr_from_addrinfo(addrinfo *info);
+};
+
+/*--------------------------------------------------------------------------------------*/
+/* IPv4 only */
+
+class inet_ipv4_socket_connection_impl final
+    : public inet_socket_connection_base_impl<sockaddr_in>
+{
+      using this_type = inet_ipv4_socket_connection_impl;
+      using base_type = socket_connection_base_impl<addr_type>;
+
+    public:
+      inet_ipv4_socket_connection_impl()           = default;
+      ~inet_ipv4_socket_connection_impl() override = default;
+      DEFAULT_MOVE_CTORS(inet_ipv4_socket_connection_impl);
+      DELETE_COPY_CTORS(inet_ipv4_socket_connection_impl);
+
+      socket_t open_new_socket()   override;
+      socket_t connect_to_socket() override;
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+};
+
+/*--------------------------------------------------------------------------------------*/
+/* IPv6 only */
+
+class inet_ipv6_socket_connection_impl final
+    : public inet_socket_connection_base_impl<sockaddr_in6>
+{
+      using this_type = inet_ipv6_socket_connection_impl;
+      using base_type = socket_connection_base_impl<addr_type>;
+
+    public:
+      inet_ipv6_socket_connection_impl()           = default;
+      ~inet_ipv6_socket_connection_impl() override = default;
+      DEFAULT_MOVE_CTORS(inet_ipv6_socket_connection_impl);
+      DELETE_COPY_CTORS(inet_ipv6_socket_connection_impl);
+
+      socket_t open_new_socket()   override;
+      socket_t connect_to_socket() override;
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+};
+
+
+/****************************************************************************************/
+/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃  ┌────────────────────────────────────────────────────────┐                      ┃
+   ┃  │Derivative interface for fd or HANDLE based connections.│                      ┃
+   ┃  └────────────────────────────────────────────────────────┘                      ┃
+   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
 class fd_connection_impl;
 
+/*
+ * For regular pipes.
+ */
 class pipe_connection_impl : public base_connection_interface<int>
 {
-    public:
       using this_type = pipe_connection_impl;
       using base_type = base_connection_interface<int>;
+      friend class fd_connection_impl;
 
-    private:
       int volatile read_  = (-1);
       int volatile write_ = (-1);
-
-      friend class fd_connection_impl;
 
     public:
       pipe_connection_impl() = default;
@@ -379,15 +506,19 @@ class pipe_connection_impl : public base_connection_interface<int>
 
 };
 
+/*--------------------------------------------------------------------------------------*/
 
+/*
+ * For any arbitrary file descriptors, including stdin/stdout.
+ */
 class fd_connection_impl final : public pipe_connection_impl
 {
 #define ERRMSG "The fd_connection class is intended to be attached to stdin and stdout. It cannot spawn a process."
 
-    public:
       using this_type = fd_connection_impl;
       using base_type = pipe_connection_impl;
 
+    public:
       fd_connection_impl()           = default;
       ~fd_connection_impl() override = default;
 
@@ -402,11 +533,12 @@ class fd_connection_impl final : public pipe_connection_impl
 
       //--------------------------------------------------------------------------------
 
+    private:
 #if defined __GNUC__ && !defined __clang__
       __attribute__((__error__(ERRMSG)))
 #endif
       [[deprecated(ERRMSG)]]
-      procinfo_t do_spawn_connection(size_t, char **) override
+      procinfo_t do_spawn_connection(size_t /*argc*/, char ** /*argv*/) override
       {
             throw std::logic_error(ERRMSG);
       }
@@ -414,13 +546,14 @@ class fd_connection_impl final : public pipe_connection_impl
 #if !defined __GNUC__ || defined __clang__
       /* HACK: Stupid ugly hack to make any attempt to call this function fail. */
       template <typename ...Types>
-      procinfo_t do_spawn_connection(Types...)
+      procinfo_t do_spawn_connection(Types... /*unused*/)
       {
             static_assert(std::is_constructible_v<Types...>, ERRMSG);
             throw std::logic_error(ERRMSG);
       }
 #endif
 
+    public:
       void set_descriptors(int const readfd, int const writefd)
       {
             read_  = readfd;
@@ -432,7 +565,13 @@ class fd_connection_impl final : public pipe_connection_impl
 #undef ERRMSG
 };
 
-/*--------------------------------------------------------------------------------------*/
+
+/****************************************************************************************/
+/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+   ┃  ┌──────────────────────────────────────────────────────────┐                    ┃
+   ┃  │Broken interface for Windows named pipe based connections.│                    ┃
+   ┃  └──────────────────────────────────────────────────────────┘                    ┃
+   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 
@@ -478,7 +617,10 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
 
 #endif
 
+
 /****************************************************************************************/
+/* Out of line implementations for all connections. */
+
 
 #ifdef _WIN32
 template <typename DescriptorType>
@@ -515,8 +657,8 @@ base_connection_interface<DescriptorType>::get_err_handle()
 #else
 
 template <typename DescriptorType>
-DescriptorType
-base_connection_interface<DescriptorType>::get_err_handle() const
+int
+base_connection_interface<DescriptorType>::get_err_handle()
 {
       int fd;
 
@@ -545,11 +687,16 @@ base_connection_interface<DescriptorType>::get_err_handle() const
 #endif
 
 /*--------------------------------------------------------------------------------------*/
+/* Out of line implementations for socket connections. */
 
 template <typename AddrType>
 void socket_connection_base_impl<AddrType>::close()
 {
       if (acceptor_ != static_cast<socket_t>(-1)) {
+            shutdown(acceptor_, 2);
+            util::close_descriptor(acceptor_);
+      }
+      if (listener_ != static_cast<socket_t>(-1)) {
             shutdown(acceptor_, 2);
             util::close_descriptor(acceptor_);
       }
@@ -615,7 +762,16 @@ socket_connection_base_impl<AddrType>::write(void    const *buf,
 
 
 /****************************************************************************************/
-} // namespace detail
-} // namespace ipc
+/* Out of line implementations for TCP/IP sockets */
+
+// template <typename AddrType> REQUIRES (IsInetSockaddr<AddrType>)
+// socket_t inet_socket_connection_base_impl<AddrType>::open_new_socket()
+// {
+// 
+// }
+
+
+/****************************************************************************************/
+} // namespace ipc::detail
 } // namespace emlsp
 #endif

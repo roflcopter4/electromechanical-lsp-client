@@ -1,11 +1,14 @@
 #include "Common.hh"
-#include "ipc/lsp/lsp-connection.hh"
 
-#include "util/owning_string_view.hh"
-
-#include "util/charconv.hh"
-#include <unistr.h>
-#include <string>
+#if defined __GNUC__ || defined __clang__
+# ifdef __clang__
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
+# else
+#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
+# endif
+#else
+# define ATTRIBUTE_PRINTF(...)
+#endif
 
 
 #if defined USE_JEMALLOC && defined DEBUG
@@ -22,22 +25,18 @@ char my_malloc_conf[] = "abort_conf:true"
 char const *malloc_conf = my_malloc_conf;
 #endif
 
-UNUSED static constexpr char barline[] = "\033[1;32m--------------------------------------------------------------------------------\033[0m";
-
 /****************************************************************************************/
 
 inline namespace emlsp {
 
 INITIALIZER_HACK(setup_locale)
 {
-      setlocale(LC_ALL, "en_US.UTF8");
-      setlocale(LC_COLLATE, "en_US.UTF8");
-      setlocale(LC_CTYPE, "en_US.UTF8");
-      setlocale(LC_MONETARY, "en_US.UTF8");
-      setlocale(LC_NUMERIC, "en_US.UTF8");
-      setlocale(LC_TIME, "en_US.UTF8");
-
-      ::localeconv();
+      ::setlocale(LC_ALL,      "en_US.UTF8");
+      ::setlocale(LC_COLLATE,  "en_US.UTF8");
+      ::setlocale(LC_CTYPE,    "en_US.UTF8");
+      ::setlocale(LC_MONETARY, "en_US.UTF8");
+      ::setlocale(LC_NUMERIC,  "en_US.UTF8");
+      ::setlocale(LC_TIME,     "en_US.UTF8");
 }
 
  namespace ipc {
@@ -57,12 +56,16 @@ INITIALIZER_HACK(setup_locale)
  namespace event {
   NOINLINE extern void test03();
   NOINLINE extern void lets_do_this(std::filesystem::path const &fname);
+  namespace FUCK {
+   NOINLINE extern void foo();
+  } // namespace FUCK
  } // namespace event
  namespace libevent {
   NOINLINE extern void testing01(std::filesystem::path const &fname);
   NOINLINE extern void testing02(std::filesystem::path const &fname);
   NOINLINE extern void testing03(std::filesystem::path const &fname);
-  NOINLINE extern void testing04(std::filesystem::path const &fname);
+  NOINLINE extern void testing04();
+  NOINLINE extern void testing05();
  } // namespace libevent
 
  namespace ipc::rpc {
@@ -80,9 +83,22 @@ INITIALIZER_HACK(setup_locale)
 
  namespace rpc {
   NOINLINE extern void helpme();
+  namespace mpack {
+   NOINLINE void test01();
+  } // namespace mpack
  } // namespace rpc
+ namespace test {
+  namespace suck {
+   NOINLINE extern void test01();
+  } // namespace suck
+  namespace nonexistant {}
+ } // namespace test 
 
 } // namespace emlsp
+
+
+/****************************************************************************************/
+
 
 #ifdef _WIN32
 static void init_wsa()
@@ -103,116 +119,12 @@ static void init_wsa()
 }
 #endif
 
-/****************************************************************************************/
 
+/*--------------------------------------------------------------------------------------*/
 
-namespace {
-
-template <typename T>
-void
-my_free(T const *ptr)
-{
-      ::free(const_cast<void *>(static_cast<void const *>(ptr)));
-}
-
-} // namespace
-
-
-template <typename ...T>
-NORETURN static __inline constexpr void dump_and_exit(int const eval, T && ... args)
-{
-      fmt::print(stderr, std::forward<T &&>(args)...);
-      ::exit(eval);
-}
-
-static void
-dickhead(char const *const __restrict fmt,  ...)
-{
-      va_list ap;
-      va_start(ap, fmt);
-      //auto const n = vsnprintf(nullptr, 0, fmt, ap);
-
-      char toosmall[6];
-
-      int const n = _vsnprintf(
-            toosmall, 6, fmt, ap
-      );
-
-      va_end(ap);
-
-
-      std::cout << "nchars: "sv << n << "  and '"sv << util::char_repr(toosmall[5]) << "'\n"sv;
-}
-
-NOINLINE static void
-brainless()
-{
-      namespace uni = util::unistring;
-
-      static constexpr wchar_t teststr[] = L"NORETURN static __inline constexpr void dump_and_exit(int const eval, T && ... args)  §♀↔∞+oτ█▼↨☻♂W5Ü♠○X Æ╫╒J♫,╔EÉÜÆì>";
-           //LR"(Конференция соберет широкий круг экспертов по  вопросам глобального Лорем ипсум долор сит амет, аутем дицта нуллам цу еам, стет диссентиет детерруиссет ин вис)";
-
-      try {
-            //auto const ass = util::unistring::char32_to_char(teststr, sizeof(teststr));
-            //std::cout << *ass << std::endl;
-
-            auto wos = std::wstringstream{};
-
-            wos << L"HELLO!\n"sv;
-            wos << L"HELLO!\n"sv;
-            wos << teststr << L'\n';
-
-            std::wcout << wos.view() << std::endl;
-
-            {
-                  char buf[sizeof(teststr) * 2];
-                  size_t nbytes;
-                  wcstombs_s(&nbytes, buf, sizeof buf, teststr, UINT64_MAX);
-                  std::cout << nbytes << '\n' << buf << '\n';
-
-                  dickhead("The quack broon fawks is %s 0x%" PRIX64 " %s\n", "hi there idiot mcfuckerface mcgee", ~UINT64_C(0), "bye");
-
-                  auto const fmtstr = fmt::format(FC("The quack broon fawks is {} 0x{:X} {}\n"), "hi there idiot mcfuckerface mcgee", ~UINT64_C(0), "bye");
-                  std::cout << "Real chars: "sv << fmtstr.size() << '\n';
-            }
-
-            std::cout << "fwrite:\n"sv;
-            fwrite(teststr, 1, sizeof(teststr) - sizeof(teststr[0]), stdout);
-            fputc('\n', stdout);
-
-            auto const ass = uni::charconv<wchar_t>(teststr, uni::strlen(teststr));
-            std::wcout << L"wcout rawstring:\n"sv << teststr << L"\nwcout cxx string:\n"sv << ass << L'\n';
-
-            auto const bla = uni::charconv<char>(teststr, uni::strlen(teststr));
-            std::cout << "cout converted char string:\n"sv << bla << std::endl;
-      }
-      catch (std::exception const &e) {
-            DUMP_EXCEPTION(e);
-      }
-}
-
-NORETURN static void
-stupidity()
-{
-#ifdef _MSC_VER
-      __try {
-            __try {
-                  brainless();
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
-                  fprintf(stderr, "exception caught! -> %08lX or maybe 0x%08lX\n",
-                          GetExceptionCode(), STATUS_ACCESS_VIOLATION);
-            }
-      } __finally {
-            ExitProcess(42);
-      }
-#endif
-}
-
-
-/****************************************************************************************/
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
-int main(int argc, char *argv[])
+int main(UNUSED int argc, UNUSED char *argv[])
 {
 #ifdef _WIN32
       init_wsa();
@@ -241,7 +153,6 @@ int main(int argc, char *argv[])
             dump_and_exit(6, FC("ERROR: Invalid paramater \"{}\": Must be a regular file.\n"), src_file.string());
 #endif
 
-
       try {
             //TRY_FUNC(event::test03);
             //TRY_FUNC(ipc::lsp::test::test11);
@@ -252,10 +163,17 @@ int main(int argc, char *argv[])
             // test::mpack::test01(src_file);
             // test::mpack::test02(src_file);
 
+
             // libevent::testing02(src_file);
 
             //libevent::testing03(src_file);
-            libevent::testing04({});
+            // libevent::testing04({});
+            // libevent::testing04();
+
+            // emlsp::event::FUCK::foo();
+
+            // test::suck::test01();
+            ::rpc::mpack::test01();
 
             // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
             // test::mpack::test01(src_file);
@@ -270,6 +188,5 @@ int main(int argc, char *argv[])
       WSACleanup();
 #endif
 
-      //stupidity();
       return 0;
 }

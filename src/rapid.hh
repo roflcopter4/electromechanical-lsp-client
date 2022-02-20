@@ -113,7 +113,7 @@ class rapid_doc
       template <NonStringRef ...Types>
       void add_member(Types &&...args)
       {
-            cur_->AddMember(std::forward<Types>(args)..., al_);
+            cur_->AddMember(std::forward<Types &&>(args)..., al_);
       }
 
       /*--------------------------------------------------------------------------------*/
@@ -191,6 +191,13 @@ class rapid_doc
             assert(!stack_.empty());
             cur_ = stack_.top();
             stack_.pop();
+      }
+
+      void clear()
+      {
+            while (!stack_.empty())
+                  stack_.pop();
+            cur_ = &doc_;
       }
 };
 
