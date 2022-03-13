@@ -1,8 +1,8 @@
 #include "Common.hh"
 #include "ipc/lsp/static-data.hh"
-#include "ipc/rpc/basic_wrapper.hh"
+#include "ipc/basic_wrapper.hh"
 #include "ipc/totality.hh"
-#include "ipc/rpc/basic_io_connection.hh"
+#include "ipc/basic_io_connection.hh"
 
 //#include <nlohmann/json.hpp>
 

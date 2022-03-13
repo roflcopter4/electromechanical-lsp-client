@@ -4,8 +4,8 @@
 /****************************************************************************************/
 #include "Common.hh"
 
-#include "ipc/base_connection.hh"
-#include "ipc/rpc/basic_wrapper.hh"
+#include "ipc/basic_connection.hh"
+#include "ipc/basic_wrapper.hh"
 
 inline namespace emlsp {
 namespace ipc::rpc {

@@ -471,22 +471,16 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 add_executable(lsp-thing
     "src/main.cc"
-    "src/rapid.cc"
-    #"src/sukitup.cc"
     "src/dothemsg.cc"
     "src/sigh.cc"
-
     "src/libevent.cc"
-    #"src/killme.cc"
     "src/util/charconv.cc"
     "src/util/charconv.hh"
 
     "src/ipc/base_connection.cc"
     "src/ipc/connection_impl.cc"
-    "src/ipc/base_client.cc"
 
     "src/ipc/lsp/static-data.cc"
-    "src/ipc/lsp/lsp-client.cc"
 
     "src/util/c_util.c"
     "src/util/err.c"
@@ -498,22 +492,14 @@ add_executable(lsp-thing
 
     # Include headers to make using MSVC less infuriatingly tedious.
     "src/Common.hh"
-    #"src/ipc/asio_connection.hh"
-    "src/ipc/base_client.hh"
     "src/ipc/base_connection.hh"
-    "src/ipc/base_message.hh"
-    "src/ipc/base_wait_loop.hh"
     "src/ipc/connection_impl.hh"
     "src/ipc/dialer.hh"
     "src/ipc/forward.hh"
-    "src/ipc/lsp/lsp-client.hh"
-    "src/ipc/lsp/lsp-connection.hh"
-    "src/ipc/lsp/lsp-message.hh"
     "src/ipc/lsp/static-data.hh"
     "src/ipc/main_loop.hh"
     "src/ipc/totality.hh"
     "src/ipc/rpc/basic_wrapper.hh"
-    #"src/ipc/mpack/mpack-connection.hh"
     "src/pch.hh"
     "src/rapid.hh"
     "src/util/concepts.hh"

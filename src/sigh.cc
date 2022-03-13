@@ -1,11 +1,8 @@
 #include "Common.hh"
+#include "ipc/basic_io_connection.hh"
 #include "ipc/lsp/static-data.hh"
-#include "ipc/rpc/basic_wrapper.hh"
-#include "ipc/rpc/basic_io_connection.hh"
-#include "ipc/totality.hh"
 
 #include <boost/asio.hpp>
-#include <uv.h>
 
 #define AUTOC auto const
 

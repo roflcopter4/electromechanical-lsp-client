@@ -1,5 +1,5 @@
 #include "Common.hh"
-#include "ipc/base_connection.hh"
+#include "ipc/basic_connection.hh"
 #include "ipc/lsp/static-data.hh"
 #include "libevent.hh"
 

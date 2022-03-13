@@ -207,6 +207,10 @@ using dual_unix_socket   = ipc::spawn_dialer<ipc::detail::dual_socket_connection
 } // namespace dialers
 
 
+template <typename T>
+concept IsDialerVariant = std::derived_from<T, basic_dialer<typename T::connection_impl_type>>;
+
+
 /****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp

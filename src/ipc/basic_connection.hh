@@ -1,9 +1,8 @@
 #pragma once
-#ifndef HGUARD__IPC__BASE_CONNECTION_HH_
-#define HGUARD__IPC__BASE_CONNECTION_HH_ //NOLINT
+#ifndef HGUARD__IPC__BASIC_CONNECTION_HH_
+#define HGUARD__IPC__BASIC_CONNECTION_HH_ //NOLINT
 
 #include "Common.hh"
-#include "ipc/forward.hh"
 #include "ipc/connection_impl.hh"
 #include "ipc/dialer.hh"
 

@@ -3,9 +3,7 @@
 #define HGUARD__IPC__RPC__BASIC_WRAPPER_HH_ //NOLINT
 
 #include "Common.hh"
-#include "ipc/base_connection.hh"
-
-#include "rapid.hh"
+#include "ipc/basic_connection.hh"
 
 inline namespace emlsp {
 namespace ipc::rpc {

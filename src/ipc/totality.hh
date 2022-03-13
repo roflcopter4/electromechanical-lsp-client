@@ -3,11 +3,9 @@
 #define HGUARD__IPC__TOTALITY_HH_ //NOLINT
 /****************************************************************************************/
 #include "Common.hh"
-#include "ipc/forward.hh"
 
-#include "ipc/base_connection.hh"
-#include "ipc/dialer.hh"
-#include "ipc/rpc/basic_wrapper.hh"
+#include "ipc/basic_connection.hh"
+#include "ipc/basic_wrapper.hh"
 
 inline namespace emlsp {
 namespace ipc {
