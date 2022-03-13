@@ -208,10 +208,17 @@ char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
       size_t      resultlen = len + SIZE_C(1);
       str.reserve(resultlen);
 
+#if defined _WIN32 && false
+      fmt::print(stderr, FC("Hi from {}!!\n"), FUNCTION_NAME);
+      resultlen = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<LPCCH>(ws), len, str.data(), resultlen);
+      if (auto const e = GetLastError())
+            conversion_error(e, 8, numbits);
+#else
       AUTOC *result = func(reinterpret_cast<uint8_t const *>(ws), len,
                            reinterpret_cast<uint_type *>(str.data()), &resultlen);
       if (!result)
             conversion_error(errno, 8, numbits);
+#endif
 
       str.data()[resultlen] = 0;
       resize_string_hack(str, resultlen);

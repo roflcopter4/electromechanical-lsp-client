@@ -452,15 +452,11 @@ class ms_jsonrpc_io_wrapper
 /****************************************************************************************/
 
 
-namespace detail {
-
 template <typename T>
 concept IsIOWrapperVariant = std::derived_from<T,
                                                basic_io_wrapper<typename T::connection_type,
                                                                 typename T::packer_type,
                                                                 typename T::unpacker_type>>;
-
-} // namespace detail
 
 
 /****************************************************************************************/

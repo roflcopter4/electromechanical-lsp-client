@@ -52,6 +52,11 @@ constexpr uint64_t ioctl_size_available = FIONREAD;
 #else
 # error "Neither TIOCINQ nor FIONREAD exist as ioctl parameters on this system."
 #endif
+#ifdef _WIN32
+using procinfo_t = PROCESS_INFORMATION;
+#else
+using procinfo_t = pid_t;
+#endif
 } // namespace detail
 
 #ifdef _WIN32
@@ -64,6 +69,8 @@ ND size_t available_in_fd(HANDLE s) noexcept(false);
 void      close_descriptor(int &fd);
 void      close_descriptor(intptr_t &fd);
 ND size_t available_in_fd(int s) noexcept(false);
+
+int kill_process(detail::procinfo_t const &pid);
 
 /*--------------------------------------------------------------------------------------*/
 

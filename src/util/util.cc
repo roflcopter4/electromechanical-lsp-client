@@ -594,6 +594,31 @@ xatoi(char const *const str, bool const strict)
 }
 
 
+int
+kill_process(detail::procinfo_t const &pid)
+{
+      int status = 0;
+
+#ifdef _WIN32
+      if (pid.hProcess) {
+            ::TerminateProcess(pid.hProcess, 0);
+            ::WaitForSingleObject(pid.hProcess, INFINITE);
+            ::GetExitCodeProcess(pid.hProcess, reinterpret_cast<DWORD *>(&status));
+            ::CloseHandle(pid.hThread);
+            ::CloseHandle(pid.hProcess);
+      }
+#else // not _WIN32
+      if (pid) {
+            ::kill(pid, SIGTERM);
+            ::waitpid(pid, &status, 0);
+            status = WEXITSTATUS(status);
+      }
+#endif
+
+      return status;
+}
+
+
 /****************************************************************************************/
 } // namespace util
 } // namespace emlsp

@@ -1,12 +1,6 @@
 #include "Common.hh"
-#include "ipc/lsp/lsp-client.hh"
-#include "ipc/lsp/lsp-connection.hh"
 #include "ipc/lsp/static-data.hh"
-#include "libevent.hh"
-
-// #include "ipc/rpc/basic_msgpack_connection.hh"
 #include "ipc/rpc/basic_wrapper.hh"
-
 #include "ipc/totality.hh"
 #include "ipc/rpc/basic_io_connection.hh"
 

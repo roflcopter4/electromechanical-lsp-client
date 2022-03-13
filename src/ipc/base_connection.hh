@@ -4,7 +4,6 @@
 
 #include "Common.hh"
 #include "ipc/forward.hh"
-
 #include "ipc/connection_impl.hh"
 #include "ipc/dialer.hh"
 

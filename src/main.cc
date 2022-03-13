@@ -1,57 +1,13 @@
 #include "Common.hh"
 
+#include "util/charconv.hh"
+
 //#include <vld.h>
-
-#if defined __GNUC__ || defined __clang__
-# ifdef __clang__
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
-# else
-#  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
-# endif
-#else
-# define ATTRIBUTE_PRINTF(...)
-#endif
-
-
-#if defined USE_JEMALLOC && defined DEBUG
-static constexpr
-char my_malloc_conf[] = "abort_conf:true"
-                        ",stats_print:true"
-                        ",confirm_conf:true"
-                        ",junk:true"
-                        ",xmalloc:true"
-                        ",prof:true"
-                        ",prof_leak:true"
-                        ",prof_final:true"
-                        ;
-char const *malloc_conf = my_malloc_conf;
-#endif
 
 /****************************************************************************************/
 
 inline namespace emlsp {
 
- namespace ipc {
-  void run_event_loop_cxx(int);
-#if 0
-  namespace lsp {
-   namespace test {
-    NOINLINE extern void test10();
-    NOINLINE extern void test11();
-    NOINLINE extern void test12();
-   } // namespace test
-  } // namespace lsp
-#endif
-  namespace test {
-  } // namespace test
- } // namespace ipc
- namespace event {
-  NOINLINE extern void test03();
-  NOINLINE extern void lets_do_this(std::filesystem::path const &fname);
-  namespace FUCK {
-   NOINLINE extern void foo();
-  } // namespace FUCK
- } // namespace event
  namespace libevent {
   NOINLINE extern void testing01(std::filesystem::path const &fname);
   NOINLINE extern void testing02(std::filesystem::path const &fname);
@@ -60,31 +16,12 @@ inline namespace emlsp {
   NOINLINE extern void testing05();
  } // namespace libevent
 
- namespace ipc::rpc {
-  // NOINLINE void test01();
- } // namespace ipc::rpc
-
- namespace moron::test {
-  NOINLINE extern void test1();
- } // namespace moron::test
-
- namespace test::mpack {
-  NOINLINE extern void test01(std::filesystem::path const &fname);
-  NOINLINE extern void test02(std::filesystem::path const &fname);
- } // namespace test::mpack
-
  namespace rpc {
-  NOINLINE extern void helpme();
   namespace mpack {
    NOINLINE void test01();
   } // namespace mpack
  } // namespace rpc
- namespace test {
-  namespace suck {
-   NOINLINE extern void test01();
-  } // namespace suck
-  namespace nonexistant {}
- } // namespace test 
+
  namespace sigh {
   NOINLINE extern void sigh01();
   NOINLINE extern void sigh02();
@@ -96,9 +33,7 @@ inline namespace emlsp {
 
 } // namespace emlsp
 
-
 /****************************************************************************************/
-
 
 static void init_locale()
 {
@@ -144,11 +79,10 @@ UNUSED static void init_libevent()
 #endif
 }
 
-
 /*--------------------------------------------------------------------------------------*/
 
 static int
-do_main()
+do_main(UNUSED int argc, UNUSED char *argv[])
 {
       init_locale();
 #ifdef _WIN32
@@ -179,32 +113,7 @@ do_main()
             dump_and_exit(6, FC("ERROR: Invalid paramater \"{}\": Must be a regular file.\n"), src_file.string());
 #endif
 
-      //TRY_FUNC(event::test03);
-      //TRY_FUNC(ipc::lsp::test::test11);
-      //TRY_FUNC(ipc::lsp::test::test12);
-      //ipc::run_event_loop_cxx(0);
-      //event::lets_do_this(src_file);
-      //libevent::testing01(src_file);
-      // test::mpack::test01(src_file);
-      // test::mpack::test02(src_file);
-
-
-      // libevent::testing02(src_file);
-
-      //libevent::testing03();
-      //libevent::testing04();
-
-      // emlsp::event::FUCK::foo();
-
-      // test::suck::test01();
-      //::rpc::mpack::test01();
-
       sigh::sigh04();
-
-      // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
-      // test::mpack::test01(src_file);
-      // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
-      // rpc::helpme();
 
 #ifdef _WIN32
       WSACleanup();
@@ -214,17 +123,15 @@ do_main()
 }
 
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
-int main(UNUSED int argc, UNUSED char *argv[])
+int
+main(int const argc, char *argv[])
 {
-      //int const orig_dbg_flags = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
-      //_CrtSetDbgFlag(orig_dbg_flags | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_LEAK_CHECK_DF);
-
       try {
-            do_main();
+            do_main(argc, argv);
       } catch (std::exception &e) {
             DUMP_EXCEPTION(e);
+            return 1;
       }
 
-      //_CrtSetDbgFlag(orig_dbg_flags);
+      return 0;
 }

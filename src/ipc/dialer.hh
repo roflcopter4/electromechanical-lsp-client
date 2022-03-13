@@ -4,21 +4,10 @@
 
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
-#include "ipc/forward.hh"
 
 inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
-
-
-namespace detail {
-
-extern int kill_impl(procinfo_t const &pid);
-
-} // namespace detail
-
-
-/*--------------------------------------------------------------------------------------*/
 
 
 template <typename ConnectionImpl>
@@ -164,7 +153,7 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
     private:
       void kill(bool const in_destructor)
       {
-            detail::kill_impl(pid_);
+            util::kill_process(pid_);
             this->impl().close();
             if (!in_destructor)
                   pid_ = {};

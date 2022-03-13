@@ -46,7 +46,6 @@ concept NonStringRef = !std::convertible_to<T, rapidjson::GenericStringRef<rapid
 template <typename Allocator = rapidjson::MemoryPoolAllocator<rapidjson::CrtAllocator>>
 class rapid_doc
 {
-    private:
       rapidjson::Document doc_;
       rapidjson::Value   *cur_;
       Allocator          &al_;

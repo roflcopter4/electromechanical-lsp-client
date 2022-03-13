@@ -1,12 +1,10 @@
 #pragma once
-#ifndef HGUARD__IPC__DISPATCHER_HH_
-#define HGUARD__IPC__DISPATCHER_HH_ //NOLINT
+#ifndef HGUARD__IPC__BASIC_IO_CONNECTION_HH_
+#define HGUARD__IPC__BASIC_IO_CONNECTION_HH_ //NOLINT
 /****************************************************************************************/
 #include "Common.hh"
-#include "ipc/forward.hh"
 
 #include "ipc/base_connection.hh"
-#include "ipc/dialer.hh"
 #include "ipc/rpc/basic_wrapper.hh"
 
 inline namespace emlsp {
@@ -16,8 +14,9 @@ namespace ipc::rpc {
 
 template <typename Connection, template <typename> typename IOWrapper>
       REQUIRES(ipc::IsBasicConnectionVariant<Connection>;
-               detail::IsIOWrapperVariant<IOWrapper<Connection>>;)
-class basic_io_connection : public Connection, public IOWrapper<Connection>
+               rpc::IsIOWrapperVariant<IOWrapper<Connection>>;)
+class basic_io_connection : public Connection,
+                            public IOWrapper<Connection>
 {
       using this_type       = basic_io_connection<Connection, IOWrapper>;
       using connection_type = Connection;
@@ -34,7 +33,7 @@ class basic_io_connection : public Connection, public IOWrapper<Connection>
       DELETE_COPY_CTORS(basic_io_connection);
       DEFAULT_MOVE_CTORS(basic_io_connection);
 
-    protected:
+    private:
       class my_cond
       {
             std::mutex              mtx_{};
@@ -60,13 +59,6 @@ class basic_io_connection : public Connection, public IOWrapper<Connection>
       void notify_one() { cond_.notify_one(); }
       void notify_all() { cond_.notify_all(); }
 };
-
-
-namespace impl {
-inline void foo123() {
-      basic_io_connection<ipc::connections::Default, ms_jsonrpc_io_wrapper> di;
-}
-} // namespace impl
 
 
 /****************************************************************************************/

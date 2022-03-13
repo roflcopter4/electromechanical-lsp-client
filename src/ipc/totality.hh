@@ -40,7 +40,7 @@ template <typename ConnectionType,
           typename EventTag>
     REQUIRES (
           requires IsBasicConnectionVariant<ConnectionType>;
-          requires rpc::detail::IsIOWrapperVariant<WrapperType<ConnectionType>>;
+          requires rpc::IsIOWrapperVariant<WrapperType<ConnectionType>>;
           requires event_tags::IsEventTag<EventTag>;
     )
 class base_totality_iface : public ConnectionType
@@ -225,40 +225,6 @@ class totality<ConnectionType, WrapperType, event_tags::libevent>
             //self->read_callback(fd, flags);
       }
 };
-
-
-/*--------------------------------------------------------------------------------------*/
-
-
-#if 0
-template <typename ConnectionType, template <typename> typename WrapperType>
-class totality<ConnectionType, WrapperType, event_tags::asio>
-    : public base_totality_iface<ConnectionType, WrapperType, event_tags::asio>
-{
-    public:
-      totality() = default;
-};
-#endif
-
-
-/****************************************************************************************/
-/****************************************************************************************/
-
-
-namespace impl {
-
-inline void foo()
-{
-      auto reet = totality<
-            connections::unix_socket,
-            rpc::ms_jsonrpc_io_wrapper,
-            event_tags::libevent
-      >::new_unique();
-
-      // totality<connections::unix_socket, rpc::lsp_jsonrpc_packer, event_tags::base_event_tag> z;
-}
-
-} // namespace impl 
 
 
 /****************************************************************************************/
