@@ -17,10 +17,10 @@ namespace util {
 extern std::filesystem::path get_temporary_directory(char const *prefix = nullptr);
 extern std::filesystem::path get_temporary_filename(char const *prefix = nullptr, char const *suffix = nullptr);
 
-extern std::string slurp_file(char const *fname);
-inline std::string slurp_file(std::string const &fname)           { return slurp_file(fname.c_str()); }
-inline std::string slurp_file(std::string_view const &fname)      { return slurp_file(fname.data()); }
-inline std::string slurp_file(std::filesystem::path const &fname) { return slurp_file(fname.string().c_str()); }
+extern std::string slurp_file(char const *fname, bool binary = false);
+inline std::string slurp_file(std::string const &fname, bool const binary = false)           { return slurp_file(fname.c_str(), binary); }
+inline std::string slurp_file(std::string_view const &fname, bool const binary = false)      { return slurp_file(fname.data(), binary); }
+inline std::string slurp_file(std::filesystem::path const &fname, bool const binary = false) { return slurp_file(fname.string().c_str(), binary); }
 
 ND extern std::string char_repr(char ch);
 ND extern std::string my_strerror(errno_t errval);
@@ -28,6 +28,19 @@ using ::my_strerror;
 
 ND extern std::string demangle(_Notnull_ char const *raw_name) __attribute__((__nonnull__));
 ND extern std::string demangle(std::type_info const &id);
+
+
+/* I wouldn't normally check the return of malloc & friends, but MSVC loudly complains
+ * about possible null pointers. So I'll make an exception. Damn it Microsoft. */
+template <typename T>
+ND __forceinline T *
+xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(false)
+{
+      void *ret = calloc(nmemb, size);
+      if (ret == nullptr) [[unlikely]]
+            throw std::runtime_error("Out of memory.");
+      return static_cast<T *>(ret);
+}
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -45,6 +58,7 @@ constexpr uint64_t ioctl_size_available = FIONREAD;
 void      close_descriptor(HANDLE &fd);
 void      close_descriptor(SOCKET &fd);
 ND size_t available_in_fd(SOCKET s) noexcept(false);
+ND size_t available_in_fd(HANDLE s) noexcept(false);
 #endif
 
 void      close_descriptor(int &fd);
@@ -98,7 +112,7 @@ namespace ipc {
 extern socket_t  open_new_unix_socket(char const *path);
 extern socket_t  connect_to_unix_socket(char const *path);
 extern socket_t  connect_to_unix_socket(sockaddr_un const *addr);
-extern addrinfo *resolve_addr(char const *server, char const *port);
+extern struct addrinfo *resolve_addr(char const *server, char const *port);
 
 } // namespace ipc
 
@@ -107,9 +121,13 @@ namespace win32 {
 
 NORETURN void error_exit_explicit(wchar_t const *msg, DWORD errval);
 
-inline void error_exit(wchar_t const *msg)       { return error_exit_explicit(msg, GetLastError()); }
-inline void error_exit_wsa(wchar_t const *msg)   { return error_exit_explicit(msg, WSAGetLastError()); }
-inline void error_exit_errno(wchar_t const *msg) { return error_exit_explicit(msg, errno); }
+NORETURN inline void error_exit(wchar_t const *msg)       { error_exit_explicit(msg, GetLastError()); }
+NORETURN inline void error_exit_wsa(wchar_t const *msg)   { error_exit_explicit(msg, WSAGetLastError()); }
+NORETURN inline void error_exit_errno(wchar_t const *msg) { error_exit_explicit(msg, errno); }
+
+NORETURN inline void error_exit(std::wstring const &msg)       { error_exit_explicit(msg.c_str(), GetLastError()); }
+NORETURN inline void error_exit_wsa(std::wstring const &msg)   { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN inline void error_exit_errno(std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno); }
 
 //void error_exit(wchar_t const *lpsz_function);
 //void WSA_error_exit(wchar_t const *lpsz_function);

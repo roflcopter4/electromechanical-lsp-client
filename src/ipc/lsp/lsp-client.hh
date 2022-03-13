@@ -128,7 +128,7 @@ concept ValidUserDataType = util::concepts::IsPointer<T> ||
 
 
 template <typename LoopVariant, typename ConnectionType, typename UserDataType = void *>
-      REQUIRES (ipc::IsConnectionVariant<ConnectionType>) //&& ValidUserDataType<UserDataType>
+      REQUIRES (ipc::IsConnectionVariant<ConnectionType>;) //&& ValidUserDataType<UserDataType>
 class client
     : public ipc::base_client<
           // ipc::wait_loop_libevent2<ConnectionType, rapidjson::Document, UserDataType>,

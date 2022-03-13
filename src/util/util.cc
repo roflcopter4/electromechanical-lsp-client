@@ -47,60 +47,65 @@ class cleanup_c
       std::recursive_mutex              mut_{};
 
       template <typename ...Types>
-      static constexpr void dbg_log(Types ...args)
+      static constexpr void dbg_log(Types &&...args)
       {
 #ifdef NDEBUG
             (void)args...;
 #else
-            fmt::print(stderr, std::forward<Types>(args)...);
+            fmt::print(stderr, std::forward<Types &&>(args)...);
 #endif
       }
 
     public:
       void push(std::filesystem::path const &path_arg)
       {
-            mut_.lock();
+            std::lock_guard lock(mut_);
             if (tmp_path_.empty())
                   tmp_path_ = path_arg;
             if (delete_list_.empty() || path_arg != delete_list_.top())
                   delete_list_.emplace(path_arg);
-            mut_.unlock();
       }
 
       std::filesystem::path const &get_path() &
       {
-            mut_.lock();
+            std::lock_guard lock(mut_);
             if (tmp_path_ == "")
                   push(get_temporary_directory(MAIN_PROJECT_NAME "."));
-            mut_.unlock();
             return tmp_path_;
       }
 
       void do_cleanup()
       {
-            mut_.lock();
-            try {
-                  while (!delete_list_.empty()) {
-                        auto const &value = delete_list_.top();
-                        dbg_log(FC("\nRemoving path '{}'\n"), value.string());
+            std::lock_guard lock(mut_);
+            dbg_log(FC("\n"));
 
-                        if (exists(value)) {
-                              std::error_code e;
-                              std::filesystem::remove(value, e);
-                              if (e)
-                                    dbg_log(FC("Failed to remove file '{}': \"{}\"\n"),
-                                            value, e);
-                        }
-                        delete_list_.pop();
-                  }
-                  fflush(stderr);
-            } catch (...) {
-                  mut_.unlock();
-                  throw;
+            while (!delete_list_.empty()) {
+                  auto const value = delete_list_.top();
+                  auto const name  = value.string();
+                  delete_list_.pop();
+                  dbg_log(FC("Removing path '{}'\n"), name);
+
+                  std::error_code e;
+                  std::filesystem::remove(value, e);
+                  if (e)
+                        dbg_log(FC("Failed to remove file '{}': \"{}\"\n"), name, e);
             }
 
+            fflush(stderr);
             tmp_path_ = std::filesystem::path{};
-            mut_.unlock();
+      }
+
+      ~cleanup_c() noexcept
+      {
+            try {
+                  do_cleanup();
+            } catch (std::exception &e) {
+                  try {
+                        std::cerr << "Caught exception:\n    " << e.what()
+                                  << "\nwhen cleaning temporary files.\n";
+                        std::cerr.flush();
+                  } catch (...) {}
+            }
       }
 
       cleanup_c()
@@ -126,19 +131,6 @@ class cleanup_c
             sigaction(SIGSEGV, &act, nullptr);
             sigaction(SIGTERM, &act, nullptr);
 #endif
-      }
-
-      ~cleanup_c() noexcept
-      {
-            try {
-                  do_cleanup();
-            } catch (std::exception &e) {
-                  try {
-                        std::cerr << "Caught exception:\n    " << e.what()
-                                  << "\nwhen cleaning temporary files.\n";
-                        std::cerr.flush();
-                  } catch (...) {}
-            }
       }
 
       DELETE_COPY_CTORS(cleanup_c);
@@ -232,12 +224,13 @@ open_new_unix_socket(char const *const path)
                                         "fit into a UNIX socket address (size: {})"),
                             path, len + 1, sizeof(addr.sun_path)));
 
-      auto const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
 #ifdef _WIN32
-      if (auto const e = ::WSAGetLastError(); e != 0) [[unlikely]]
+      auto const connection_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+      if (connection_sock == (SOCKET)SOCKET_ERROR)
             FATAL_ERROR("socket");
 #else
+      auto const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
       if (connection_sock == (-1)) [[unlikely]]
             FATAL_ERROR("socket");
       int tmp = ::fcntl(connection_sock, F_GETFL);
@@ -259,12 +252,12 @@ open_new_unix_socket(char const *const path)
 socket_t
 connect_to_unix_socket(sockaddr_un const *addr)
 {
-      auto const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-
 #ifdef _WIN32
-      if (auto const e = ::WSAGetLastError(); e != 0)
+      auto const data_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+      if (data_sock == (SOCKET)SOCKET_ERROR)
             FATAL_ERROR("socket");
 #else
+      auto const data_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
       if (data_sock == (-1))
            FATAL_ERROR("socket");
       int tmp = ::fcntl(data_sock, F_GETFL);
@@ -454,23 +447,23 @@ my_err_throw(UNUSED int const     status,
 /****************************************************************************************/
 
 std::string
-slurp_file(char const *fname)
+slurp_file(char const *fname, bool const binary)
 {
       std::string  buf;
       struct stat  st; // NOLINT(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
-      FILE        *fp = ::fopen(fname, "rb");
+      FILE        *fp = ::fopen(fname, binary ? "rb" : "r");
       if (!fp)
             err(1, "fopen()");
 
       ::fstat(::fileno(fp), &st);
       buf.reserve(static_cast<size_t>(st.st_size) + SIZE_C(1));
       auto const nread = ::fread(buf.data(), 1, static_cast<size_t>(st.st_size), fp);
-      if (nread != static_cast<size_t>(st.st_size))
+      if ((binary && nread != static_cast<size_t>(st.st_size)) || static_cast<ssize_t>(nread) <= 0)
             err(1, "fread()");
       ::fclose(fp);
 
-      resize_string_hack(buf, static_cast<size_t>(st.st_size));
-      buf[static_cast<size_t>(st.st_size)] = '\0';
+      resize_string_hack(buf, nread);
+      buf.data()[nread] = '\0';
       return buf;
 }
 
@@ -530,6 +523,18 @@ available_in_fd(SOCKET const s) noexcept(false)
 
       return value;
 }
+
+size_t
+available_in_fd(HANDLE const s) noexcept(false)
+{
+      throw util::except::not_implemented("Don't know how to do this.");
+      //unsigned long value  = 0;
+      //int const     result = ::ioctl(s, detail::ioctl_size_available, &value);
+      //if (result < 0)
+      //      err(1, "ioctlsocket(TIOCINQ aka FIONREAD)");
+
+      //return value;
+}
 #else
 
 void
@@ -561,7 +566,8 @@ __attribute__((__error__(WIN32_ERRMSG)))
 size_t available_in_fd(UNUSED int const s) noexcept(false)
 {
 #ifdef _WIN32
-      throw except::not_implemented(P99_PASTE_2(WIN32_ERRMSG, s));
+      //throw except::not_implemented(P99_PASTE_2(WIN32_ERRMSG, s));
+      return 0;
 #else
       int value  = 0;
       int result = ::ioctl(s, detail::ioctl_size_available, &value);

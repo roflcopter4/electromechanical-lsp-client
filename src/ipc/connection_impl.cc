@@ -1,3 +1,4 @@
+// ReSharper disable CppTooWideScopeInitStatement
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
 
@@ -12,7 +13,7 @@
 
 #ifdef _WIN32
 # define ERRNO WSAGetLastError()
-# define ERR(n, t) win32::error_exit_wsa(L ## t)
+# define ERR(n, t) util::win32::error_exit_wsa(L ## t)
 #else
 # define ERRNO errno
 # define ERR(n, t) err(n, t)
@@ -25,253 +26,6 @@ namespace ipc::detail {
 /****************************************************************************************/
 
 
-static void
-check_executable(char const *exe)
-{
-      return;
-      std::error_code e;
-      auto st = std::filesystem::status(exe, e);
-
-      if (e)
-            throw(std::runtime_error(
-                fmt::format(FC("Cannot execute file {}: {}"), exe, e)));
-      if (!(static_cast<unsigned>(st.permissions()) & 0111U))
-            throw(std::runtime_error(
-                fmt::format(FC("File {} is not executable"), exe)));
-}
-
-/*--------------------------------------------------------------------------------------*/
-
-ssize_t
-pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
-{
-      ssize_t total = 0;
-
-      if (flags & MSG_WAITALL) {
-            ssize_t n;
-            do {
-                  if (read_ == (-1)) [[unlikely]]
-                        throw except::connection_closed();
-                  n = ::read(read_, static_cast<char *>(buf) + total,
-                             static_cast<size_t>(nbytes - total));
-            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
-      } else {
-            if (read_ == (-1)) [[unlikely]]
-                  throw except::connection_closed();
-            total = ::read(read_, buf, static_cast<size_t>(nbytes));
-      }
-
-      return static_cast<ssize_t>(total);
-}
-
-ssize_t
-pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
-{
-      ssize_t total = 0;
-      ssize_t n;
-
-      do {
-            if (write_ == (-1)) [[unlikely]]
-                  throw except::connection_closed();
-            n = ::write(write_, static_cast<char const *>(buf) + total,
-                        static_cast<size_t>(nbytes - total));
-      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
-
-      return total;
-}
-
-void pipe_connection_impl::close()
-{
-      if (read_ > 2)
-            ::close(read_);
-      if (write_ > 2)
-            ::close(write_);
-      read_  = (-1);
-      write_ = (-1);
-}
-
-/****************************************************************************************/
-
-int
-ersatz_socketpair(int const family, int const type, int const protocol, _Notnull_ socket_t fd[2])
-{
-      /* This code is originally from Tor.  Used with permission. */
-      /* ... and then stolen from libevent2, without permission.  */
-
-      /* This socketpair does not work when localhost is down. So
-       * it's really not the same thing at all. But it's close enough
-       * for now, and really, when localhost is down sometimes, we
-       * have other problems too.
-       */
-#ifdef _WIN32
-# define EVERR(e) (WSA##e)
-# define EVUTIL_SOCKET_ERROR() WSAGetLastError()
-#else
-# define EVERR(e) (e)
-# define EVUTIL_SOCKET_ERROR() errno
-#endif
-#define EVUTIL_SET_SOCKET_ERROR(val) (errno = (val))
-
-      socklen_t size;
-      intptr_t  listener;
-      intptr_t  connector   = -1;
-      intptr_t  acceptor    = -1;
-      int       saved_errno = -1;
-      bool      family_test = family != AF_INET6;
-
-#ifdef AF_UNIX
-      family_test = family_test && (family != AF_UNIX);
-#endif
-
-      if (protocol || family_test) {
-            EVUTIL_SET_SOCKET_ERROR(EVERR(EAFNOSUPPORT));
-            return -1;
-      }
-      if (!fd) {
-            EVUTIL_SET_SOCKET_ERROR(EVERR(EINVAL));
-            return -1;
-      }
-
-      listener = static_cast<intptr_t>(socket(AF_INET6, type, 0));
-      if (listener < 0)
-            return -1;
-
-      struct sockaddr_in6 listen_addr  = {};
-      struct sockaddr_in6 connect_addr = {};
-
-      listen_addr.sin6_addr   = IN6ADDR_LOOPBACK_INIT;
-      listen_addr.sin6_port   = 0;
-      listen_addr.sin6_family = AF_INET6;
-
-      if (bind(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&listen_addr), sizeof(listen_addr)) == -1)
-            goto tidy_up_and_fail;
-
-      if (listen(static_cast<socket_t>(listener), 1) == -1)
-            goto tidy_up_and_fail;
-
-      connector = static_cast<intptr_t>(socket(AF_INET6, type, 0));
-      if (connector < 0)
-            goto tidy_up_and_fail;
-
-      /* We want to find out the port number to connect to.  */
-      size = sizeof(connect_addr);
-      if (getsockname(static_cast<socket_t>(listener), reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
-            goto tidy_up_and_fail;
-      if (size != sizeof(connect_addr))
-            goto abort_tidy_up_and_fail;
-
-      if (connect(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr), sizeof(connect_addr)) == -1)
-            goto tidy_up_and_fail;
-
-      size     = sizeof(listen_addr);
-      acceptor = static_cast<intptr_t>(accept(static_cast<socket_t>(listener),
-                                              reinterpret_cast<sockaddr *>(&listen_addr), &size));
-
-      if (acceptor < 0)
-            goto tidy_up_and_fail;
-      if (size != sizeof(listen_addr))
-            goto abort_tidy_up_and_fail;
-
-      /* Now check we are talking to ourself by matching port
-       * and host on the two sockets. */
-      if (getsockname(static_cast<socket_t>(connector), reinterpret_cast<sockaddr *>(&connect_addr), &size) == -1)
-            goto tidy_up_and_fail;
-
-      if (sizeof(connect_addr) != size ||
-          listen_addr.sin6_family != connect_addr.sin6_family ||
-          listen_addr.sin6_port != connect_addr.sin6_port ||
-          ::memcmp(&listen_addr.sin6_addr, &connect_addr.sin6_addr, sizeof(listen_addr.sin6_addr)) != 0)
-      {
-            goto abort_tidy_up_and_fail;
-      }
-
-      ::util::close_descriptor(listener);
-      fd[0] = static_cast<socket_t>(connector);
-      fd[1] = static_cast<socket_t>(acceptor);
-
-      return 0;
-
-abort_tidy_up_and_fail:
-      saved_errno = EVERR(ECONNABORTED);
-tidy_up_and_fail:
-      if (saved_errno < 0)
-            saved_errno = EVUTIL_SOCKET_ERROR();
-      if (listener != -1)
-            emlsp::util::close_descriptor(listener);
-      if (connector != -1)
-            emlsp::util::close_descriptor(connector);
-      if (acceptor != -1)
-            emlsp::util::close_descriptor(acceptor);
-
-      EVUTIL_SET_SOCKET_ERROR(saved_errno);
-      return -1;
-#undef EVERR
-}
-
-
-socket_t
-fuck_my_ass(char *servername, struct addrinfo *info)
-{
-      char const *server   = servername;
-      char       *servport = strchr(servername, ':');
-      if (!servport)
-            errx(1, "no port identified");
-
-      *servport++ = '\0';
-      socket_t sd = -1;
-
-      struct in_addr   in4_addr{};
-      struct in6_addr  in6_addr{};
-      struct addrinfo  hints{};
-      struct addrinfo *res = nullptr;
-
-      hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
-      hints.ai_socktype = SOCK_STREAM;
-
-      int rc = inet_pton(AF_INET, server, &in4_addr);
-
-      /* valid IPv4 text address? */
-      if (rc == 1) {
-            hints.ai_family = AF_INET;
-            hints.ai_flags |= AI_NUMERICHOST;
-      } else {
-            rc = inet_pton(AF_INET6, server, &in6_addr);
-
-            /* valid IPv6 text address? */
-            if (rc == 1) {
-                  hints.ai_family = AF_INET6;
-                  hints.ai_flags |= AI_NUMERICHOST;
-            }
-      }
-
-      do {
-            rc = getaddrinfo(server, servport, &hints, &res);
-            if (rc != 0) {
-                  warnx("Host not found --> %s", gai_strerror(rc));
-                  if (rc == EAI_FAIL)
-                        ERR(1, "getaddrinfo() failed");
-                  break;
-            }
-
-            sd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-            if (sd == static_cast<socket_t>(-1))
-                  ERR(1, "socket() failed");
-
-            /* TODO Consider actually iterating through the list here? */
-            rc = connect(sd, res->ai_addr, res->ai_addrlen);
-            if (rc < 0)
-                  ERR(1, "connect()");
-            if (info)
-                  memcpy(info, res, sizeof(struct addrinfo));
-      } while (false);
-
-      if (res != nullptr)
-            freeaddrinfo(res);
-
-      return sd;
-}
-
-
 /*======================================================================================*/
 #ifdef _WIN32
 /*======================================================================================*/
@@ -279,76 +33,21 @@ fuck_my_ass(char *servername, struct addrinfo *info)
 
 namespace win32 {
 
-# define READ_FD     0
-# define WRITE_FD    1
-# define INPUT_PIPE  0
-# define OUTPUT_PIPE 1
-
-static int
-start_process_with_pipe(UNUSED char const   *exe,
-                        wchar_t const       *argv,
-                        int                  pipefds[2],
-                        HANDLE const         err_handle,
-                        PROCESS_INFORMATION *pi)
-{
-      HANDLE              handles[2][2] = {};
-      STARTUPINFOW        start_info    = {};
-      SECURITY_ATTRIBUTES sec_attr      = {
-          .nLength              = sizeof(SECURITY_ATTRIBUTES),
-          .lpSecurityDescriptor = nullptr,
-          .bInheritHandle       = true,
-      };
-
-      memset(pi, 0, sizeof(PROCESS_INFORMATION));
-
-      if (!CreatePipe(&handles[INPUT_PIPE][READ_FD], &handles[INPUT_PIPE][WRITE_FD], &sec_attr, 0))
-            util::win32::error_exit(L"Stdin CreatePipe()");
-      if (!SetHandleInformation(handles[INPUT_PIPE][WRITE_FD], HANDLE_FLAG_INHERIT, 0))
-            util::win32::error_exit(L"Stdin SetHandleInformation() (write end)");
-
-      if (!CreatePipe(&handles[OUTPUT_PIPE][READ_FD], &handles[OUTPUT_PIPE][WRITE_FD], &sec_attr, 0))
-            util::win32::error_exit(L"Stdout CreatePipe()");
-      if (!SetHandleInformation(handles[OUTPUT_PIPE][READ_FD], HANDLE_FLAG_INHERIT, 0))
-            util::win32::error_exit(L"Stdout SetHandleInformation() (read end)");
-
-      start_info.cb         = sizeof(STARTUPINFOA);
-      start_info.dwFlags    = STARTF_USESTDHANDLES;
-      start_info.hStdInput  = handles[INPUT_PIPE][READ_FD];
-      start_info.hStdOutput = handles[OUTPUT_PIPE][WRITE_FD];
-      start_info.hStdError  = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
-
-      if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
-            util::win32::error_exit(L"Stderr SetHandleInformation");
-
-      /* _open_osfhandle() ought to transfer ownership of the handle to the file
-       * descriptor. The original HANDLE isn't leaked when it goes out of scope. */
-      pipefds[WRITE_FD] = _open_osfhandle(reinterpret_cast<intptr_t>(handles[INPUT_PIPE][WRITE_FD]), _O_APPEND);
-      pipefds[READ_FD]  = _open_osfhandle(reinterpret_cast<intptr_t>(handles[OUTPUT_PIPE][READ_FD]), _O_RDONLY);
-
-      if (!CreateProcessW(nullptr, const_cast<LPWSTR>(argv), nullptr, nullptr,
-                          TRUE, 0, nullptr, nullptr, &start_info, pi))
-            util::win32::error_exit(L"CreateProcess() failed");
-
-      CloseHandle(handles[INPUT_PIPE][READ_FD]);
-      CloseHandle(handles[OUTPUT_PIPE][WRITE_FD]);
-
-      return 0;
-}
-
-# undef READ_FD
-# undef WRITE_FD
-# undef INPUT_PIPE
-# undef OUTPUT_PIPE
-
 struct socket_info {
-      std::string  path;
-      std::wstring cmdline;
-      socket_t     listener_sock;
-      socket_t     connected_sock;
-      socket_t     accepted_sock;
-      HANDLE       err_handle;
+      std::string path;
+      socket_t    listener_sock;
+      socket_t    connected_sock;
+      socket_t    accepted_sock;
+      bool        connect;
+};
+
+struct process_spawn_info : socket_info {
+      int    argc;
+      char **argv;
+      HANDLE err_handle;
       PROCESS_INFORMATION pid;
 };
+
 
 /*
  * XXX
@@ -436,77 +135,171 @@ protect_argv(int const argc, char **argv)
       return str;
 }
 
-static void
-start_process_with_socket_wrapper(socket_info *info, int *errval)
+
+static procinfo_t
+spawn_connection_common(socket_t const      connected,
+                        HANDLE const        err_fd,
+                        UNUSED size_t const argc,
+                        char              **argv)
 {
-      try {
-            info->connected_sock = util::ipc::connect_to_socket(info->path.c_str());
-      } catch (std::exception &e) {
-            fmt::print(stderr,
-                       FC("Caught exception \"{}\" while attempting to connect to socket at \"{}\".\n"),
-                       e.what(), info->path);
-            *errval = ::WSAGetLastError();
-            return;
-      }
+      PROCESS_INFORMATION pid;
+      ZeroMemory(&pid, sizeof pid);
+      HANDLE io = static_cast<intptr_t>(connected) >= 0
+                      ? reinterpret_cast<HANDLE>(connected)
+                      : CreateFileA("NUL", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
 
       STARTUPINFOW startinfo = {};
       startinfo.cb           = sizeof(startinfo);
       startinfo.dwFlags      = STARTF_USESTDHANDLES;
-      startinfo.hStdInput    = reinterpret_cast<HANDLE>(info->connected_sock); //NOLINT
-      startinfo.hStdOutput   = reinterpret_cast<HANDLE>(info->connected_sock); //NOLINT
-      startinfo.hStdError    = info->err_handle;
+      startinfo.hStdInput    = io;
+      startinfo.hStdOutput   = io;
+      startinfo.hStdError    = err_fd;
 
+      if (!::SetHandleInformation(io, HANDLE_FLAG_INHERIT, 1))
+            util::win32::error_exit(L"IO SetHandleInformation");
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      bool b = ::CreateProcessW(nullptr, const_cast<LPWSTR>(info->cmdline.c_str()), nullptr,
-                                nullptr, true, 0, nullptr, nullptr, &startinfo, &info->pid);
+      AUTOC safe_argv = win32::protect_argv(static_cast<int>(argc), argv);
+      AUTOC ret = ::CreateProcessW(nullptr, const_cast<LPWSTR>(safe_argv.c_str()), nullptr,
+                                   nullptr, true, 0, nullptr, nullptr, &startinfo, &pid);
 
-      AUTOC error = ::GetLastError();
-      *errval     = static_cast<int>(b ? 0LU : error);
+      if (!ret)
+            util::win32::error_exit(L"CreateProcessW()");
+      if (io != reinterpret_cast<HANDLE>(connected))
+            CloseHandle(io);
+
+      return pid;
 }
 
+
+static void
+async_connect_to_unix_socket(socket_info *info) noexcept
+{
+      try {
+            info->connected_sock = util::ipc::connect_to_unix_socket(info->path.c_str());
+      } catch (std::exception &e) {
+            ::util::win32::error_exit_wsa(L"Failed to connect to socket");
+      }
+}
+
+
+# define READ_FD     0
+# define WRITE_FD    1
+# define INPUT_PIPE  0
+# define OUTPUT_PIPE 1
+
+static int
+start_process_with_pipe(UNUSED char const   *exe,
+                        wchar_t const       *argv,
+                        HANDLE               pipefds[2],
+                        void const *const    err_handle,
+                        PROCESS_INFORMATION *pi)
+{
+      HANDLE              handles[2][2] = {};
+      STARTUPINFOW        start_info    = {};
+      SECURITY_ATTRIBUTES sec_attr      = {
+          .nLength              = sizeof(SECURITY_ATTRIBUTES),
+          .lpSecurityDescriptor = nullptr,
+          .bInheritHandle       = true,
+      };
+
+      ZeroMemory(pi, sizeof(PROCESS_INFORMATION));
+
+      if (!CreatePipe(&handles[INPUT_PIPE][READ_FD], &handles[INPUT_PIPE][WRITE_FD], &sec_attr, 0))
+            util::win32::error_exit(L"Stdin CreatePipe()");
+      if (!SetHandleInformation(handles[INPUT_PIPE][WRITE_FD], HANDLE_FLAG_INHERIT, 0))
+            util::win32::error_exit(L"Stdin SetHandleInformation() (write end)");
+
+      if (!CreatePipe(&handles[OUTPUT_PIPE][READ_FD], &handles[OUTPUT_PIPE][WRITE_FD], &sec_attr, 0))
+            util::win32::error_exit(L"Stdout CreatePipe()");
+      if (!SetHandleInformation(handles[OUTPUT_PIPE][READ_FD], HANDLE_FLAG_INHERIT, 0))
+            util::win32::error_exit(L"Stdout SetHandleInformation() (read end)");
+
+      start_info.cb         = sizeof(STARTUPINFOA);
+      start_info.dwFlags    = STARTF_USESTDHANDLES;
+      start_info.hStdInput  = handles[INPUT_PIPE][READ_FD];
+      start_info.hStdOutput = handles[OUTPUT_PIPE][WRITE_FD];
+      start_info.hStdError  = const_cast<HANDLE>(err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE));
+
+      if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
+            util::win32::error_exit(L"Stderr SetHandleInformation");
+
+      /* _open_osfhandle() ought to transfer ownership of the handle to the file
+       * descriptor. The original HANDLE isn't leaked when it goes out of scope. */
+      //pipefds[WRITE_FD] = _open_osfhandle(reinterpret_cast<intptr_t>(handles[INPUT_PIPE][WRITE_FD]), _O_APPEND);
+      //pipefds[READ_FD]  = _open_osfhandle(reinterpret_cast<intptr_t>(handles[OUTPUT_PIPE][READ_FD]), _O_RDONLY);
+
+      pipefds[WRITE_FD] = handles[INPUT_PIPE][WRITE_FD];
+      pipefds[READ_FD]  = handles[OUTPUT_PIPE][READ_FD];
+
+      if (!CreateProcessW(nullptr, const_cast<LPWSTR>(argv), nullptr, nullptr,
+                          true, 0, nullptr, nullptr, &start_info, pi))
+            util::win32::error_exit(L"CreateProcess() failed");
+
+      CloseHandle(handles[INPUT_PIPE][READ_FD]);
+      CloseHandle(handles[OUTPUT_PIPE][WRITE_FD]);
+
+      return 0;
+}
+
+# undef READ_FD
+# undef WRITE_FD
+# undef INPUT_PIPE
+# undef OUTPUT_PIPE
+
+
 } // namespace win32
+
+
+using win32::spawn_connection_common;
 
 
 /****************************************************************************************/
 /* Unix Socket Connection */
 
+void
+unix_socket_connection_impl::open()
+{
+      throw_if_initialized(typeid(*this), 1);
+      if (path_.empty())
+            path_ = util::get_temporary_filename(nullptr, ".sock").string();
+      if (listener_ == static_cast<socket_t>(-1))
+            listener_ = open_new_socket();
+
+      if (should_connect()) {
+            auto info         = win32::socket_info{path_, listener_, {}, {}, should_connect()};
+            auto start_thread = std::thread{win32::async_connect_to_unix_socket, &info};
+
+            sockaddr_un con_addr = {};
+            int         len      = sizeof(con_addr);
+            acceptor_            = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+            if (!acceptor_ || acceptor_ == static_cast<uintptr_t>(-1))
+                  util::win32::error_exit_wsa(L"accept()");
+
+            start_thread.join();
+            connector_ = info.connected_sock;
+      }
+
+      set_initialized(1);
+}
+
 procinfo_t
 unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
-      throw_if_initialized(typeid(*this));
-      check_executable(argv[0]);
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
 
-      if (listener_ == static_cast<socket_t>(-1)) {
-            if (path_.empty())
-                  path_ = util::get_temporary_filename(nullptr, ".sock").string();
-            listener_ = open_new_socket();
-      }
+      AUTOC err_handle = get_err_handle();
+      AUTOC pid = spawn_connection_common(connector_, err_handle, argc, argv);
 
-      int  errval = 0;
-      auto info = win32::socket_info{path_, win32::protect_argv(argc, argv),
-                                     listener_, {}, {}, get_err_handle(), {}};
-      auto start_thread = std::thread{win32::start_process_with_socket_wrapper,
-                                      &info, &errval};
+      if (err_sink_type_ == sink_type::FILENAME)
+            ::CloseHandle(err_handle);
 
-      sockaddr_un con_addr = {};
-      int         len      = sizeof(con_addr);
-      acceptor_            = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
-
-      if (!acceptor_ || acceptor_ == static_cast<uintptr_t>(-1))
-            util::win32::error_exit_wsa("accept()");
-
-      start_thread.join();
-      if (errval != 0)
-            errx(errval, "Process creation failed -> %d.", errval);
-      if (err_sink_type_ != sink_type::DEFAULT)
-            ::CloseHandle(info.err_handle);
-
-      procinfo_t const *pid_ptr = &info.pid;
-
-      set_to_initialized();
-      return *pid_ptr;
+      set_initialized(2);
+      return pid;
 }
 
 socket_t
@@ -521,23 +314,24 @@ unix_socket_connection_impl::open_new_socket()
       memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
       addr_.sun_family = AF_UNIX;
 
-      socket_t const connection_sock = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t listener = static_cast<socket_t>(-1);
 
-      if (auto const e = ::WSAGetLastError(); e != 0)
-            util::win32::error_exit_explicit(L"socket()", e);
+      if (should_open_listener()) {
+            listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
-      AUTOC ret = ::bind(connection_sock, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
-      if (ret == (-1)) {
-            util::win32::error_exit_wsa(L"bind()");
-            auto const e = fmt::system_error(errno, "bind() @({}:{})", __FILE__, __LINE__);
-            std::cerr << e.what() << std::endl;
-            abort();
+            if (auto const e = ::WSAGetLastError(); e != 0)
+                  util::win32::error_exit_explicit(L"socket()", e);
+
+            AUTOC ret = ::bind(listener, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
+            if (ret < 0)
+                  util::win32::error_exit_wsa(L"bind()");
+
+            if (::listen(listener, 8) == (-1))
+                 util::win32::error_exit_wsa(L"listen");
+
       }
-           // err(1, "bind");
-      if (::listen(connection_sock, 0) == (-1))
-           util::win32::error_exit_wsa(L"listen");
 
-      return connection_sock;
+      return listener;
 }
 
 socket_t
@@ -546,89 +340,123 @@ unix_socket_connection_impl::connect_to_socket()
       socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
 
       if (auto const e = ::WSAGetLastError(); e != 0)
-            util::win32::error_exit_wsa("socket(): %d", e);
+            util::win32::error_exit_wsa(L"socket(): "s + std::to_wstring(e));
 
       AUTOC ret = ::connect(connector, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
       if (ret == (-1))
-            util::win32::error_exit_wsa("connect");
+            util::win32::error_exit_wsa(L"connect");
 
       return connector;
 }
 
-/*--------------------------------------------------------------------------------------*/
+void
+unix_socket_connection_impl::set_listener(socket_t const sock, sockaddr_un const &addr)
+{
+      should_close_listnener() = false;
+      this->listener_          = sock;
+      this->addr_              = addr;
+}
 
-# ifdef HAVE_SOCKETPAIR
-
-// Maybe someday windows will someday get socketpair()?...
-
-procinfo_t
-socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
+void
+unix_socket_connection_impl::set_address(std::string path)
 {
       throw_if_initialized(typeid(*this));
-      check_executable(argv[0]);
-
-      procinfo_t pid;
-      acceptor_ = open_new_socket();
-      err_fd_   = get_err_handle();
-
-      auto const cmdline = win32::protect_argv(argc, argv);
-      socket_t   dsock   = connect_to_socket();
-
-      STARTUPINFOA startinfo = {};
-      startinfo.cb           = sizeof(startinfo);
-      startinfo.dwFlags      = STARTF_USESTDHANDLES;
-      startinfo.hStdInput    = reinterpret_cast<HANDLE>(dsock); //NOLINT
-      startinfo.hStdOutput   = reinterpret_cast<HANDLE>(dsock); //NOLINT
-      startinfo.hStdError    = err_fd_;
-
-      if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
-            util::win32::error_exit(L"Stderr SetHandleInformation");
-
-      ::CreateProcessA(nullptr, const_cast<LPSTR>(info->cmdline.c_str()), nullptr,
-                       nullptr, true, 0, nullptr, nullptr, &startinfo, &info->pid);
-      AUTOC errval = ::GetLastError();
-
-      if (errval != 0)
-            errx(errval, "Process creation failed -> %d.", errval);
-      if (err_sink_type_ != sink_type::DEFAULT)
-            ::CloseHandle(err_handle);
-
-      pid = info.pid;
-
-      set_to_initialized();
-      return pid;
+      path_ = std::move(path);
 }
 
 socket_t
-socketpair_connection_impl::open_new_socket()
+unix_socket_connection_impl::connect()
 {
-      if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds_) == (-1))
-            err(1, "socketpair()");
-      return fds_[0];
+      if (!check_initialized(1))
+            throw std::logic_error("Cannot connect to uninitialized address!");
+
+      connector_ = connect_to_socket();
+      main_fd_   = connector_;
+      return connector_;
 }
 
 socket_t
-socketpair_connection_impl::connect_to_socket()
+unix_socket_connection_impl::accept()
 {
-      return fds_[1]; /* ugh */
+      if (!check_initialized(1))
+            throw std::logic_error("Cannot connect to uninitialized address!");
+
+      sockaddr_un con_addr = {};
+      int         len      = sizeof(con_addr);
+      acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+      if (!acceptor_ || acceptor_ == static_cast<uintptr_t>(-1))
+            util::win32::error_exit_wsa(L"accept()");
+
+      main_fd_ = acceptor_;
+      return acceptor_;
 }
 
-# endif
 
 /*--------------------------------------------------------------------------------------*/
 /* Pipe Connection */
+
+void pipe_connection_impl::close()
+{
+      if (read_ > 2)
+            ::close(read_);
+      if (write_ > 2)
+            ::close(write_);
+      read_  = (-1);
+      write_ = (-1);
+}
 
 procinfo_t
 pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 {
       throw_if_initialized(typeid(*this));
-      check_executable(argv[0]);
 
-      int pipefds[2];
+      HANDLE pipefds[2];
       procinfo_t pid{};
 
-      HANDLE err_handle = get_err_handle();
-      AUTOC  cmdline    = win32::protect_argv(static_cast<int>(argc), argv);
+      AUTOC err_handle = get_err_handle();
+      AUTOC cmdline    = win32::protect_argv(static_cast<int>(argc), argv);
+
+      win32::start_process_with_pipe(argv[0], cmdline.c_str(),
+                                     pipefds, err_handle, &pid);
+
+      if (err_sink_type_ != sink_type::DEFAULT)
+            CloseHandle(err_handle);
+
+      read_  = _open_osfhandle(reinterpret_cast<intptr_t>(pipefds[0]), _O_RDONLY | _O_BINARY);
+      write_ = _open_osfhandle(reinterpret_cast<intptr_t>(pipefds[1]), _O_WRONLY | _O_BINARY);
+
+      //if (_setmode(write_, _O_BINARY) == (-1))
+      //      util::win32::error_exit(L"_setmode(write_)");
+      //if (_setmode(read_, _O_BINARY) == (-1))
+      //      util::win32::error_exit(L"_setmode(read_)");
+
+      set_initialized();
+      return pid;
+}
+
+/*--------------------------------------------------------------------------------------*/
+
+void
+pipe_handle_connection_impl::close()
+{
+      if (read_ != GetStdHandle(STD_INPUT_HANDLE))
+            ::CloseHandle(read_);
+      if (write_ != GetStdHandle(STD_OUTPUT_HANDLE))
+            ::CloseHandle(write_);
+      read_  = reinterpret_cast<HANDLE>(-1);
+      write_ = reinterpret_cast<HANDLE>(-1);
+}
+
+procinfo_t
+pipe_handle_connection_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this));
+
+      HANDLE pipefds[2];
+      procinfo_t pid{};
+
+      AUTOC err_handle = get_err_handle();
+      AUTOC cmdline    = win32::protect_argv(static_cast<int>(argc), argv);
 
       win32::start_process_with_pipe(argv[0], cmdline.c_str(),
                                      pipefds, err_handle, &pid);
@@ -639,13 +467,56 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
       read_  = pipefds[0];
       write_ = pipefds[1];
 
-      if (_setmode(write_, _O_BINARY) == (-1))
-            util::win32::error_exit(L"_setmode(write_)");
-      if (_setmode(read_, _O_BINARY) == (-1))
-            util::win32::error_exit(L"_setmode(read_)");
-
+      set_initialized();
       return pid;
 }
+
+ssize_t
+pipe_handle_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
+{
+      auto    lock  = std::lock_guard{read_mtx_};
+      ssize_t total = 0;
+      DWORD   n;
+
+      if (flags & MSG_WAITALL) {
+            do {
+                  if (read_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                        throw except::connection_closed();
+
+                  bool b = ::ReadFile(read_, static_cast<char *>(buf) + total, static_cast<size_t>(nbytes - total), &n, nullptr);
+                  if (!b)
+                        util::win32::error_exit(L"ReadFile()");
+            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+      } else {
+            if (read_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                  throw except::connection_closed();
+            bool b = ::ReadFile(read_, static_cast<char *>(buf), static_cast<size_t>(nbytes), &n, nullptr);
+            if (!b)
+                  util::win32::error_exit(L"ReadFile()");
+            total = n;
+      }
+
+      return static_cast<ssize_t>(total);
+}
+
+ssize_t
+pipe_handle_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+      DWORD n;
+
+      do {
+            if (write_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                  throw except::connection_closed();
+            bool b = ::WriteFile(write_, static_cast<char const *>(buf) + total, static_cast<size_t>(nbytes - total), &n, nullptr);
+            if (!b)
+                  util::win32::error_exit(L"ReadFile()");
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
+
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -668,15 +539,14 @@ named_pipe_spawn_connection_helper(HANDLE               pipe,
             util::win32::error_exit(L"Named pipe SetHandleInformation");
 
 
-      HANDLE client_pipe =
-          CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC,
-                      /* FILE_SHARE_READ | FILE_SHARE_WRITE */ 0, &sec_attr,
-                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+      HANDLE client_pipe = CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC,
+                                       /* FILE_SHARE_READ | FILE_SHARE_WRITE */ 0, &sec_attr,
+                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 
       if (client_pipe == INVALID_HANDLE_VALUE)
             util::win32::error_exit(L"CreateFileW");
 
-      memset(pi, 0, sizeof(PROCESS_INFORMATION));
+      ZeroMemory(pi, sizeof(PROCESS_INFORMATION));
       STARTUPINFOW start_info = {};
       start_info.cb           = sizeof(STARTUPINFOW);
       start_info.dwFlags      = STARTF_USESTDHANDLES;
@@ -697,95 +567,128 @@ named_pipe_spawn_connection_helper(HANDLE               pipe,
       //CloseHandle(client_pipe);
 }
 
-procinfo_t
-win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
+void
+win32_named_pipe_impl::open()
 {
-      throw_if_initialized(typeid(*this));
-      check_executable(argv[0]);
+      throw_if_initialized(typeid(*this), 1);
 
+      std::string debug_fname;
       {
             char buf[PATH_MAX + 1];
             size_t const len = braindead_tempname(buf, R"(\\.\pipe)", MAIN_PROJECT_NAME "-", "-io_pipe");
-            pipe_fname_ = {buf, len};
+            pipe_fname_ = util::unistring::charconv<wchar_t>(buf, len);
+            debug_fname = {buf, len};
       }
 
-      auto const wide_fname = util::unistring::charconv<wchar_t>(pipe_fname_);
-
       pipe_ = CreateNamedPipeW(
-           wide_fname.c_str(),
+           pipe_fname_.c_str(),
            PIPE_ACCESS_DUPLEX | WRITE_DAC | FILE_FLAG_FIRST_PIPE_INSTANCE,
            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
-           1,
+           PIPE_UNLIMITED_INSTANCES,
            65536,     // outbound buffer
            65536,     // inbound buffer
            0, nullptr // Default wait time and security attrs.
       );
 
-      fmt::print(stderr, FC("Using pipe at `{}' with raw value `{}'.\n"), pipe_fname_, pipe_);
-      std::wcerr << L"Wide name: "sv << wide_fname << L'\n';
+      fmt::print(stderr, FC("Using pipe at `{}' with raw value `{}'.\n"), debug_fname, pipe_);
       fflush(stderr);
+      std::wcerr << L"Wide name: "sv << pipe_fname_ << L'\n';
       std::wcerr.flush();
+
+      SecureZeroMemory(&overlapped_, sizeof overlapped_);
+      overlapped_.hEvent = CreateEvent( 
+         nullptr,   // default security attribute 
+         true,      // manual-reset event 
+         true,      // initial state = signaled 
+         nullptr);  // unnamed event object
+
+      set_initialized(1);
+}
+
+procinfo_t
+win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
 
       PROCESS_INFORMATION pi;
       auto const safe_argv  = win32::protect_argv(static_cast<int>(argc), argv);
       HANDLE     err_handle = get_err_handle();
       err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
 
-      named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, wide_fname, safe_argv);
+      named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, pipe_fname_, safe_argv);
 
       if (err_sink_type_ != sink_type::DEFAULT && err_handle)
             CloseHandle(err_handle);
 
-      set_to_initialized();
+      set_initialized(2);
       return pi;
 }
 
 ssize_t
 win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
 {
+      auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
       DWORD  n      = 0;
       int    ret;
-
-      mtx_.lock();
+      //memset(&overlapped_, 0, sizeof overlapped_);
+      overlapped_.hEvent = CreateEvent(nullptr, true, true, nullptr);
+      assert(overlapped_.hEvent != nullptr);
 
       if (flags & MSG_WAITALL) {
             do {
-                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &overlapped_);;
-                  ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, nullptr);;
-            } while (ret && n != UINT32_C(-1) && (total += n) < nbytes);
+                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &overlapped_);
+                  //assert(overlapped_.hEvent != nullptr);
+                  //if (ret < 0)
+                  //      ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
+
+                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &ov);
+                  //ResetEvent(ov.hEvent);
+                  ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, nullptr);
+                  if (ret == 0 && n == 0)
+                        break;
+            } while (ret >= 0 && n != static_cast<uint32_t>(-1) && (total += n) < nbytes);
       } else {
             do {
                   //ret = ReadFile(pipe_, buf, nbytes, &n, &overlapped_);
+                  //assert(overlapped_.hEvent != nullptr);
+                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &ov);
+                  //if (!ret)
+                  //      ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
+                  //ResetEvent(ov.hEvent);
                   ret = ReadFile(pipe_, buf, nbytes, &n, nullptr);
             } while (ret >=0 && n == 0);
             total = n;
       }
 
+      ResetEvent(overlapped_.hEvent);
       AUTOC e = GetLastError();
       //if (!ret && e != ERROR_MORE_DATA)
-      if (!ret || e)
-            util::win32::error_exit_explicit(L"ReadFile", e);
+      //if (!ret || e)
+            //util::win32::error_exit_explicit(L"ReadFile", e);
 
-      mtx_.unlock();
       return total;
 }
 
 ssize_t
 win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, int const flags)
 {
+      auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
       DWORD   n     = 0;
       int     ret;
 
-      mtx_.lock();
-
       do {
-            //ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, &overlapped_);;
-            ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, nullptr);;
-      } while (ret >= 0 && n != UINT32_C(-1) && (total += n) < nbytes);
+            //ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, &overlapped_);
+            //ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
+            //ResetEvent(overlapped_.hEvent);
+            ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, nullptr);
+      } while (ret >= 0 && n != static_cast<uint32_t>(-1) && (total += n) < nbytes);
 
-      mtx_.unlock();
+
+
       total = n;
       return total;
 }
@@ -803,17 +706,15 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, int const fl
 
 template<typename T>
 static procinfo_t
-unix_spawn_connection_common(T self, int const err_fd, UNUSED size_t const argc, char **argv)
+spawn_connection_common(socket_t const connected, int const err_fd, UNUSED size_t const argc, char **argv)
 {
-      // check_executable(argv[0]);
       pid_t const this_id = getpid();
       procinfo_t  pid;
       
       if ((pid = ::fork()) == 0) {
-            socket_t dsock = self->get_connected_socket();
-            ::dup2(dsock, STDOUT_FILENO);
-            ::dup2(dsock, STDIN_FILENO);
-            ::close(dsock);
+            ::dup2(connected, STDOUT_FILENO);
+            ::dup2(connected, STDIN_FILENO);
+            ::close(connected);
             assert(argv[0] != nullptr);
 
             if (err_fd > 2) {
@@ -847,7 +748,7 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
       }
 
       err_fd_ = get_err_handle();
-      procinfo_t pid = unix_spawn_connection_common(this, err_fd_, argc, argv);
+      procinfo_t pid = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
 
       {
             sockaddr_un con_addr{};
@@ -857,7 +758,7 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
                   err(1, "accept");
       }
 
-      set_to_initialized();
+      set_initialized();
       return pid;
 }
 
@@ -924,9 +825,9 @@ socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char *
 
       acceptor_ = open_new_socket();
       err_fd_   = get_err_handle();
-      procinfo_t pid = unix_spawn_connection_common(this, err_fd_, argc, argv);
+      procinfo_t pid = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
 
-      set_to_initialized();
+      set_initialized();
       return pid;
 }
 
@@ -980,7 +881,6 @@ procinfo_t
 pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 {
       throw_if_initialized(typeid(*this));
-      check_executable(argv[0]);
 
       int        fds[2][2];
       procinfo_t pid;
@@ -1018,7 +918,7 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
       write_ = fds[0][WRITE_FD];
       read_  = fds[1][READ_FD];
 
-      set_to_initialized();
+      set_initialized();
       return pid;
 }
 
@@ -1026,12 +926,54 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 #endif // defined _WIN32
 /*======================================================================================*/
 
+/* Not system specific. */
+
+ssize_t
+pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
+{
+      auto    lock  = std::lock_guard{read_mtx_};
+      ssize_t total = 0;
+
+      if (flags & MSG_WAITALL) {
+            ssize_t n;
+            do {
+                  if (read_ == (-1)) [[unlikely]]
+                        throw except::connection_closed();
+                  n = ::read(read_, static_cast<char *>(buf) + total,
+                             static_cast<size_t>(nbytes - total));
+            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+      } else {
+            if (read_ == (-1)) [[unlikely]]
+                  throw except::connection_closed();
+            total = ::read(read_, buf, static_cast<size_t>(nbytes));
+      }
+
+      return static_cast<ssize_t>(total);
+}
+
+ssize_t
+pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+      ssize_t n;
+
+      do {
+            if (write_ == (-1)) [[unlikely]]
+                  throw except::connection_closed();
+            n = ::write(write_, static_cast<char const *>(buf) + total,
+                        static_cast<size_t>(nbytes - total));
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
+
 
 /*======================================================================================*/
 /* Inet Connection */
 
 
-static int lazy_getsockname(socket_t listener, sockaddr *addr, socklen_t const size)
+static int lazy_getsockname(socket_t const listener, sockaddr *addr, socklen_t const size)
 {
       socklen_t size_local = size;
       int ret  = ::getsockname(listener, addr, &size_local);
@@ -1042,9 +984,9 @@ static int lazy_getsockname(socket_t listener, sockaddr *addr, socklen_t const s
 }
 
 static
-socket_t open_new_inet_socket(sockaddr *addr, socklen_t const size, int const type)
+socket_t open_new_inet_socket(sockaddr const *addr, socklen_t const size, int const type, int const queue = 1)
 {
-      socket_t listener = ::socket(type, SOCK_STREAM, 0);
+      socket_t const listener = ::socket(type, SOCK_STREAM, 0);
       if (static_cast<intptr_t>(listener) < 0)
             ERR(1, "socket()");
 
@@ -1052,7 +994,7 @@ socket_t open_new_inet_socket(sockaddr *addr, socklen_t const size, int const ty
       if (ret == -1)
             ERR(1, "bind()");
 
-      ret = ::listen(listener, 1);
+      ret = ::listen(listener, queue);
       if (ret == (-1))
             ERR(1, "listen()");
 
@@ -1061,14 +1003,14 @@ socket_t open_new_inet_socket(sockaddr *addr, socklen_t const size, int const ty
       return listener;
 }
 
-static socket_t
-connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int type)
+socket_t
+connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int const type)
 {
-      socket_t connector = ::socket(type, SOCK_STREAM, 0);
+      socket_t const connector = ::socket(type, SOCK_STREAM, type);
       if (static_cast<intptr_t>(connector) < 0)
             ERR(1, "socket()");
 
-      int ret = ::connect(connector, reinterpret_cast<sockaddr const *>(addr), size);
+      int const ret = ::connect(connector, addr, size);
       if (ret == -1)
             ERR(1, "connect()");
 
@@ -1080,21 +1022,31 @@ connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int type)
 /* Either */
 
 
-procinfo_t
-inet_any_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+void
+inet_any_socket_connection_impl::open()
 {
+      throw_if_initialized(typeid(*this), 1);
       connect_to_socket();
-      socklen_t size = addr_length_;
-      acceptor_ = accept(listener_, addr_, &size);
 
-      if (static_cast<intptr_t>(acceptor_) < 0 || size != addr_length_)
-            ERR(1, "accept");
+      if (should_connect()) {
+            socklen_t size = addr_length_;
+            acceptor_      = ::accept(listener_, addr_, &size);
+            if (static_cast<intptr_t>(acceptor_) < 0 || size != addr_length_)
+                  ERR(1, "accept");
+      }
 
-      // fmt::print(stderr, FC("Spawning connection on {:X}\n"), __builtin_bswap32((reinterpret_cast<sockaddr_in *>(addr_))->sin_addr.s_addr));
-      err_fd_ = get_err_handle();
-      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
-      ::util::close_descriptor(connector_);
-      set_to_initialized();
+      set_initialized(1);
+}
+
+procinfo_t
+inet_any_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
+      err_fd_   = get_err_handle();
+      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+      set_initialized(2);
       return ret;
 }
 
@@ -1102,9 +1054,10 @@ socket_t
 inet_any_socket_connection_impl::open_new_socket()
 {
       if (!addr_init_) {
-            addr_length_      = sizeof(sockaddr_in6);
-            type_             = AF_INET6;
-            auto *addr        = (sockaddr_in6 *)calloc(1, addr_length_); // NOLINT
+            addr_length_ = sizeof(sockaddr_in6);
+            type_        = AF_INET6;
+
+            auto *addr        = ::util::xcalloc<sockaddr_in6>();
             addr->sin6_addr   = IN6ADDR_LOOPBACK_INIT;
             addr->sin6_family = type_; // Default to ipv6 I guess
             addr->sin6_port   = 0;
@@ -1112,12 +1065,13 @@ inet_any_socket_connection_impl::open_new_socket()
             addr_init_        = true;
       }
 
-      listener_ = open_new_inet_socket(addr_, addr_length_, type_);
+      if (should_connect()) {
+            listener_ = open_new_inet_socket(addr_, addr_length_, type_, 255);
+            memset(addr_, 0, addr_length_);
+            lazy_getsockname(listener_, addr_, addr_length_);
+      }
 
-      memset(addr_, 0, addr_length_);
-      lazy_getsockname(listener_, addr_, addr_length_);
       addr_init_ = true;
-
       return listener_;
 }
 
@@ -1131,23 +1085,25 @@ inet_any_socket_connection_impl::connect_to_socket()
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
-      } else {
+      } else if (should_open_listener()) {
             listener_ = open_new_socket();
       }
 
-      connector_ = connect_to_inet_socket(addr_, addr_length_, type_);
+      if (should_connect())
+            connector_ = connect_to_inet_socket(addr_, addr_length_, type_);
+
       addr_init_ = true;
       return connector_;
 }
 
 
-void inet_any_socket_connection_impl::assign_addr_from_addrinfo(addrinfo *info)
+void inet_any_socket_connection_impl::assign_from_addrinfo(addrinfo const *info)
 {
       if (addr_)
             free(addr_); //NOLINT
-      type_ = info->ai_family;
-      addr_length_ = info->ai_addrlen;
-      addr_ = static_cast<sockaddr *>(calloc(1, addr_length_)); //NOLINT
+      type_        = info->ai_family;
+      addr_length_ = static_cast<socklen_t>(info->ai_addrlen);
+      addr_        = ::util::xcalloc<sockaddr>(1, addr_length_);
       memcpy(addr_, info->ai_addr, info->ai_addrlen);
       addr_init_ = true;
 }
@@ -1158,7 +1114,7 @@ int inet_any_socket_connection_impl::resolve(char const *server_name, char const
       auto *info = ::util::ipc::resolve_addr(server_name, port);
       if (!info)
             return (-1);
-      assign_addr_from_addrinfo(info);
+      assign_from_addrinfo(info);
       freeaddrinfo(info);
       return 0;
 }
@@ -1168,19 +1124,20 @@ int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
 {
 #define BAD_ADDRESS(ipver)      \
       throw std::runtime_error( \
-          fmt::format(FC("Invalid IPv" ipver " address \"{}\""), server_and_port));
+          fmt::format(FC("Invalid IPv" ipver " address \"{}\" - @(line {})"), server_and_port, __LINE__));
 
       char buf[48];
       char const *server;
       char const *port;
 
       if (server_and_port[0] == '[') {
-            /* IPv6 address, in brackets, hopefully with port. */
-            if (*(server = server_and_port + 1) != '[')
+            /* IPv6 address, in brackets, hopefully with port.
+             * e.g. [::1]:12345 */
+            if (!*(server = server_and_port + 1))
                   BAD_ADDRESS("6");
             if (!(port = strchr(server, ']')))
                   BAD_ADDRESS("6");
-            size_t const size = port - server - 1;
+            size_t const size = port - server;
             if (size > SIZE_C(39) || port[1] != ':' || !isdigit(port[2]))
                   BAD_ADDRESS("6");
 
@@ -1189,6 +1146,8 @@ int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
             server    = buf;
             port     += 2;
       } else {
+            /* Assume it's an ipv4 address with port.
+             * e.g. 127.0.0.1:12345 */
             port              = strchr(server_and_port, ':');
             size_t const size = port - server_and_port;
             memcpy(buf, server_and_port, size);
@@ -1203,6 +1162,7 @@ int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
       }
 
       return resolve(server, port);
+
 #undef BAD_ADDRESS
 }
 
@@ -1211,21 +1171,31 @@ int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
 /* IPv4 only */
 
 
-procinfo_t
-inet_ipv4_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+void
+inet_ipv4_socket_connection_impl::open()
 {
+      throw_if_initialized(typeid(*this), 1);
       connect_to_socket();
-      socklen_t size = sizeof(addr_);
-      acceptor_ = accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
 
-      if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
-            ERR(1, "accept");
+      if (should_connect()) {
+            socklen_t size = sizeof(addr_);
+            acceptor_      = ::accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
+            if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+                  ERR(1, "accept");
+      }
 
-      err_fd_ = get_err_handle();
-      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
-      shutdown(listener_, 2);
-      ::util::close_descriptor(connector_);
-      set_to_initialized();
+      set_initialized(1);
+}
+
+procinfo_t
+inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
+      err_fd_   = get_err_handle();
+      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+      set_initialized(2);
       return ret;
 }
 
@@ -1234,13 +1204,13 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 {
       if (!addr_init_) {
             memset(&addr_, 0, sizeof(addr_));
-            addr_.sin_addr.s_addr = INADDR_LOOPBACK; //__bswap_constant_32(INADDR_LOOPBACK);
+            addr_.sin_addr.s_addr = UINT32_C(0x0100'007F); // 127.0.0.1
             addr_.sin_family      = AF_INET;
             addr_.sin_port        = 0;
       }
 
       listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                        sizeof(addr_), AF_INET);
+                                        sizeof(addr_), AF_INET, 255);
       memset(&addr_, 0, sizeof(addr_));
       lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
       addr_init_ = true;
@@ -1258,12 +1228,13 @@ inet_ipv4_socket_connection_impl::connect_to_socket()
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
-      } else {
+      } else if (should_open_listener()) {
             listener_ = open_new_socket();
       }
 
-      connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                          sizeof(addr_), AF_INET);
+      if (should_connect())
+            connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                                sizeof(addr_), AF_INET);
       return connector_;
 }
 
@@ -1272,20 +1243,31 @@ inet_ipv4_socket_connection_impl::connect_to_socket()
 /* IPv6 only */
 
 
-procinfo_t
-inet_ipv6_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+void
+inet_ipv6_socket_connection_impl::open()
 {
+      throw_if_initialized(typeid(*this), 1);
       connect_to_socket();
-      socklen_t size = sizeof(addr_);
-      acceptor_ = accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
 
-      if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
-            ERR(1, "accept");
+      if (should_connect()) {
+            socklen_t size = sizeof(addr_);
+            acceptor_      = ::accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
+            if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+                  ERR(1, "accept");
+      }
 
-      err_fd_ = get_err_handle();
-      int ret = unix_spawn_connection_common(this, err_fd_, argc, argv);
-      ::util::close_descriptor(connector_);
-      set_to_initialized();
+      set_initialized(1);
+}
+
+procinfo_t
+inet_ipv6_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
+      err_fd_   = get_err_handle();
+      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+      set_initialized(2);
       return ret;
 }
 
@@ -1299,12 +1281,14 @@ inet_ipv6_socket_connection_impl::open_new_socket()
             addr_.sin6_port   = 0;
       }
 
-      listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                        sizeof(addr_), AF_INET6);
-      memset(&addr_, 0, sizeof(addr_));
-      lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
-      addr_init_ = true;
+      if (should_open_listener()) {
+            listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+                                              sizeof(addr_), AF_INET6, 255);
+            memset(&addr_, 0, sizeof(addr_));
+            lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+      }
 
+      addr_init_ = true;
       return listener_;
 }
 
@@ -1318,7 +1302,7 @@ inet_ipv6_socket_connection_impl::connect_to_socket()
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
-      } else {
+      } else if (should_open_listener()) {
             listener_ = open_new_socket();
       }
 

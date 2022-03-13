@@ -110,11 +110,21 @@ class rapid_doc
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
+#if 1
       template <NonStringRef ...Types>
       void add_member(Types &&...args)
       {
             cur_->AddMember(std::forward<Types &&>(args)..., al_);
       }
+#endif
+
+#if 0
+      template <NonStringRef T1, NonStringRef T2>
+      void add_member(T1 arg1, T2 arg2)
+      {
+            cur_->AddMember(std::forward<T1 &>(arg1), std::forward<T2 &>(arg2), al_);
+      }
+#endif
 
       /*--------------------------------------------------------------------------------*/
 

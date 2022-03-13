@@ -18,10 +18,10 @@ namespace detail {
 
 
 NORETURN static void
-conversion_error(errno_t const e, int const from, int const to)
+conversion_error(errno_t const e, int const from, int const to) noexcept(false)
 {
       char errbuf[128];
-      auto const *eptr = my_strerror(e, errbuf, 128);
+      auto const *eptr = my_strerror(e, errbuf, sizeof errbuf);
 
       /* This ought to be evaluated to a constant string at compile time. */
       throw std::runtime_error(
@@ -52,7 +52,7 @@ std::u##TO##string char##FROM##_to_char##TO(char##FROM##_t const *ws, size_t con
 /*--------------------------------------------------------------------------------------*/
 
 std::u16string
-char8_to_char16(char8_t const *ws, size_t const len)
+char8_to_char16(char8_t const *ws, size_t const len) noexcept(false)
 {
       std::u16string str;
       size_t         resultlen = len + SIZE_C(1);
@@ -69,7 +69,7 @@ char8_to_char16(char8_t const *ws, size_t const len)
 }
 
 std::u32string
-char8_to_char32(char8_t const *ws, size_t const len)
+char8_to_char32(char8_t const *ws, size_t const len) noexcept(false)
 {
       std::u32string str;
       size_t         resultlen = len + SIZE_C(1);
@@ -86,7 +86,7 @@ char8_to_char32(char8_t const *ws, size_t const len)
 }
 
 std::u8string
-char16_to_char8(char16_t const *ws, size_t const len)
+char16_to_char8(char16_t const *ws, size_t const len) noexcept(false)
 {
       std::u8string str;
       size_t        resultlen = (len + SIZE_C(1)) * SIZE_C(2);
@@ -103,7 +103,7 @@ char16_to_char8(char16_t const *ws, size_t const len)
 }
 
 std::u32string
-char16_to_char32(char16_t const *ws, size_t const len)
+char16_to_char32(char16_t const *ws, size_t const len) noexcept(false)
 {
       std::u32string str;
       size_t         resultlen = (len + SIZE_C(1));
@@ -120,7 +120,7 @@ char16_to_char32(char16_t const *ws, size_t const len)
 }
 
 std::u8string
-char32_to_char8(char32_t const *ws, size_t const len)
+char32_to_char8(char32_t const *ws, size_t const len) noexcept(false)
 {
       std::u8string str;
       size_t        resultlen = (len + SIZE_C(1)) * SIZE_C(4);
@@ -138,7 +138,7 @@ char32_to_char8(char32_t const *ws, size_t const len)
 }
 
 std::u16string
-char32_to_char16(char32_t const *ws, size_t const len)
+char32_to_char16(char32_t const *ws, size_t const len) noexcept(false)
 {
       std::u16string str;
       size_t         resultlen = (len + SIZE_C(1)) * SIZE_C(2);
@@ -158,7 +158,7 @@ char32_to_char16(char32_t const *ws, size_t const len)
 /*--------------------------------------------------------------------------------------*/
 
 std::string
-char16_to_char(char16_t const *ws, size_t const len)
+char16_to_char(char16_t const *ws, size_t const len) noexcept(false)
 {
       std::string str;
       size_t      resultlen = (len + SIZE_C(1)) * SIZE_C(2);
@@ -175,7 +175,7 @@ char16_to_char(char16_t const *ws, size_t const len)
 }
 
 std::string
-char32_to_char(char32_t const *ws, size_t const len)
+char32_to_char(char32_t const *ws, size_t const len) noexcept(false)
 {
       std::string str;
       size_t      resultlen = (len + SIZE_C(1)) * SIZE_C(4);
@@ -192,7 +192,7 @@ char32_to_char(char32_t const *ws, size_t const len)
 }
 
 std::wstring
-char8_to_wide(char8_t const *ws, size_t const len)
+char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
 {
 #if defined WCHAR_IS_U16
       using uint_type = uint16_t;
@@ -219,7 +219,7 @@ char8_to_wide(char8_t const *ws, size_t const len)
 }
 
 std::wstring
-char16_to_wide(char16_t const *ws, size_t const len)
+char16_to_wide(char16_t const *ws, size_t const len) noexcept(false)
 {
 #if defined WCHAR_IS_U16
       return {reinterpret_cast<wchar_t const *>(ws), len};
@@ -242,7 +242,7 @@ char16_to_wide(char16_t const *ws, size_t const len)
 }
 
 std::wstring
-char32_to_wide(char32_t const *ws, size_t const len)
+char32_to_wide(char32_t const *ws, size_t const len) noexcept(false)
 {
 #if defined WCHAR_IS_U32
       return {reinterpret_cast<wchar_t const *>(ws), len};
@@ -273,10 +273,10 @@ char32_to_wide(char32_t const *ws, size_t const len)
 
 
 /*--------------------------------------------------------------------------------------*/
-/* The fundemental types: char and wchar_t. */
+/* The fundamental types: char and wchar_t. */
 
 template <> std::string
-charconv<char, wchar_t>(wchar_t const *orig, size_t const length)
+charconv<char, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char(reinterpret_cast<char16_t const *>(orig), length);
@@ -286,7 +286,7 @@ charconv<char, wchar_t>(wchar_t const *orig, size_t const length)
 }
 
 template <> std::wstring
-charconv<wchar_t, char>(char const *orig, size_t const length)
+charconv<wchar_t, char>(char const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_wide(reinterpret_cast<char8_t const *>(orig), length);
 }
@@ -295,37 +295,37 @@ charconv<wchar_t, char>(char const *orig, size_t const length)
 /* Conversions to and from char (excluding wchar_t). */
 
 template <> std::string
-charconv<char, char8_t>(char8_t const *orig, size_t const length)
+charconv<char, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
 {
       return std::string{reinterpret_cast<char const *>(orig), length};
 }
 
 template <> std::string
-charconv<char, char16_t>(char16_t const *orig, size_t const length)
+charconv<char, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char16_to_char(orig, length);
 }
 
 template <> std::string
-charconv<char, char32_t>(char32_t const *orig, size_t const length)
+charconv<char, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char32_to_char(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char>(char const *orig, size_t const length)
+charconv<char8_t, char>(char const *orig, size_t const length) noexcept(false)
 {
       return std::u8string{reinterpret_cast<char8_t const *>(orig), length};
 }
 
 template <> std::u16string
-charconv<char16_t, char>(char const *orig, size_t const length)
+charconv<char16_t, char>(char const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_char16(reinterpret_cast<char8_t const *>(orig), length);
 }
 
 template <> std::u32string
-charconv<char32_t, char>(char const *orig, size_t const length)
+charconv<char32_t, char>(char const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_char32(reinterpret_cast<char8_t const *>(orig), length);
 }
@@ -334,25 +334,25 @@ charconv<char32_t, char>(char const *orig, size_t const length)
 /* Conversions to and from wchar_t (excluding char). */
 
 template <> std::wstring
-charconv<wchar_t, char8_t>(char8_t const *orig, size_t const length)
+charconv<wchar_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_wide(orig, length);
 }
 
 template <> std::wstring
-charconv<wchar_t, char16_t>(char16_t const *orig, size_t const length)
+charconv<wchar_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char16_to_wide(orig, length);
 }
 
 template <> std::wstring
-charconv<wchar_t, char32_t>(char32_t const *orig, size_t const length)
+charconv<wchar_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char32_to_wide(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, wchar_t>(wchar_t const *orig, size_t const length)
+charconv<char8_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char8(reinterpret_cast<char16_t const *>(orig), length);
@@ -362,7 +362,7 @@ charconv<char8_t, wchar_t>(wchar_t const *orig, size_t const length)
 }
 
 template <> std::u16string
-charconv<char16_t, wchar_t>(wchar_t const *orig, size_t const length)
+charconv<char16_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 {
 #ifdef WCHAR_IS_U16
       return std::u16string{reinterpret_cast<char16_t const *>(orig), length};
@@ -372,7 +372,7 @@ charconv<char16_t, wchar_t>(wchar_t const *orig, size_t const length)
 }
 
 template <> std::u32string
-charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const length)
+charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char32(reinterpret_cast<char16_t const *>(orig), length);
@@ -385,37 +385,37 @@ charconv<char32_t, wchar_t>(wchar_t const *orig, size_t const length)
 /* The rest. */
 
 template <> std::u16string
-charconv<char16_t, char8_t>(char8_t const *orig, size_t const length)
+charconv<char16_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_char16(orig, length);
 }
 
 template <> std::u32string
-charconv<char32_t, char8_t>(char8_t const *orig, size_t const length)
+charconv<char32_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char8_to_char32(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char16_t>(char16_t const *orig, size_t const length)
+charconv<char8_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char16_to_char8(orig, length);
 }
 
 template <> std::u32string
-charconv<char32_t, char16_t>(char16_t const *orig, size_t const length)
+charconv<char32_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char16_to_char32(orig, length);
 }
 
 template <> std::u16string
-charconv<char16_t, char32_t>(char32_t const *orig, size_t const length)
+charconv<char16_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char32_to_char16(orig, length);
 }
 
 template <> std::u8string
-charconv<char8_t, char32_t>(char32_t const *orig, size_t const length)
+charconv<char8_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
 {
       return detail::char32_to_char8(orig, length);
 }
@@ -424,31 +424,31 @@ charconv<char8_t, char32_t>(char32_t const *orig, size_t const length)
 /* What the hell; why not. */
 
 template <> std::string
-charconv<char, char>(char const *orig, size_t const length)
+charconv<char, char>(char const *orig, size_t const length) noexcept(false)
 {
       return std::string{orig, length};
 }
 
 template <> std::wstring
-charconv<wchar_t, wchar_t>(wchar_t const *orig, size_t const length)
+charconv<wchar_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 {
       return std::wstring{orig, length};
 }
 
 template <> std::u8string
-charconv<char8_t, char8_t>(char8_t const *orig, size_t const length)
+charconv<char8_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
 {
       return std::u8string{orig, length};
 }
 
 template <> std::u16string
-charconv<char16_t, char16_t>(char16_t const *orig, size_t const length)
+charconv<char16_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
 {
       return std::u16string{orig, length};
 }
 
 template <> std::u32string
-charconv<char32_t, char32_t>(char32_t const *orig, size_t const length)
+charconv<char32_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
 {
       return std::u32string{orig, length};
 }

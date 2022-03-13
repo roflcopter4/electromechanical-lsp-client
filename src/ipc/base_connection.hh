@@ -13,11 +13,12 @@ namespace ipc {
 /****************************************************************************************/
 
 
+#if 0
 /**
  * TODO: Documentation of some kind...
  */
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class base_connection
 {
       using procinfo_t   = detail::procinfo_t;
@@ -187,6 +188,7 @@ using base_socketpair_connection  = base_connection<detail::socketpair_connectio
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using base_named_pipe_connection  = base_connection<detail::win32_named_pipe_impl>;
 #endif
+#endif
 
 
 /****************************************************************************************/
@@ -202,11 +204,11 @@ using base_named_pipe_connection  = base_connection<detail::win32_named_pipe_imp
  * TODO: Documentation of some kind...
  */
 template <typename DialerVariant>
-      REQUIRES (IsDialerVariant<DialerVariant>)
+      REQUIRES (IsDialerVariant<DialerVariant>;)
 class basic_connection : public DialerVariant
 {
-      using cint    = const int;
-      using csize_t = const size_t;
+      using cint    = int const;
+      using csize_t = size_t const;
 
       using this_type = basic_connection<DialerVariant>;
       using base_type = DialerVariant;
@@ -224,16 +226,25 @@ class basic_connection : public DialerVariant
       DEFAULT_MOVE_CTORS(basic_connection);
 
       static auto new_unique() { return std::unique_ptr<this_type>(new this_type); }
-      static auto new_shared() { return std::shared_ptr<this_type>(new this_type); }
+      static auto new_shared() { return std::unique_ptr<this_type>(new this_type); }
 
       //--------------------------------------------------------------------------------
-
 
       ssize_t raw_read(void *buf, csize_t nbytes)             { return impl().read(buf, static_cast<ssize_t>(nbytes)); }
       ssize_t raw_read(void *buf, csize_t nbytes, cint flags) { return impl().read(buf, static_cast<ssize_t>(nbytes), flags); }
 
-      ssize_t raw_write(void const *buf, csize_t nbytes)             { return impl().write(buf, static_cast<ssize_t>(nbytes)); }
-      ssize_t raw_write(void const *buf, csize_t nbytes, cint flags) { return impl().write(buf, static_cast<ssize_t>(nbytes), flags); }
+      ssize_t raw_write(void const *buf, csize_t nbytes)
+      {
+            fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}\033[1;33m\n_eof_\033[0m\n"),
+                       nbytes, std::string_view(static_cast<char const *>(buf), nbytes));
+            return impl().write(buf, static_cast<ssize_t>(nbytes));
+      }
+      ssize_t raw_write(void const *buf, csize_t nbytes, cint flags)
+      {
+            fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}\033[1;33m\n_eof_\033[0m\n"),
+                       nbytes, std::string_view(static_cast<char const *>(buf), nbytes));
+            return impl().write(buf, static_cast<ssize_t>(nbytes), flags);
+      }
 
       ssize_t raw_write(std::string const &buf)                  { return raw_write(buf.data(), buf.size()); }
       ssize_t raw_write(std::string const &buf, cint flags)      { return raw_write(buf.data(), buf.size(), flags); }
@@ -260,7 +271,8 @@ using Default          = socketpair;
 using Default          = unix_socket;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
-using spawn_win32_named_pipe  = basic_connection<dialers::spawn_win32_named_pipe>;
+using win32_named_pipe  = basic_connection<dialers::win32_named_pipe>;
+using win32_handle_pipe = basic_connection<dialers::win32_handle_pipe>;
 #endif
 
 } // namespace connections

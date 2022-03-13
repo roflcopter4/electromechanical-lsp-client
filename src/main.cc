@@ -1,5 +1,7 @@
 #include "Common.hh"
 
+//#include <vld.h>
+
 #if defined __GNUC__ || defined __clang__
 # ifdef __clang__
 #  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
@@ -29,16 +31,6 @@ char const *malloc_conf = my_malloc_conf;
 
 inline namespace emlsp {
 
-INITIALIZER_HACK(setup_locale)
-{
-      ::setlocale(LC_ALL,      "en_US.UTF8");
-      ::setlocale(LC_COLLATE,  "en_US.UTF8");
-      ::setlocale(LC_CTYPE,    "en_US.UTF8");
-      ::setlocale(LC_MONETARY, "en_US.UTF8");
-      ::setlocale(LC_NUMERIC,  "en_US.UTF8");
-      ::setlocale(LC_TIME,     "en_US.UTF8");
-}
-
  namespace ipc {
   void run_event_loop_cxx(int);
 #if 0
@@ -63,7 +55,7 @@ INITIALIZER_HACK(setup_locale)
  namespace libevent {
   NOINLINE extern void testing01(std::filesystem::path const &fname);
   NOINLINE extern void testing02(std::filesystem::path const &fname);
-  NOINLINE extern void testing03(std::filesystem::path const &fname);
+  NOINLINE extern void testing03();
   NOINLINE extern void testing04();
   NOINLINE extern void testing05();
  } // namespace libevent
@@ -93,12 +85,30 @@ INITIALIZER_HACK(setup_locale)
   } // namespace suck
   namespace nonexistant {}
  } // namespace test 
+ namespace sigh {
+  NOINLINE extern void sigh01();
+  NOINLINE extern void sigh02();
+  NOINLINE extern void sigh03();
+  NOINLINE extern void sigh04();
+  NOINLINE extern void sigh05();
+  NOINLINE extern void sigh06();
+ }
 
 } // namespace emlsp
 
 
 /****************************************************************************************/
 
+
+static void init_locale()
+{
+      ::setlocale(LC_ALL,      "en_US.UTF8");
+      ::setlocale(LC_COLLATE,  "en_US.UTF8");
+      ::setlocale(LC_CTYPE,    "en_US.UTF8");
+      ::setlocale(LC_MONETARY, "en_US.UTF8");
+      ::setlocale(LC_NUMERIC,  "en_US.UTF8");
+      ::setlocale(LC_TIME,     "en_US.UTF8");
+}
 
 #ifdef _WIN32
 static void init_wsa()
@@ -119,13 +129,28 @@ static void init_wsa()
 }
 #endif
 
+UNUSED static void init_libevent()
+{
+      event_set_mem_functions(malloc, realloc, free);
+      event_enable_debug_mode();
+      event_enable_debug_logging(EVENT_DBG_ALL);
+
+#ifdef _WIN32
+      if (evthread_use_windows_threads() != 0)
+            util::win32::error_exit(L"evthread_use_windows_threads()");
+#else
+      if (evthread_use_pthreads() != 0)
+            err(1, "evthread_use_pthreads()");
+#endif
+}
+
 
 /*--------------------------------------------------------------------------------------*/
 
-
-// NOLINTNEXTLINE(bugprone-exception-escape)
-int main(UNUSED int argc, UNUSED char *argv[])
+static int
+do_main()
 {
+      init_locale();
 #ifdef _WIN32
       init_wsa();
       if (_setmode(0, _O_BINARY) == (-1))
@@ -135,6 +160,7 @@ int main(UNUSED int argc, UNUSED char *argv[])
       if (_setmode(2, _O_TEXT) == (-1))
             util::win32::error_exit(L"_setmode(2)");
 #endif
+      //init_libevent();
 
 #if 0
       if (argc < 2)
@@ -153,40 +179,56 @@ int main(UNUSED int argc, UNUSED char *argv[])
             dump_and_exit(6, FC("ERROR: Invalid paramater \"{}\": Must be a regular file.\n"), src_file.string());
 #endif
 
-      try {
-            //TRY_FUNC(event::test03);
-            //TRY_FUNC(ipc::lsp::test::test11);
-            //TRY_FUNC(ipc::lsp::test::test12);
-            //ipc::run_event_loop_cxx(0);
-            //event::lets_do_this(src_file);
-            //libevent::testing01(src_file);
-            // test::mpack::test01(src_file);
-            // test::mpack::test02(src_file);
+      //TRY_FUNC(event::test03);
+      //TRY_FUNC(ipc::lsp::test::test11);
+      //TRY_FUNC(ipc::lsp::test::test12);
+      //ipc::run_event_loop_cxx(0);
+      //event::lets_do_this(src_file);
+      //libevent::testing01(src_file);
+      // test::mpack::test01(src_file);
+      // test::mpack::test02(src_file);
 
 
-            // libevent::testing02(src_file);
+      // libevent::testing02(src_file);
 
-            //libevent::testing03(src_file);
-            // libevent::testing04({});
-            // libevent::testing04();
+      //libevent::testing03();
+      //libevent::testing04();
 
-            // emlsp::event::FUCK::foo();
+      // emlsp::event::FUCK::foo();
 
-            // test::suck::test01();
-            ::rpc::mpack::test01();
+      // test::suck::test01();
+      //::rpc::mpack::test01();
+      //sigh::sigh02();
 
-            // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
-            // test::mpack::test01(src_file);
-            // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
-            // rpc::helpme();
+      //sigh::sigh03();
+      //sigh::sigh04();
+      //sigh::sigh05();
+      sigh::sigh04();
 
-      } catch (std::exception &e) {
-            DUMP_EXCEPTION(e);
-      }
+      // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
+      // test::mpack::test01(src_file);
+      // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();
+      // rpc::helpme();
 
 #ifdef _WIN32
       WSACleanup();
 #endif
 
       return 0;
+}
+
+
+// NOLINTNEXTLINE(bugprone-exception-escape)
+int main(UNUSED int argc, UNUSED char *argv[])
+{
+      //int const orig_dbg_flags = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
+      //_CrtSetDbgFlag(orig_dbg_flags | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_CHECK_ALWAYS_DF | _CRTDBG_LEAK_CHECK_DF);
+
+      try {
+            do_main();
+      } catch (std::exception &e) {
+            DUMP_EXCEPTION(e);
+      }
+
+      //_CrtSetDbgFlag(orig_dbg_flags);
 }

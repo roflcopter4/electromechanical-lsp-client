@@ -22,7 +22,7 @@ extern int kill_impl(procinfo_t const &pid);
 
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class basic_dialer
 {
       ConnectionImpl impl_;
@@ -51,7 +51,7 @@ class basic_dialer
 
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class spawn_dialer : public basic_dialer<ConnectionImpl>
 {
       using procinfo_t = detail::procinfo_t;
@@ -76,8 +76,8 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 
       DELETE_COPY_CTORS(spawn_dialer);
       spawn_dialer(spawn_dialer &&other) noexcept
-          : base_type(std::move(other)),
-            pid_(std::move(other.pid_))
+          : pid_(std::move(other.pid_)),
+            base_type(std::move(other))
       {
             other.pid_ = {};
       }
@@ -159,11 +159,13 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return spawn_connection(argc, const_cast<char **>(pack));
       }
 
+      ND procinfo_t const &pid() const & { return pid_; }
+
     private:
       void kill(bool const in_destructor)
       {
-            this->impl().close();
             detail::kill_impl(pid_);
+            this->impl().close();
             if (!in_destructor)
                   pid_ = {};
       }
@@ -207,7 +209,8 @@ using unix_socket      = ipc::spawn_dialer<ipc::detail::unix_socket_connection_i
 using socketpair       = ipc::spawn_dialer<ipc::detail::socketpair_connection_impl>;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
-using spawn_win32_named_pipe  = ipc::spawn_dialer<ipc::detail::win32_named_pipe_impl>;
+using win32_named_pipe   = ipc::spawn_dialer<ipc::detail::win32_named_pipe_impl>;
+using win32_handle_pipe  = ipc::spawn_dialer<ipc::detail::pipe_handle_connection_impl>;
 #endif
 
 } // namespace dialers

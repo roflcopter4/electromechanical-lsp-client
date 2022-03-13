@@ -8,6 +8,8 @@
 #define _GLIBCXX_PARALLEL_ASSERTIONS 1
 #undef NDEBUG
 
+#define __PTW32_CLEANUP_C 1
+
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
@@ -74,12 +76,6 @@ using namespace fmt::literals;
 /*--------------------------------------------------------------------------------------*/
 
 #include "util/macros.h"
-
-#ifdef HAVE_THREADS_H
-# include <threads.h>
-#else
-# include <tinycthread.h>
-#endif
 
 #include "util/types.h"
 

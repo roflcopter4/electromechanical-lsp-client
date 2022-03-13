@@ -8,6 +8,15 @@
 #else
 #  include <uchar.h>
 #endif
+#undef true
+#undef false
+#undef uint8_t
+#undef uint16_t
+#undef uint32_t
+#undef int8_t
+#undef int16_t
+#undef int32_t
+#undef int64_t
 
 #define FORCE_USE_OF_LIBUNISTRING 1
 #define EMLSP_UNISTRING_NO_WCSLEN
@@ -38,20 +47,18 @@ namespace util::unistring {
  * \tparam To Desired output char type.
  * \tparam From Input char type (typically deduced).
  * \param orig The NUL terminated string to convert.
- * \param codepoints Number of unicode points in the string.
- * \return Smart pointer holding the converted string in a string_view. This is done to
- * avoid having to copy the malloc allocated string returned by libunistring. The smart
- * pointer has a deleter that properly frees the same.
+ * \param length Number of unicode points in the string.
+ * \return The appropriate type of std::basic_string.
  */
 template <typename To, typename From>
 ND std::basic_string<To>
-charconv(From const *orig, size_t length);
+charconv(From const *orig, size_t length) noexcept(false);
 
 
 template <typename To, class Container>
-      REQUIRES(concepts::IsIntegral<typename Container::value_type>)
+      REQUIRES(concepts::IsIntegral<typename Container::value_type>;)
 ND std::basic_string<To>
-charconv(Container const &orig)
+charconv(Container const &orig) noexcept(false)
 {
       return charconv<To, typename Container::value_type>(orig.data(), orig.size());
 }

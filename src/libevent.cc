@@ -42,7 +42,7 @@ replace_all(std::string &&str, char const tofind, char const replacement)
       char  *c;
       while ((c = static_cast<char *>(memchr(ptr, tofind, count)))) {
             *c     = replacement;
-            count -= util::ptr_diff(c, ptr) + SIZE_C(1);
+            count -= ::util::ptr_diff(c, ptr) + SIZE_C(1);
             ptr    = c + 1U;
       }
 #endif
@@ -74,7 +74,7 @@ ts_from_double(double const val)
 {
       return ::timespec{static_cast<int64_t>(val),
                         static_cast<decltype(::timespec::tv_nsec)>((val - static_cast<double>(static_cast<uintmax_t>(val))) *
-                                          static_cast<double>(NSEC2SECOND))};
+                                                                   static_cast<double>(NSEC2SECOND))};
 }
 
 } // namespace
@@ -300,17 +300,17 @@ dispose_msg(std::unique_ptr<T> const &ptr)
 
       AUTOC nread = ptr->raw_read(buf, sizeof(buf), 0);
 
-      fflush(stderr);
-      fmt::print(stderr, FC("\033[1;31mRead {} bytes <<'_EOF_'\n\033[0;36m{}\n\033[1;31m_EOF_\033[0m\n"),
+      fmt::print(FC("\n\033[1;31mRead {} bytes <<'_EOF_'\n\033[0;36m{}\n\033[1;31m_EOF_\033[0m\n"),
                  nread, std::string_view(buf, nread));
       fflush(stderr);
+      fflush(stdout);
 }
 
 template <typename T> void
 write_msg(std::unique_ptr<T> const &conn, ipc::json::rapid_doc<> &wrap)
 {
 
-      rapidjson::MemoryBuffer ss;
+      rapidjson::StringBuffer ss;
       rapidjson::Writer       writer(ss);
       wrap.doc().Accept(writer);
 
@@ -318,13 +318,13 @@ write_msg(std::unique_ptr<T> const &conn, ipc::json::rapid_doc<> &wrap)
       AUTOC buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", ss.GetSize());
 
       fflush(stderr);
-      fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}{}\033[1;33m\n_eof_\033[0m\n"),
+      fmt::print(FC("\n\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}{}\033[1;33m\n_eof_\033[0m\n"),
                  ss.GetSize() + buflen, std::string_view(buf, buflen),
-                 std::string_view{ss.GetBuffer(), ss.GetSize()});
-      fflush(stderr);
+                 std::string_view{ss.GetString(), ss.GetSize()});
+      fflush(stdout);
 
       conn->raw_write(buf, static_cast<size_t>(buflen));
-      conn->raw_write(ss.GetBuffer(), ss.GetSize());
+      conn->raw_write(ss.GetString(), ss.GetSize());
 }
 
 
@@ -332,20 +332,26 @@ write_msg(std::unique_ptr<T> const &conn, ipc::json::rapid_doc<> &wrap)
 
 
 NOINLINE void
-testing03(std::filesystem::path const &fname)
+testing03()
 {
-      //using conn_type = ipc::connections::spawn_default;
-      using conn_type = ipc::connections::pipe;
-      //using conn_type = ipc::connections::spawn_win32_named_pipe;
+      using conn_type = ipc::connections::unix_socket;
+      //using conn_type = ipc::connections::pipe;
+      //using conn_type = ipc::connections::inet_ipv6_socket;
+      //using conn_type = ipc::connections::win32_named_pipe;
 
       //AUTOC fname_uri = /*"file://"s +*/ fix_backslashes(fname.string());
-      constexpr auto fname_uri = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32\\src\\libevent.cc)"sv;
-      constexpr auto proj_path = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32)"sv;
+      constexpr auto fname_raw = R"(D:\ass\VisualStudio\emlsp\trivial.c)"sv;
+      constexpr auto fname_uri = R"(file:/D:/ass/VisualStudio/emlsp/trivial.c)"sv;
+      constexpr auto proj_path = R"(file:/D:/ass/VisualStudio/emlsp)"sv;
 
-      auto con = conn_type::new_unique();
+      auto con = std::make_unique<conn_type>();
+
+      system("where clangd.exe");
 
       con->set_stderr_default();
-      con->spawn_connection_l(R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
+      con->impl().open();
+      //con->spawn_connection_l(R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
+      con->spawn_connection_l(R"(D:\new_msys64\ucrt64\bin\clangd.exe)",
                               "--pch-storage=memory", "--log=verbose", "--clang-tidy");
 
       {
@@ -360,9 +366,10 @@ testing03(std::filesystem::path const &fname)
 
       std::this_thread::sleep_for(1s);
       dispose_msg<conn_type>(con);
-
+      if (con->available())
+            dispose_msg<conn_type>(con);
       {
-            AUTOC contentvec = util::slurp_file(fname);
+            AUTOC contentvec = ::util::slurp_file(fname_raw);
             ipc::json::rapid_doc wrap;
             wrap.add_member("jsonrpc", "2.0");
             wrap.add_member("method", "textDocument/didOpen");
@@ -375,6 +382,10 @@ testing03(std::filesystem::path const &fname)
 
             write_msg<conn_type>(con, wrap);
       }
+      if (con->available())
+            dispose_msg<conn_type>(con);
+      if (con->available())
+            dispose_msg<conn_type>(con);
       {
             ipc::json::rapid_doc wrap;
             wrap.add_member("jsonrpc", "2.0");
@@ -389,9 +400,12 @@ testing03(std::filesystem::path const &fname)
 
       std::this_thread::sleep_for(100ms);
       dispose_msg<conn_type>(con);
-      dispose_msg<conn_type>(con);
       (void)fflush(stderr);
-      fmt::print(stderr, FC("Finished waiting!\n"));
+      (void)fflush(stdout);
+      fmt::print(FC("Finished waiting!\n"));
+      (void)fflush(stdout);
+      std::this_thread::sleep_for(3000ms);
+      con->close();
 }
 
 /*--------------------------------------------------------------------------------------*/
@@ -401,35 +415,41 @@ static void how_should_I_know(event_base *base, std::unique_ptr<ipc::connections
 NOINLINE void
 testing04()
 {
-      using conn_type = ipc::connections::inet_socket;
+      using conn_type = ipc::connections::unix_socket;
 
-      // constexpr auto fname_uri = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32\\src\\libevent.cc)"sv;
-      // constexpr auto proj_path = R"(file:/D:\\ass\\VisualStudio\\Foo_Bar\\elmwin32)"sv;
+       //constexpr auto fname_uri = R"(file:/D:\\ass\\VisualStudio\\emlsp\\src\\libevent.cc)"sv;
+       //constexpr auto proj_path = R"(file:/D:\\ass\\VisualStudio\\emlsp)"sv;
+       //constexpr auto raw_fname = R"(D:\\ass\\VisualStudio\\emlsp\\src\\libevent.cc)"sv;
 
-      UNUSED static constexpr auto fname_uri = R"(file://home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
-      UNUSED static constexpr auto proj_path = R"(file://home/bml/files/Projects/sigh-elm)"sv;
-      UNUSED static constexpr auto raw_fname = R"(/home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
+      constexpr auto fname_raw = R"(D:\ass\VisualStudio\emlsp\trivial.c)"sv;
+      constexpr auto fname_uri = R"(file:/D:/ass/VisualStudio/emlsp/trivial.c)"sv;
+      constexpr auto proj_path = R"(file:/D:/ass/VisualStudio/emlsp)"sv;
+
+      //UNUSED static constexpr auto fname_uri = R"(file://home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
+      //UNUSED static constexpr auto proj_path = R"(file://home/bml/files/Projects/sigh-elm)"sv;
+      //UNUSED static constexpr auto raw_fname = R"(/home/bml/files/Projects/sigh-elm/src/libevent.cc)"sv;
 
       // event_enable_debug_mode();
       // evthread_enable_lock_debugging();
       // event_enable_debug_logging(EVENT_DBG_ALL);
-      // evthread_use_windows_threads();
-      evthread_use_pthreads();
 
       event_base *base;
-      auto        con = conn_type::new_unique();
-      con->impl().resolve("127.0.0.1:59231");
+      auto const  con = conn_type::new_unique();
+      //con->impl().resolve("127.0.0.1:59231");
 
       //con->set_stderr_fd ( GetStdHandle(STD_OUTPUT_HANDLE));
       // con->spawn_connection_l(R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
       //                         "--pch-storage=memory", "--log=verbose", "--clang-tidy");
 
-      con->spawn_connection_l("clangd", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--sync");
+      con->impl().open();
+
+      con->spawn_connection_l("clangd", "--pch-storage=memory", "--log=verbose",
+                              "--clang-tidy", "--background-index", "--print-all-options");
 
 
       {
             event_config *cfg = ::event_config_new();
-            ::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
+            //::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
 #ifdef _WIN32
             //::event_config_set_flag(cfg, EVENT_BASE_FLAG_STARTUP_IOCP);
 #endif
@@ -469,7 +489,11 @@ testing04()
                   uint64_t const n = iter.fetch_add(1);
                   fmt::print(stderr, FC("\033[1;35mHERE IN '{}`, iter number {}\033[0m\n"), FUNCTION_NAME, n);
 
-                  ::event_base_loop(evbase, 0);
+                  AUTOC ret = ::event_base_loop(evbase, 0);
+
+                  fmt::print(FMT_COMPILE("\033[1;35mHERE IN {}, iter number {}\033[0m ALSO -> {}\n"),
+                             FUNCTION_NAME, n, ret);
+
                   std::this_thread::sleep_for(10ms);
                   //if (::event_base_loop(evbase, 0) == 1) [[unlikely]] {
                   //      fmt::print(stderr, "\033[1;31mERROR: No registered events!\033[0m\n");
@@ -482,6 +506,7 @@ testing04()
             }
 
             ::pthread_exit(nullptr);
+            return nullptr;
       }};
 
       pthread_t thrd;
@@ -493,9 +518,9 @@ testing04()
             std::string rd;
             rd.reserve(65536);
             size_t const buflen = bufferevent_read(evb, rd.data(), rd.max_size());
-            util::resize_string_hack(rd, buflen);
+            ::util::resize_string_hack(rd, buflen);
 
-            fmt::print(stderr, FC("\n\n\033[0;33mRead {} bytes <<_EOF_\n{}\n_EOF_\033[0m\n\n"), buflen, rd);
+            fmt::print(stderr, FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"), buflen, rd);
       };
       auto const writemsg = [evb](ipc::json::rapid_doc<> & wrap) {
             rapidjson::MemoryBuffer ss;
@@ -518,7 +543,7 @@ testing04()
       {
             //AUTOC init = ipc::lsp::data::init_msg(("file:/"s + fix_backslashes(fname.parent_path().parent_path().string())).c_str());
 
-            AUTOC init = ipc::lsp::data::init_msg(fname_uri.data());
+            AUTOC init = ipc::lsp::data::init_msg(proj_path.data());
             char buf[60];
             auto buflen = static_cast<size_t>(::sprintf(buf, "Content-Length: %zu\r\n\r\n", init.size()));
 
@@ -529,7 +554,7 @@ testing04()
             dispose();
       }
       {
-            AUTOC contentvec = util::slurp_file(raw_fname);
+            AUTOC contentvec = ::util::slurp_file(fname_raw);
             ipc::json::rapid_doc wrap;
             wrap.add_member("jsonrpc", "2.0");
             wrap.add_member("method", "textDocument/didOpen");
@@ -543,6 +568,8 @@ testing04()
             writemsg(wrap);
             dispose();
       }
+
+      std::this_thread::sleep_for(3000ms);
 
       ::event_base_loopbreak(base);
       ::pthread_join(thrd, nullptr);
@@ -569,13 +596,16 @@ how_should_I_know(event_base *base, std::unique_ptr<ipc::connections::unix_socke
 
       for (;;) {
             uint64_t const n = iter.fetch_add(1);
-            fmt::print(FMT_COMPILE("\033[1;35mHERE IN {}, iter number {}\033[0m\n"),
-                       FUNCTION_NAME, n);
+            AUTOC ret = ::event_base_loop(base, 0);
 
-            if (::event_base_loop(base, 0) == 1) [[unlikely]] {
+            if (ret == 1) [[unlikely]] {
                   fmt::print(stderr, "\033[1;31mERROR: No registered events!\033[0m\n");
                   break;
             }
+
+            fmt::print(FMT_COMPILE("\033[1;35mHERE IN {}, iter number {}\033[0m ALSO -> {}\n"),
+                       FUNCTION_NAME, n, ret);
+
             if (::event_base_got_break(base)) [[unlikely]]
                   break;
       }
@@ -816,6 +846,7 @@ static void *stupid_wrapper(void *varg)
       // handle->write((char *)SLS("Hello there moran\n"));
 
       pthread_exit(nullptr);
+      return nullptr;
 }
 
 NOINLINE void testing05()
@@ -833,7 +864,11 @@ NOINLINE void testing05()
       // connector->connect<uvw::IPv4>("127.0.0.1", 50101U);
       // listener->accept(*acceptor);
 
+#ifdef _WIN32
+      ASSERT_THROW(evthread_use_windows_threads());
+#else
       ASSERT_THROW(evthread_use_pthreads());
+#endif
 
       auto loop = std::make_unique<uv_loop_t>();
       uv_loop_init(loop.get());
@@ -853,8 +888,8 @@ NOINLINE void testing05()
       // acceptor->read();
       // pthread_join(tid, nullptr);
 
-      int     fds[2];
-      ssize_t ret;
+      socket_t fds[2];
+      ssize_t  ret;
 #if 0
       auto *loop  = event_base_new();
       auto *evdns = evdns_base_new(loop, 1);

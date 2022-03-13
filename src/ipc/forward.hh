@@ -25,37 +25,37 @@ class asio     : public detail::root_loop_selector {};
 /*--------------------------------------------------------------------------------------*/
 
 template <class ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class base_connection;
 
 
-template <class T>
-concept IsConnectionVariant = std::derived_from<T, base_connection<class T::connection_impl_type>>;
+template <typename T>
+concept IsConnectionVariant = std::derived_from<T, base_connection<typename T::connection_impl_type>>;
 
-template <class T>
+template <typename T>
 concept IsLoopVariant = std::derived_from<T, loops::detail::root_loop_selector>;
 
 /*--------------------------------------------------------------------------------------*/
 
-template <class LoopVariant, class ConnectionType, class MsgType, class UserDataType>
-      REQUIRES (IsConnectionVariant<ConnectionType>)
+template <typename LoopVariant, typename ConnectionType, typename MsgType, typename UserDataType>
+      REQUIRES (IsConnectionVariant<ConnectionType>;)
 class base_client;
 
-template <class LoopVariant, class ConnectionType, class MsgType, class UserDataType>
-      REQUIRES (IsLoopVariant<LoopVariant>)
+template <typename LoopVariant, typename ConnectionType, typename MsgType, typename UserDataType>
+      REQUIRES (IsLoopVariant<LoopVariant>;)
 class base_loop_template;
 
-template <class LoopVariant, class ConnectionType, class MsgType, class UserDataType>
+template <typename LoopVariant, typename ConnectionType, typename MsgType, typename UserDataType>
 class base_loop;
 
 /*--------------------------------------------------------------------------------------*/
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class basic_dialer;
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
 class spawn_dialer;
 
 template <typename T>
@@ -68,7 +68,7 @@ class basic_connection;
 #endif
 
 template <typename DialerVariant>
-      REQUIRES (IsDialerVariant<DialerVariant>)
+      REQUIRES (IsDialerVariant<DialerVariant>;)
 class basic_connection;
 
 /*--------------------------------------------------------------------------------------*/

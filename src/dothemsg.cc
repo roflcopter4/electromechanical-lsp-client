@@ -7,6 +7,11 @@
 // #include "ipc/rpc/basic_msgpack_connection.hh"
 #include "ipc/rpc/basic_wrapper.hh"
 
+#include "ipc/totality.hh"
+#include "ipc/rpc/basic_io_connection.hh"
+
+//#include <nlohmann/json.hpp>
+
 // #include <msgpack.h>
 
 #define AUTOC auto const
@@ -156,62 +161,44 @@ class msgpack_wrapper
 NOINLINE void
 test01()
 {
+#if 0
       using conn_type = ipc::connections::std_streams;
-      using wrapper   = ipc::rpc::msgpack_wrapper<conn_type>;
-      // using wrapper   = rpc::msgpack_connection;
-      // using wrapper   = ipc::rpc::msgpack_connection<conn_type>;
+      using wrapper   = ipc::rpc::msgpack_io_wrapper<conn_type>;
 
-      auto con = conn_type::new_shared();
-      auto rd  = std::make_unique<wrapper>(*con);
+      auto con       = conn_type::new_unique();
+      auto iowrapper = std::make_unique<wrapper>(con.get());
+      auto pack1     = iowrapper->get_packer();
+
+      {
+            auto &pk = pack1->pk;
+            double x = 2.0;
+
+            pk.pack_array(3);
+            pk << "hello";
+            pk << 3.1415926535897932384626433832795;
 
 #if 0
-      int orig = fcntl(0, F_GETFL);
-      fcntl(0, F_SETFL, orig | O_NONBLOCK);
-      std::string in;
+            __asm__ volatile (
+                  "vsqrtsd %[in], %[in], %[out]\n\t"
+                  : [out] "=v" (x)
+                  : [in] "v" (x)
+                  :
+            );
+#endif
 
-      while (!feof(stdin)) {
-            char buf[8192];
-            size_t const nread = fread(buf, 1, sizeof buf, stdin);
-            in.append(buf, nread);
+            pk.pack_array(4);
+            pk << x;
+            pk << 'q';
+            pk << "hello"sv;
+            pk << ~0LLU;
       }
-#endif
-
-#if 0
-      std::this_thread::sleep_for(2000ms);
-      auto obj1 = rd->read_object();
-      fmt::print(stderr, "Read obj... uh... {}\n", obj1->type);
-      auto obj2 = rd->read_object();
-      fmt::print(stderr, "Read obj... uh... {}\n", obj2->type);
-      auto obj3 = rd->read_object();
-      fmt::print(stderr, "Read obj... uh... {}\n", obj2->type);
-#endif
-
-      auto pack1 = rd->get_packer();
-
-      double x = 2.0;
-
-      pack1->pk.pack_array(3);
-      pack1->pk << "hello";
-      pack1->pk << M_PI;
-
-      __asm__ volatile (
-            "vsqrtsd %[in], %[in], %[out]\n\t"
-            : [out] "=v" (x)
-            : [in] "v" (x)
-            :
-      );
-
-      pack1->pk.pack_array(4);
-      pack1->pk << x;
-      pack1->pk << 'q';
-      pack1->pk << "hello"sv;
-      pack1->pk << ~0LLU;
 
 
       {
-            wrapper::packer_ptr arr[7] = {
-                rd->get_packer(), rd->get_packer(), rd->get_packer(), rd->get_packer(),
-                rd->get_packer(), rd->get_packer(), rd->get_packer(),
+            wrapper::packer_container arr[7] = {
+                iowrapper->get_packer(), iowrapper->get_packer(), iowrapper->get_packer(),
+                iowrapper->get_packer(), iowrapper->get_packer(), iowrapper->get_packer(),
+                iowrapper->get_packer(),
             };
 
             for (auto &obj : arr) {
@@ -220,14 +207,15 @@ test01()
             }
 
             for (auto &obj : arr) {
-                  rd->write_object(obj->vbuf);
-                  rd->con().raw_write("\n"sv);
+                  iowrapper->write_object(obj);
+                  iowrapper->con()->raw_write("\n"sv);
             }
       }
       {
-            wrapper::packer_ptr arr[7] = {
-                rd->get_packer(), rd->get_packer(), rd->get_packer(), rd->get_packer(),
-                rd->get_packer(), rd->get_packer(), rd->get_packer(),
+            wrapper::packer_container arr[7] = {
+                iowrapper->get_packer(), iowrapper->get_packer(), iowrapper->get_packer(),
+                iowrapper->get_packer(), iowrapper->get_packer(), iowrapper->get_packer(),
+                iowrapper->get_packer(),
             };
 
             for (auto &obj : arr) {
@@ -237,15 +225,31 @@ test01()
             }
 
             for (auto &obj : arr) {
-                  rd->write_object(obj->vbuf);
-                  rd->con().raw_write("\n"sv);
+                  iowrapper->write_object(obj);
+                  iowrapper->con()->raw_write("\n"sv);
             }
       }
 
-#define PACK(N) pack ## N
+      iowrapper->write_object(pack1);
+      iowrapper->con()->raw_write("\n"sv);
+#endif
 
-      rd->write_object(pack1->vbuf);
-      rd->con().raw_write("\n"sv);
+#if 0
+
+      {
+            auto reet = ipc::totality<ipc::connections::unix_socket,
+                                      ipc::rpc::ms_jsonrpc_io_wrapper,
+                                      ipc::event_tags::libevent
+                        >::new_unique();
+
+            reet->spawn_connection_l(R"(C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin\clangd.exe)", "--pch-storage=memory", "--log=verbose", "--clang-tidy");
+            reet->start();
+            auto pk = reet->wrapper().get_packer();
+            pk().add_member("jsonrpc", "2");
+            reet->stop();
+      }
+
+#endif
 
 #if 0
       ssize_t           len;
@@ -258,6 +262,96 @@ test01()
       if (!fin) {
             if (len == read_buffer_size)
                   throw util::except::not_implemented("Sheesh, this is unlikely.");
+      }
+#endif
+
+#if 1
+      {
+            //auto con = ipc::connections::pipe::new_shared();
+            //auto con = std::make_unique<ipc::connections::pipe>();
+            //auto x   = std::make_unique<ipc::rpc::ms_jsonrpc_io_wrapper<ipc::connections::pipe>>(con.get());
+
+            auto reet = ipc::totality<ipc::connections::unix_socket,
+                                      ipc::rpc::ms_jsonrpc_io_wrapper,
+                                      ipc::event_tags::libevent
+                        >::new_unique();
+
+            reet->spawn_connection_l(R"(C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\Llvm\x64\bin\clangd.exe)", "--pch-storage=memory", "--log=verbose", "--clang-tidy");
+            reet->start();
+            auto pack = reet->wrapper().get_packer();
+            pack().add_member("moran", 34);
+            reet->wrapper().write_object(*pack);
+            std::this_thread::sleep_for(5s);
+      }
+#endif
+            std::this_thread::sleep_for(1s);
+
+#if 0
+      {
+            // auto again = std::make_unique<ipc::rpc::basic_io_connection<
+            //     ipc::connections::socketpair, ipc::rpc::ms_jsonrpc_io_wrapper>>();
+            // auto cont = again->get_packer();
+
+            // auto foo = nlohmann::json::object();
+            // auto foo = nlohmann::json({{"hi", "there"}, {"do", 34}}, false, nlohmann::json::value_t::object);
+            // foo.insert(foo.cbegin(), );
+
+            auto foo = nlohmann::json::object();
+            foo.emplace("jsonrpc", "2.0");
+            foo.emplace("method", "textDocument/didOpen");
+            auto obj2 = nlohmann::json::object();
+            auto obj3 = nlohmann::json::object();
+            obj3.emplace("uri", "THE QUAK BROON");
+            obj3.emplace("text", "insert texate herr");
+            obj3.emplace("version", 1);
+            obj3.emplace("languageId", M_PI);
+            obj2.emplace("textDocument", std::move(obj3));
+            foo.emplace("params", std::move(obj2));
+            foo["cunt"] = 34;
+
+            std::cout << foo << std::endl;
+      }
+#endif
+
+#if 0
+      {
+            ipc::json::rapid_doc wrap;
+            wrap.add_member("jsonrpc", "2.0");
+            wrap.add_member("method", "textDocument/didOpen");
+            wrap.set_member("params");
+            wrap.set_member("textDocument");
+            wrap.add_member("uri", "THE QUAK BROON");
+            wrap.add_member("text", "insert texate herr");
+            wrap.add_member("version", 1);
+            wrap.add_member("languageId", "cpp");
+            wrap.add_member("cunt", 34);
+            wrap.add_member("reet", 342819);
+
+            rapidjson::MemoryBuffer ss;
+            rapidjson::Writer       writer(ss);
+            wrap.doc().Accept(writer);
+            std::cout << std::string_view{ss.GetBuffer(), ss.GetSize()} << std::endl;
+      }
+#endif
+#if 0
+      {
+            rapidjson::Document doc(rapidjson::kObjectType);
+            doc.AddMember("jsonrpc", "2.0", doc.GetAllocator());
+            doc.AddMember("method", "textDocument/didOpen", doc.GetAllocator());
+            auto obj2 = rapidjson::Value(rapidjson::kObjectType);
+            auto obj3 = rapidjson::Value(rapidjson::kObjectType);
+            obj3.AddMember("uri", "THE QUAK BROON", doc.GetAllocator());
+            obj3.AddMember("text", "insert texate herr", doc.GetAllocator());
+            obj3.AddMember("version", 1, doc.GetAllocator());
+            obj3.AddMember("languageId", M_PI, doc.GetAllocator());
+            obj2.AddMember("params", std::move(obj3), doc.GetAllocator());
+            doc.AddMember("textDocument", std::move(obj2), doc.GetAllocator());
+            doc.AddMember("cunt", rapidjson::Value(rapidjson::kNumberType).Set(34), doc.GetAllocator());
+
+            rapidjson::MemoryBuffer ss;
+            rapidjson::Writer       writer(ss);
+            doc.Accept(writer);
+            std::cout << std::string_view{ss.GetBuffer(), ss.GetSize()} << std::endl;
       }
 #endif
 }

@@ -67,19 +67,19 @@
       t(t &&) noexcept            = default; \
       t &operator=(t &&) noexcept = default
 
-# define DUMP_EXCEPTION(e)                                                             \
-      do {                                                                             \
-            fmt::print(stderr,                                                         \
-                       FMT_COMPILE("Caught exception:\n{}\nat line {}, in file '{}', " \
-                                   "in function '{}'\n"),                              \
-                       (e).what(), __LINE__, __FILE__, FUNCTION_NAME);                 \
-            fflush(stderr);                                                            \
+# define DUMP_EXCEPTION(e)                                                                                     \
+      do {                                                                                                     \
+            fflush(stderr);                                                                                    \
+            fmt::print(stderr,                                                                                 \
+                       FC("\nCaught exception in function '{}', at line {} '{}'\n\033[1;32mWhat:\033[0m\t{}\n"), \
+                       FUNCTION_NAME, __LINE__, __FILE__, (e).what());                                         \
+            fflush(stderr);                                                                                    \
       } while (0)
 
 # ifdef __TAG_HIGHLIGHT__
 #  define REQUIRES(...)
 # else
-#  define REQUIRES(...) requires __VA_ARGS__
+#  define REQUIRES(...) requires( requires { __VA_ARGS__ } )
 # endif
 
 # ifndef NO_OBNOXIOUS_TWO_LETTER_CONVENIENCE_MACROS_PLEASE
@@ -123,7 +123,7 @@
 #if defined __GNUC__ || defined __clang__
 # define NOINLINE __attribute__((__noinline__))
 # ifndef __always_inline
-#  define __always_inline __attribute__((__always_inline__)) __inline__
+#  define __always_inline __attribute__((__always_inline__, __gnu_inline__)) extern __inline
 # endif
 # ifndef __forceinline
 #  define __forceinline __always_inline

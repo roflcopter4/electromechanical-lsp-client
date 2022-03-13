@@ -16,7 +16,7 @@ namespace ipc {
 
 
 template <typename LoopVariant, typename ConnectionType, typename MsgType, typename UserDataType = void *>
-      REQUIRES (IsConnectionVariant<ConnectionType>)
+      REQUIRES (IsConnectionVariant<ConnectionType>;)
 class base_client : public ConnectionType
 {
       using this_type       = base_client<LoopVariant, ConnectionType, MsgType, UserDataType>;

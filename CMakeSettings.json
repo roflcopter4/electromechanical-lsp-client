@@ -9,7 +9,6 @@
       "installRoot": "${projectDir}\\out\\install\\${name}",
       "cmakeCommandArgs": "-DCMAKE_EXPORT_COMPILE_COMMANDS=YES -DVCPKG_CRT_LINKAGE=dynamic -DVCPKG_VERBOSE=YES",
       "buildCommandArgs": "-nologo -detailedSummary /p:VcpkgEnabled=false",
-      //"buildCommandArgs": "-nologo -detailedSummary /p:VcpkgEnabled=true",
       "ctestCommandArgs": "",
       "variables": [
         {
@@ -24,7 +23,7 @@
         },
         {
           "name": "CMAKE_CXX_FLAGS",
-          "value": "/DWIN32 /D_WINDOWS /EHsc -Zc:preprocessor -Zc:__cplusplus /MDd /ZI /MP /W4 /WX- /JMC- /diagnostics:caret",
+          "value": "/DWIN32 /D_WINDOWS /EHsc -Zc:preprocessor -Zc:__cplusplus /MDd /ZI /MP /W4 /WX- /JMC-",
           "type": "STRING"
         },
         {
@@ -76,7 +75,6 @@
           "value": "D:/VCPKG",
           "type": "STRING"
         }
-
       ],
       "cmakeExecutable": "D:\\Program Files\\Microsoft Visual Studio\\2022\\Preview\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
     }

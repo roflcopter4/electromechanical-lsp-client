@@ -15,7 +15,7 @@ namespace ipc {
 
 template <class LoopVariant, class ConnectionType,
           class MsgType, class UserDataType = void *>
-REQUIRES(IsLoopVariant<LoopVariant>)
+      REQUIRES(IsLoopVariant<LoopVariant>;)
 class base_loop_template
 {
       using this_type = base_loop_template<LoopVariant, ConnectionType,
@@ -169,7 +169,7 @@ class base_loop<loops::libevent, ConnectionType, MsgType, UserDataType>
 
 // TODO
 template <class ConnectionType, class MsgType, class UserDataType>
-      REQUIRES((false))
+      REQUIRES(false;)
 class base_loop<loops::asio, ConnectionType, MsgType, UserDataType>
     : public base_loop_template<loops::asio, ConnectionType, MsgType, UserDataType>
 {
@@ -181,7 +181,7 @@ class base_loop<loops::asio, ConnectionType, MsgType, UserDataType>
 
 // FIXME: BROKEN!
 template <class ConnectionType, class MsgType, class UserDataType>
-      REQUIRES((false))
+      REQUIRES(false;)
 class base_loop<loops::libuv, ConnectionType, MsgType, UserDataType>
     : public base_loop_template<loops::libuv, ConnectionType, MsgType, UserDataType>
 {

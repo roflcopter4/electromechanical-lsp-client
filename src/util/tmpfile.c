@@ -17,7 +17,7 @@
 #ifdef DUMB_TEMPNAME_NUM_CHARS
 # define NUM_RANDOM_CHARS DUMB_TEMPNAME_NUM_CHARS
 #else
-# define NUM_RANDOM_CHARS 6
+# define NUM_RANDOM_CHARS 8
 #endif
 
 #ifdef _WIN32
@@ -94,10 +94,10 @@ get_random_chars(char *buf)
       for (int i = 0; i < NUM_RANDOM_CHARS; ++i) {
             uint32_t const tmp = RAND();
 
-            if ((tmp & 0x0F) < 2U)
+            if ((tmp & (0xF0 >> 4)) < 2U)
                   *ptr++ = (char)((RAND() % 10) + '0');
             else
-                  *ptr++ = (char)((RAND() % 26) + ((tmp & 1) ? 'A' : 'a'));
+                  *ptr++ = (char)((RAND() % 26) + ((tmp & 1) ? 'a' : 'A'));
       }
 
       return ptr;

@@ -17,9 +17,10 @@ kill_impl(procinfo_t const &pid)
 
 #ifdef _WIN32
       if (pid.hProcess) {
-            ::CloseHandle(pid.hThread);
             ::TerminateProcess(pid.hProcess, 0);
+            ::WaitForSingleObject(pid.hProcess, INFINITE);
             ::GetExitCodeProcess(pid.hProcess, reinterpret_cast<DWORD *>(&status));
+            ::CloseHandle(pid.hThread);
             ::CloseHandle(pid.hProcess);
       }
 #else // not _WIN32

@@ -30,7 +30,7 @@ namespace util {
 
 /* The C++ function 'my_err_throw` must use the same mutex as the C function my_err_,
  * even if it means awkwardly mixing APIs. */
-extern "C" { extern mtx_t util_c_error_write_mutex; }
+//extern "C" { extern mtx_t util_c_error_write_mutex; }
 
 NORETURN
 extern void

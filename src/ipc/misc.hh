@@ -1,10 +1,12 @@
 #pragma once
-#include <netdb.h>
 #ifndef HGUARD__IPC__MISC_HH_
 #define HGUARD__IPC__MISC_HH_ //NOLINT
 
 #include "Common.hh"
-#include <netinet/in.h>
+#ifndef _WIN32
+#  include <netdb.h>
+#  include <netinet/in.h>
+#endif
 
 inline namespace emlsp {
 namespace ipc { //NOLINT(modernize-concat-nested-namespaces)
