@@ -92,7 +92,7 @@ inline namespace emlsp {
   NOINLINE extern void sigh04();
   NOINLINE extern void sigh05();
   NOINLINE extern void sigh06();
- }
+ } // namespace sigh
 
 } // namespace emlsp
 
@@ -131,7 +131,7 @@ static void init_wsa()
 
 UNUSED static void init_libevent()
 {
-      event_set_mem_functions(malloc, realloc, free);
+      //event_set_mem_functions(malloc, realloc, free);
       event_enable_debug_mode();
       event_enable_debug_logging(EVENT_DBG_ALL);
 

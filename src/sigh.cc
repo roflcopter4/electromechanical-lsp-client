@@ -60,6 +60,7 @@ dump_read(rapidjson::Document &obj)
 }
 
 
+#ifdef _WIN32
 static void
 poll_throw(WSAPOLLFD *data, uint16_t events = 0, ULONG nobjs = 1, INT time = (-1))
 {
@@ -71,6 +72,7 @@ poll_throw(WSAPOLLFD *data, uint16_t events = 0, ULONG nobjs = 1, INT time = (-1
       if (ret == SOCKET_ERROR)
             util::win32::error_exit_wsa(L"WSAPoll()");
 }
+#endif
 
 
 NOINLINE void sigh01()
@@ -432,16 +434,18 @@ NOINLINE void sigh03()
       assert(count > 0);
       fmt::print(FC("S: Wrote {} bytes...\n"), count);
 
+#ifdef _WIN32
       DWORD code = 0;
       WaitForSingleObject(con->pid().hProcess, INFINITE);
       GetExitCodeProcess(con->pid().hProcess, &code);
       fmt::print(FC("S: Process {} has ended with raw status {}.\n"), con->pid().dwProcessId, code);
+#endif
 }
 
 
 NOINLINE void sigh04()
 {
-      putenv("RUST_BACKTRACE=full");
+      putenv((char *)"RUST_BACKTRACE=full");
 
       //auto const path = util::get_temporary_filename(nullptr, ".sock").string();
       auto con = std::make_unique<con_type>();
@@ -675,8 +679,10 @@ NOINLINE void sigh06()
             char  buf[60];
             AUTOC buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", init.size());
 
-            WriteFile(data->wrpipe.handle, buf, buflen, nullptr, nullptr);
-            WriteFile(data->wrpipe.handle, init.data(), init.size(), nullptr, nullptr);
+#ifdef _WIN32
+            ::WriteFile(data->wrpipe.handle, buf, buflen, nullptr, nullptr);
+            ::WriteFile(data->wrpipe.handle, init.data(), init.size(), nullptr, nullptr);
+#endif
 
             //uv_buf_t ubuf = {static_cast<ULONG>(buflen), buf};
             //uv_try_write(reinterpret_cast<uv_stream_t *>(&data->pipe), &ubuf, 1);

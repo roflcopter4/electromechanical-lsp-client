@@ -33,8 +33,8 @@ class basic_dialer
       basic_dialer() = default;
       virtual ~basic_dialer() noexcept = default;
 
-      DELETE_COPY_CTORS(basic_dialer);
-      basic_dialer &operator=(basic_dialer &&) noexcept = default;
+      DEFAULT_COPY_CTORS(basic_dialer);
+      basic_dialer &operator=(basic_dialer &&) noexcept = delete;
 
       basic_dialer(basic_dialer &&other) noexcept
             : impl_(std::move(other.impl_))
@@ -186,7 +186,8 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
       ~std_streams_dialer() noexcept override = default;
 
       DELETE_COPY_CTORS(std_streams_dialer);
-      DEFAULT_MOVE_CTORS(std_streams_dialer);
+      std_streams_dialer &operator=(std_streams_dialer &&) noexcept = delete;
+      std_streams_dialer(std_streams_dialer &&) noexcept = default;
 
       //--------------------------------------------------------------------------------
 

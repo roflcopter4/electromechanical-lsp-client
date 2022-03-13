@@ -205,7 +205,7 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
             close();
       }
 
-      DELETE_COPY_CTORS(socket_connection_base_impl);
+      DEFAULT_COPY_CTORS(socket_connection_base_impl);
       socket_connection_base_impl &
       operator=(socket_connection_base_impl &&) noexcept = default;
 
@@ -271,8 +271,7 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       ~unix_socket_connection_impl() override = default;
 
       DELETE_COPY_CTORS(unix_socket_connection_impl);
-      unix_socket_connection_impl &
-      operator=(this_type &&) noexcept = default;
+      unix_socket_connection_impl &operator=(this_type &&) noexcept = delete;
 
       unix_socket_connection_impl(this_type &&other) noexcept
             : base_type(std::move(other))
@@ -294,7 +293,7 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
     protected:
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
-      socket_t get_connected_socket() override { return connect_to_socket(); }
+      socket_t get_connected_socket() override { return connector_; }
 };
 
 
@@ -322,7 +321,7 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 
       DELETE_COPY_CTORS(socketpair_connection_impl);
       socketpair_connection_impl &
-      operator=(socketpair_connection_impl &&) noexcept = default;
+      operator=(socketpair_connection_impl &&) noexcept = delete;
 
       socketpair_connection_impl(socketpair_connection_impl &&other) noexcept
           : base_type(std::move(other))
@@ -334,12 +333,17 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 
       //--------------------------------------------------------------------------------
 
+      void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
     protected:
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
       socket_t get_connected_socket() override { return connect_to_socket(); }
+
+    private:
+      socket_t connect() override { throw util::except::not_implemented(""); }
+      socket_t accept() override { throw util::except::not_implemented(""); }
 };
 #endif
 
@@ -430,7 +434,7 @@ class inet_any_socket_connection_impl final
             free(this->addr_); //NOLINT
       }
 
-      DEFAULT_MOVE_CTORS(inet_any_socket_connection_impl);
+      DELETE_MOVE_CTORS(inet_any_socket_connection_impl);
       DELETE_COPY_CTORS(inet_any_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
@@ -468,7 +472,7 @@ class inet_ipv4_socket_connection_impl final
     public:
       inet_ipv4_socket_connection_impl()           = default;
       ~inet_ipv4_socket_connection_impl() override = default;
-      DEFAULT_MOVE_CTORS(inet_ipv4_socket_connection_impl);
+      DELETE_MOVE_CTORS(inet_ipv4_socket_connection_impl);
       DELETE_COPY_CTORS(inet_ipv4_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
@@ -497,7 +501,7 @@ class inet_ipv6_socket_connection_impl final
     public:
       inet_ipv6_socket_connection_impl()           = default;
       ~inet_ipv6_socket_connection_impl() override = default;
-      DEFAULT_MOVE_CTORS(inet_ipv6_socket_connection_impl);
+      DELETE_MOVE_CTORS(inet_ipv6_socket_connection_impl);
       DELETE_COPY_CTORS(inet_ipv6_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
@@ -548,7 +552,7 @@ class pipe_connection_impl : public base_connection_interface<int>
       }
 
       DELETE_COPY_CTORS(pipe_connection_impl);
-      pipe_connection_impl &operator=(pipe_connection_impl &&) noexcept = default;
+      pipe_connection_impl &operator=(pipe_connection_impl &&) noexcept = delete;
       pipe_connection_impl(pipe_connection_impl &&other) noexcept
           : base_type(std::move(other))
           , read_(other.read_)
@@ -611,7 +615,7 @@ class fd_connection_impl final : public pipe_connection_impl
 #endif
 
       DELETE_COPY_CTORS(fd_connection_impl);
-      DEFAULT_MOVE_CTORS(fd_connection_impl);
+      DELETE_MOVE_CTORS(fd_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -872,7 +876,7 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
       if (n == (-1)) [[unlikely]] {
             if (errno == EBADF)
                   throw except::connection_closed();
-            util::win32::error_exit_wsa(L"recv");
+            // util::win32::error_exit_wsa(L"recv");
             err(1, "recv() failed");
       }
 
