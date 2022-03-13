@@ -253,7 +253,7 @@ socket_t
 connect_to_unix_socket(sockaddr_un const *addr)
 {
 #ifdef _WIN32
-      auto const data_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+      auto const data_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, 0);
       if (data_sock == (SOCKET)SOCKET_ERROR)
             FATAL_ERROR("socket");
 #else
@@ -582,7 +582,7 @@ size_t available_in_fd(UNUSED int const s) noexcept(false)
 
 
 uintmax_t
-xatoi(char const *const str, const bool strict)
+xatoi(char const *const str, bool const strict)
 {
       char           *endptr;
       uintmax_t const val = strtoumax(str, &endptr, 0);

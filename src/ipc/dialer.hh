@@ -212,6 +212,7 @@ using socketpair       = ipc::spawn_dialer<ipc::detail::socketpair_connection_im
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using win32_named_pipe   = ipc::spawn_dialer<ipc::detail::win32_named_pipe_impl>;
 using win32_handle_pipe  = ipc::spawn_dialer<ipc::detail::pipe_handle_connection_impl>;
+using dual_unix_socket   = ipc::spawn_dialer<ipc::detail::dual_socket_connection_impl>;
 #endif
 
 } // namespace dialers

@@ -17,12 +17,16 @@ namespace sigh {
 
 namespace asio = boost::asio;
 
-using con_type = ipc::rpc::basic_io_connection<ipc::connections::inet_ipv4_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::rpc::basic_io_connection<ipc::connections::unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+using con_type = ipc::rpc::basic_io_connection<ipc::connections::dual_unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::rpc::basic_io_connection<ipc::connections::inet_ipv6_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_handle_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
 
 static constexpr auto timeout_len = UINT64_C(1000);
 static constexpr auto fname_raw   = R"(D:\ass\VisualStudio\emlsp\src\sigh.cc)"sv;
-static constexpr auto fname_uri   = R"(file:/D:/ass/VisualStudio/emlsp/src/sigh.cc)"sv;
-static constexpr auto fname_path  = R"(file:/D:/ass/VisualStudio/emlsp)"sv;
+static constexpr auto fname_uri   = R"(file://D:/ass/VisualStudio/emlsp/src/sigh.cc)"sv;
+static constexpr auto fname_path  = R"(file://D:/ass/VisualStudio/emlsp)"sv;
 
 
 UNUSED static void
@@ -69,6 +73,8 @@ poll_throw(WSAPOLLFD *data, uint16_t events = 0, ULONG nobjs = 1, INT time = (-1
       data[0].revents = 0;
 
       auto ret = WSAPoll(data, nobjs, time);
+      fmt::print(stderr, FC("\n\n\n\n\nGot {} -- {:X} -- {:X}\n\n\n\n\n"), ret, data->events, data->revents);
+      fflush(stderr);
       if (ret == SOCKET_ERROR)
             util::win32::error_exit_wsa(L"WSAPoll()");
 }
@@ -77,15 +83,16 @@ poll_throw(WSAPOLLFD *data, uint16_t events = 0, ULONG nobjs = 1, INT time = (-1
 
 NOINLINE void sigh01()
 {
+#if 0
       auto con = std::make_unique<con_type>();
       con->impl().open();
-      //WSAPOLLFD wsa_data[] = {
-          //{.fd = con->raw_descriptor(), .events = POLLRDNORM, .revents = 0}
-      //};
+      WSAPOLLFD wsa_data[] = {
+          {.fd = con->raw_descriptor(), .events = 0, .revents = 0},
+      };
 
       con->spawn_connection_l(
                               //R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
-                              R"(D:\ass\GIT\llvm-project\llvm\turd\bin\clangd.exe)",
+                              R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
                               "--pch-storage=memory", "--log=verbose", "--clang-tidy");
 
       AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
@@ -94,6 +101,7 @@ NOINLINE void sigh01()
       //poll_throw(wsa_data);
       //fmt::print(FC("revents is 0x{:X}\n"), wsa_data[0].revents);
 
+      poll_throw(wsa_data, POLLRDNORM, 1);
       auto obj = con->read_object();
       dump_read(obj);
 
@@ -108,158 +116,11 @@ NOINLINE void sigh01()
             wrap().add_member("text", rapidjson::Value { contentvec.data(), static_cast<rapidjson::SizeType>(contentvec.size()) } );
             wrap().add_member("version", 1);
             wrap().add_member("languageId", "cpp");
-            //poll_throw(wsa_data, POLLWRNORM, 1, INFINITE);
+            //poll_throw(wsa_data, POLLWRNORM);
             con->write_object(wrap);
       }
-
-      //poll_throw(wsa_data, POLLRDNORM);
+      poll_throw(wsa_data, POLLRDNORM, 1);
       obj = con->read_object();
-      dump_read(obj);
-}
-
-
-NOINLINE void sigh05()
-{
-      //using Socket = asio::basic_stream_socket<asio::local::stream_protocol>;
-      using Socket = asio::basic_stream_socket<asio::ip::tcp>;
-
-      static constexpr uint64_t timeout_len = 1000;
-      std::mutex mtx1;
-
-      auto con = std::make_unique<con_type>();
-      con->impl().open();
-      //con->spawn_connection_l("clangd", "--log=verbose");
-      //con->spawn_connection_l("rls");
-      con->spawn_connection_l(
-                              R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
-                              //"--sync",
-                              "--log=verbose",
-                              "--pch-storage=memory", "--clang-tidy", "--background-index"
-      );
-
-#if 0
-      fmt::print(FC("With sockets {} and {}. Also '{}'.\n"),
-                 con->impl().fd(), con->impl().peer(),
-                 util::demangle(typeid(std::remove_reference_t<decltype(*con)>)));
-
-      auto write_thread = std::thread{[&cond1, &mtx1](socket_t const sock) {
-            auto lock = std::unique_lock(mtx1);
-            send(sock, SLS("Hello, idiot mcfuckerface!\n"), 0);
-            cond1.wait(lock);
-            std::this_thread::sleep_for(1s);
-            send(sock, SLS("Hello, idiot mcfuckerface!\n"), 0);
-            cond1.wait(lock);
-      }, con->impl().peer()};
-
-      struct my_uv_data {
-            uv_loop_t  loop{};
-            uv_poll_t  poll_hand{};
-            uv_timer_t timer_hand{};
-      };
-
-      auto const data = std::make_unique<my_uv_data>();
-      fmt::print(stderr,
-                 FC("The bloated ass structure is size {}, alignment {}. The last field "
-                    "(1024 bytes in, theoretically?) is at offset {}.\n"),
-                 sizeof(my_uv_data), alignof(my_uv_data), __builtin_offsetof(my_uv_data, timer_hand));
-#endif
-
-#if 0
-      rapidjson::MemoryBuffer membuf;
-      auto iox  = asio::io_context{};
-      auto sock = Socket{iox};
-      sock.assign(asio::ip::tcp::v4(), con->raw_descriptor());
-
-      std::remove_cvref_t<decltype(con->get_packer())> *to_write;
-
-      //auto rdfn = [&](boost::system::error_code const &) {
-      auto rdfn = [&sock, &mtx1]() {
-            std::lock_guard lock{mtx1};
-            char       rawbuf[65536];
-            auto const buffer = asio::mutable_buffer(rawbuf, sizeof rawbuf);
-            auto const nread  = sock.read_some(buffer);
-
-          fmt::print(stderr, FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
-                     nread, std::string_view{rawbuf, nread});
-      };
-
-      auto read_thread = std::thread{[&con, &iox, &sock, rdfn]() {
-            try {
-                  for (;;) {
-                        sock.wait(Socket::wait_read);
-                        auto strand = asio::make_strand(iox);
-                        strand.dispatch(rdfn, std::allocator<void>());
-                        iox.run();
-                        //con->notify_one();
-                  }
-            } catch (boost::system::system_error &e) {
-                  if (e.code().value() != WSAEINTR) {
-                        fmt::print(stderr, "Unexpected exception {}\n", e.what());
-                        throw;
-                  }
-            }
-      }};
-
-      //con->wait();
-
-      //sock.async_wait(Socket::wait_read, rdfn);
-
-      auto wrfn = [&con, &membuf, &mtx1](boost::system::error_code const &) {
-            std::lock_guard lock{mtx1};
-            con->write_string(membuf.GetBuffer(), membuf.GetSize());
-      };
-#endif
-
-#if 0
-      auto watch_thread = std::thread{[&]() {
-            sock.wait(Socket::wait_error);
-            auto foo = asio::make_strand(iox);
-            
-            sock.async_wait(Socket::wait_read, [](boost::system::error_code const &c){});
-      }};
-#endif
-
-      auto read_thread = std::thread{[&con]() {
-            for (;;) {
-                  auto doc = con->read_object();
-                  rapidjson::StringBuffer sb;
-                  rapidjson::Writer       wr{sb};
-                  doc.Accept(wr);
-
-                  fmt::print(stderr,
-                             FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n"
-                                "\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
-                             sb.GetSize(),
-                             std::string_view{sb.GetString(), sb.GetSize()});
-                  con->notify_one();
-            }
-      }};
-
-      AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
-      con->write_string(init);
-      con->wait();
-
-      //write_thread.join();
-      {
-            AUTOC contentvec = ::util::slurp_file(fname_raw);
-            auto wrap = con->get_packer();
-            wrap().add_member("jsonrpc", "2.0");
-            wrap().add_member("method", "textDocument/didOpen");
-            wrap().set_member("params");
-            wrap().set_member("textDocument");
-            wrap().add_member("uri",  rapidjson::Value ( fname_uri.data(),  static_cast<rapidjson::SizeType>(fname_uri.size()) ) );
-            wrap().add_member("text", rapidjson::Value { contentvec.data(), static_cast<rapidjson::SizeType>(contentvec.size()) } );
-            wrap().add_member("version", 1);
-            wrap().add_member("languageId", "cpp");
-
-            //rapidjson::MemoryBuffer membuf;
-            //rapidjson::Writer wr{membuf};
-            //wrap().doc().Accept(wr);
-            con->write_object(wrap);
-            //con->wait();
-            //sock.async_wait(Socket::wait_write, wrfn);
-            //con->wait();
-      }
       {
             auto wrap = con->get_packer();
             wrap().add_member("jsonrpc", "2.0");
@@ -268,64 +129,15 @@ NOINLINE void sigh05()
             wrap().set_member("params");
             wrap().set_member("textDocument");
             wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size()));
+            //poll_throw(wsa_data, POLLWRNORM);
             con->write_object(wrap);
-            con->wait();
       }
 
-
-
-      std::this_thread::sleep_for(10000ms);
-      con->impl().close();
-      //iox.stop();
-      read_thread.join();
-
-#if 0
-      uv_loop_init(&data->loop);
-      uv_poll_init_socket(&data->loop, &data->poll_hand, con->impl().fd());
-      uv_timer_init(&data->loop, &data->timer_hand);
-
-      uv_timer_start(
-          &data->timer_hand,
-          [](uv_timer_t *) { /*NOP*/ },
-          timeout_len, timeout_len
-      );
-
-      data->poll_hand.data = &cond1;
-
-      uv_poll_start(
-          &data->poll_hand, UV_READABLE | UV_DISCONNECT,
-          [](uv_poll_t *hand, int const status, int const events) -> void
-          {
-                auto *cnd = static_cast<std::condition_variable *>(hand->data);
-                fmt::print(FC("{} - {}\n"), status, events);
-                if (events & UV_DISCONNECT) {
-                      fmt::print(stderr, "Disconnecting!\n");
-                }
-                if (events & UV_READABLE) {
-                      fmt::print(stderr, "It mostly worked maybe.\n");
-                      char       buf[1024];
-                      auto const len = recv(hand->socket, buf, 1024, 0);
-                      if (len <= 0)
-                            util::win32::error_exit_wsa(L"recv()");
-                      fmt::print(stderr, FC("Got \"{}\"\n"), std::string_view{buf, static_cast<size_t>(len)});
-                } else {
-                      fmt::print(stderr, "Bah?\n");
-                      uv_poll_stop(hand);
-                }
-                cnd->notify_one();
-          });
-
-      auto loop_thread = std::thread{uv_run, &data->loop, UV_RUN_DEFAULT};
-
-      //std::this_thread::sleep_for(3s);
-      write_thread.join();
-
-      uv_poll_stop(&data->poll_hand);
-      uv_timer_stop(&data->timer_hand);
-      uv_stop(&data->loop);
-      //con->impl().close();
-      loop_thread.join();
-      //Sleep(2000);
+      poll_throw(wsa_data, POLLRDNORM, 1);
+      obj = con->read_object();
+      dump_read(obj);
+      fflush(stderr);
+      Sleep(1000);
 #endif
 }
 
@@ -447,24 +259,30 @@ NOINLINE void sigh04()
 {
       putenv((char *)"RUST_BACKTRACE=full");
 
+      //using conn_type = ipc::rpc::basic_io_connection<ipc::connections::unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+      using conn_type = con_type;
+
       //auto const path = util::get_temporary_filename(nullptr, ".sock").string();
-      auto con = std::make_unique<con_type>();
-      con->impl().should_close_listnener() = false;
-      con->impl().should_open_listener() = false;
-      con->impl().should_connect() = false;
-      con->impl().addr().sin_port = htons(62010);
+      auto con = std::make_unique<conn_type>();
+      //con->impl().should_close_listnener() = false;
+      //con->impl().should_open_listener() = false;
+      //con->impl().should_connect() = false;
+      //con->impl().addr().sin_port = htons(62010);
       con->impl().open();
 
       //std::string const listen_str = fmt::format("--listen=unix:{}", con->impl().path());
       //std::string const listen_str = fmt::format("--listen=[::1]:{}", ntohs(con->impl().addr().sin6_port));
-      std::string const listen_str = fmt::format("--listen=127.0.0.1:{}", ntohs(con->impl().addr().sin_port));
+      //std::string const listen_str = fmt::format("--listen=127.0.0.1:{}", ntohs(con->impl().addr().sin_port));
       char const *const args[]     = {
-          R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
-          "--log=verbose",
-          "--debug",
-          "--pch-storage=memory",
-          "--clang-tidy",
-          listen_str.c_str()};
+          //R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
+          //R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
+          //"--log=verbose",
+          //"--debug",
+          //"--pch-storage=memory",
+          //"--clang-tidy",
+          //listen_str.c_str()
+            "gopls"
+      };
 
       con->spawn_connection(std::size(args), const_cast<char **>(args));
       std::this_thread::sleep_for(1s);
@@ -479,7 +297,7 @@ NOINLINE void sigh04()
             util::win32::error_exit_wsa(L"connect()");
 #endif
 
-      con->impl().connect();
+      //con->impl().connect();
 
       //con->impl().
 
@@ -520,7 +338,7 @@ NOINLINE void sigh04()
           &data->poll_hand, UV_READABLE | UV_DISCONNECT,
           [](uv_poll_t *hand, int const status, int const events) -> void
           {
-                auto *conp = static_cast<con_type *>(hand->data);
+                auto *conp = static_cast<conn_type *>(hand->data);
 
                 //fmt::print(FC("{} - {}\n"), status, events);
                 if (events & UV_DISCONNECT) {
@@ -543,23 +361,29 @@ NOINLINE void sigh04()
                 }
           });
 
-      auto loop_thread = std::thread{uv_run, &data->loop, UV_RUN_DEFAULT};
+      auto loop_thread = std::thread{[](uv_loop_t *arg) {
+                                           __try {
+                                                 uv_run(arg, UV_RUN_DEFAULT);
+                                           } __except (EXCEPTION_CONTINUE_EXECUTION) {
+                                                 fprintf(stdout, "\n\nI, uh, I caught a thing -> 0x%08X\n\n", GetExceptionCode());
+                                                 fflush(stderr);
+                                           }
+                                     },
+                                     &data->loop};
+
+      //pthread_t tid{};
+      //pthread_create(
+      //    &tid, nullptr,
+      //    [](void *arg) -> void * {
+      //          auto uvloop = static_cast<uv_loop_t *>(arg);
+      //          uv_run(uvloop, UV_RUN_DEFAULT);
+      //          pthread_exit(nullptr);
+      //    },
+      //    &data->loop);
 
       {
             AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
             con->write_string(init);
-#if 0
-            auto wrap = con->get_packer();
-            wrap().add_member("id", 0);
-            wrap().add_member("jsonrpc", "2.0");
-            wrap().add_member("method", "initialize");
-            wrap().set_member("params");
-            wrap().add_member("processId", getpid());
-            wrap().add_member("rootUri", rapidjson::Value{fname_path.data(), fname_path.size()});
-            wrap().add_member("locale", "en_US.UTF8");
-            wrap().set_member("capabilities");
-            con->write_object(wrap);
-#endif
             con->wait();
       }
       {
@@ -589,8 +413,231 @@ NOINLINE void sigh04()
       }
 
 
-      fflush(stderr);
+      uv_poll_stop(&data->poll_hand);
+      uv_stop(&data->loop);
+
+      //pthread_join(tid, nullptr);
       loop_thread.join();
+
+      fmt::print(stderr, FC("\033[1mAll done, now exiting.\033[0m\n"));
+      fflush(stderr);
+}
+
+
+NOINLINE void sigh05()
+{
+      //using Socket = asio::basic_stream_socket<asio::local::stream_protocol>;
+      using Socket = asio::basic_stream_socket<asio::ip::tcp>;
+
+      static constexpr uint64_t timeout_len = 1000;
+      std::mutex mtx1;
+
+      auto con = std::make_unique<con_type>();
+      con->impl().open();
+      //con->spawn_connection_l("clangd", "--log=verbose");
+      //con->spawn_connection_l("rls");
+      con->spawn_connection_l(
+                              R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
+                              //"--sync",
+                              "--log=verbose",
+                              "--pch-storage=memory", "--clang-tidy", "--background-index"
+      );
+
+#if 0
+      fmt::print(FC("With sockets {} and {}. Also '{}'.\n"),
+                 con->impl().fd(), con->impl().peer(),
+                 util::demangle(typeid(std::remove_reference_t<decltype(*con)>)));
+
+      auto write_thread = std::thread{[&cond1, &mtx1](socket_t const sock) {
+            auto lock = std::unique_lock(mtx1);
+            send(sock, SLS("Hello, idiot mcfuckerface!\n"), 0);
+            cond1.wait(lock);
+            std::this_thread::sleep_for(1s);
+            send(sock, SLS("Hello, idiot mcfuckerface!\n"), 0);
+            cond1.wait(lock);
+      }, con->impl().peer()};
+
+      struct my_uv_data {
+            uv_loop_t  loop{};
+            uv_poll_t  poll_hand{};
+            uv_timer_t timer_hand{};
+      };
+
+      auto const data = std::make_unique<my_uv_data>();
+      fmt::print(stderr,
+                 FC("The bloated ass structure is size {}, alignment {}. The last field "
+                    "(1024 bytes in, theoretically?) is at offset {}.\n"),
+                 sizeof(my_uv_data), alignof(my_uv_data), __builtin_offsetof(my_uv_data, timer_hand));
+#endif
+
+#if 0
+      rapidjson::MemoryBuffer membuf;
+      auto iox  = asio::io_context{};
+      auto sock = Socket{iox};
+      sock.assign(asio::ip::tcp::v4(), con->raw_descriptor());
+
+      std::remove_cvref_t<decltype(con->get_packer())> *to_write;
+
+      //auto rdfn = [&](boost::system::error_code const &) {
+      auto rdfn = [&sock, &mtx1]() {
+            std::lock_guard lock{mtx1};
+            char       rawbuf[65536];
+            auto const buffer = asio::mutable_buffer(rawbuf, sizeof rawbuf);
+            auto const nread  = sock.read_some(buffer);
+
+          fmt::print(stderr, FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
+                     nread, std::string_view{rawbuf, nread});
+      };
+
+      auto read_thread = std::thread{[&con, &iox, &sock, rdfn]() {
+            try {
+                  for (;;) {
+                        sock.wait(Socket::wait_read);
+                        auto strand = asio::make_strand(iox);
+                        strand.dispatch(rdfn, std::allocator<void>());
+                        iox.run();
+                        //con->notify_one();
+                  }
+            } catch (boost::system::system_error &e) {
+                  if (e.code().value() != WSAEINTR) {
+                        fmt::print(stderr, "Unexpected exception {}\n", e.what());
+                        throw;
+                  }
+            }
+      }};
+
+      //con->wait();
+
+      //sock.async_wait(Socket::wait_read, rdfn);
+
+      auto wrfn = [&con, &membuf, &mtx1](boost::system::error_code const &) {
+            std::lock_guard lock{mtx1};
+            con->write_string(membuf.GetBuffer(), membuf.GetSize());
+      };
+#endif
+
+#if 0
+      auto watch_thread = std::thread{[&]() {
+            sock.wait(Socket::wait_error);
+            auto foo = asio::make_strand(iox);
+            
+            sock.async_wait(Socket::wait_read, [](boost::system::error_code const &c){});
+      }};
+#endif
+
+      auto read_thread = std::thread{[&con]() {
+            for (;;) {
+                  auto doc = con->read_object();
+                  rapidjson::StringBuffer sb;
+                  rapidjson::Writer       wr{sb};
+                  doc.Accept(wr);
+
+                  fmt::print(stderr,
+                             FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n"
+                                "\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
+                             sb.GetSize(),
+                             std::string_view{sb.GetString(), sb.GetSize()});
+                  fflush(stderr);
+                  Sleep(250);
+                  con->notify_one();
+            }
+      }};
+
+      AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
+      con->write_string(init);
+      con->wait();
+
+      //write_thread.join();
+      {
+            AUTOC contentvec = ::util::slurp_file(fname_raw);
+            auto wrap = con->get_packer();
+            wrap().add_member("jsonrpc", "2.0");
+            wrap().add_member("method", "textDocument/didOpen");
+            wrap().set_member("params");
+            wrap().set_member("textDocument");
+            wrap().add_member("uri",  rapidjson::Value ( fname_uri.data(),  static_cast<rapidjson::SizeType>(fname_uri.size()) ) );
+            wrap().add_member("text", rapidjson::Value { contentvec.data(), static_cast<rapidjson::SizeType>(contentvec.size()) } );
+            wrap().add_member("version", 1);
+            wrap().add_member("languageId", "cpp");
+
+            //rapidjson::MemoryBuffer membuf;
+            //rapidjson::Writer wr{membuf};
+            //wrap().doc().Accept(wr);
+            con->write_object(wrap);
+            con->wait();
+            //con->wait();
+            //sock.async_wait(Socket::wait_write, wrfn);
+            //con->wait();
+      }
+      {
+            auto wrap = con->get_packer();
+            wrap().add_member("jsonrpc", "2.0");
+            wrap().add_member("id", 1);
+            wrap().add_member("method", "textDocument/semanticTokens/full");
+            wrap().set_member("params");
+            wrap().set_member("textDocument");
+            wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size()));
+            con->write_object(wrap);
+            con->wait();
+            con->wait();
+            Sleep(250);
+      }
+
+
+
+      std::this_thread::sleep_for(10000ms);
+      con->impl().close();
+      //iox.stop();
+      read_thread.join();
+
+#if 0
+      uv_loop_init(&data->loop);
+      uv_poll_init_socket(&data->loop, &data->poll_hand, con->impl().fd());
+      uv_timer_init(&data->loop, &data->timer_hand);
+
+      uv_timer_start(
+          &data->timer_hand,
+          [](uv_timer_t *) { /*NOP*/ },
+          timeout_len, timeout_len
+      );
+
+      data->poll_hand.data = &cond1;
+
+      uv_poll_start(
+          &data->poll_hand, UV_READABLE | UV_DISCONNECT,
+          [](uv_poll_t *hand, int const status, int const events) -> void
+          {
+                auto *cnd = static_cast<std::condition_variable *>(hand->data);
+                fmt::print(FC("{} - {}\n"), status, events);
+                if (events & UV_DISCONNECT) {
+                      fmt::print(stderr, "Disconnecting!\n");
+                }
+                if (events & UV_READABLE) {
+                      fmt::print(stderr, "It mostly worked maybe.\n");
+                      char       buf[1024];
+                      auto const len = recv(hand->socket, buf, 1024, 0);
+                      if (len <= 0)
+                            util::win32::error_exit_wsa(L"recv()");
+                      fmt::print(stderr, FC("Got \"{}\"\n"), std::string_view{buf, static_cast<size_t>(len)});
+                } else {
+                      fmt::print(stderr, "Bah?\n");
+                      uv_poll_stop(hand);
+                }
+                cnd->notify_one();
+          });
+
+      auto loop_thread = std::thread{uv_run, &data->loop, UV_RUN_DEFAULT};
+
+      //std::this_thread::sleep_for(3s);
+      write_thread.join();
+
+      uv_poll_stop(&data->poll_hand);
+      uv_timer_stop(&data->timer_hand);
+      uv_stop(&data->loop);
+      //con->impl().close();
+      loop_thread.join();
+      //Sleep(2000);
+#endif
 }
 
 
@@ -605,6 +652,8 @@ my_alloc_cb(uv_handle_t *handle, size_t suggested, uv_buf_t *buf)
 static void
 my_read_cb(uv_stream_t *uvstream, ssize_t cnt, uv_buf_t const *buf)
 {
+      auto *con = static_cast<ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper> *>(uvstream->data);
+
       if (cnt <= 0) {
             // cnt == 0 means libuv asked for a buffer and decided it wasn't needed:
             // http://docs.libuv.org/en/latest/stream.html#c.uv_read_start.
@@ -629,6 +678,7 @@ my_read_cb(uv_stream_t *uvstream, ssize_t cnt, uv_buf_t const *buf)
       }
 
       dump_read(buf->base, cnt);
+      con->notify_all();
 }
 
 
@@ -636,15 +686,31 @@ NOINLINE void sigh06()
 {
       struct my_uv_data {
             uv_loop_t    loop{};
-            uv_pipe_t    rdpipe{};
-            uv_pipe_t    wrpipe{};
+            //uv_pipe_t    rdpipe{};
+            //uv_pipe_t    wrpipe{};
             uv_process_t proc{};
       };
 
+      using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
+
+
       auto data = std::make_unique<my_uv_data>();
       uv_loop_init(&data->loop);
-      uv_pipe_init(&data->loop, &data->rdpipe, 0);
-      uv_pipe_init(&data->loop, &data->wrpipe, 0);
+      //uv_pipe_init(&data->loop, &data->rdpipe, 0);
+      //uv_pipe_init(&data->loop, &data->wrpipe, 0);
+
+      auto con = std::make_unique<con_type>();
+      con->impl().set_loop(&data->loop);
+      con->spawn_connection_l("clangd.exe", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--background-index");
+
+#if 0
+#ifdef _WIN32
+      constexpr int uvflags[2] = {UV_CREATE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE,
+                                  UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE};
+#else
+      constexpr int uvflags[2] = {UV_CREATE_PIPE | UV_READABLE_PIPE,
+                                  UV_CREATE_PIPE | UV_WRITABLE_PIPE};
+#endif
 
       auto argv = std::array{"clangd.exe", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--background-index", static_cast<char const *>(0)};
       uv_stdio_container_t cont[] = {
@@ -652,9 +718,17 @@ NOINLINE void sigh06()
             // .data = { .fd = 0, }},
             //{.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE),
             // .data = { .fd = 1, }},
-            {.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE),
+            //{.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE),
+            // .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->wrpipe), }},
+            //{.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_WRITABLE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE),
+            // .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->rdpipe), }},
+            //{.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_WRITABLE_PIPE | UV_READABLE_PIPE),
+            // .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->wrpipe), }},
+            //{.flags = static_cast<uv_stdio_flags>(UV_INHERIT_STREAM),
+            // .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->wrpipe), }},
+            {.flags = static_cast<uv_stdio_flags>(uvflags[0]),
              .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->wrpipe), }},
-            {.flags = static_cast<uv_stdio_flags>(UV_CREATE_PIPE | UV_WRITABLE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE),
+            {.flags = static_cast<uv_stdio_flags>(uvflags[1]),
              .data = { .stream = reinterpret_cast<uv_stream_t *>(&data->rdpipe), }},
             {.flags = static_cast<uv_stdio_flags>(UV_INHERIT_FD), .data = { .fd = 2, }},
       };
@@ -673,29 +747,19 @@ NOINLINE void sigh06()
 
       //auto con = std::make_unique <con_type>();
       //con->impl().
+#endif
+
+      //con->impl().set_descriptors(data->rdpipe.handle, data->wrpipe.handle);
+
+      con->impl().get_uv_handle()->data = con.get();
+      uv_read_start(reinterpret_cast<uv_stream_t *>(con->impl().get_uv_handle()), my_alloc_cb, my_read_cb);
+
+      auto loop_thread = std::thread{uv_run, &data->loop, UV_RUN_DEFAULT};
 
       {
             AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
-            char  buf[60];
-            AUTOC buflen = ::sprintf(buf, "Content-Length: %zu\r\n\r\n", init.size());
+            con->write_string(init);
 
-#ifdef _WIN32
-            ::WriteFile(data->wrpipe.handle, buf, buflen, nullptr, nullptr);
-            ::WriteFile(data->wrpipe.handle, init.data(), init.size(), nullptr, nullptr);
-#endif
-
-            //uv_buf_t ubuf = {static_cast<ULONG>(buflen), buf};
-            //uv_try_write(reinterpret_cast<uv_stream_t *>(&data->pipe), &ubuf, 1);
-            //ubuf.base = const_cast<char *>(init.data());
-            //ubuf.len  = init.size();
-            //uv_try_write(reinterpret_cast<uv_stream_t *>(&data->pipe), &ubuf, 1);
-      }
-
-      uv_read_start(reinterpret_cast<uv_stream_t *>(&data->rdpipe), my_alloc_cb, my_read_cb);
-      auto loop_thread = std::thread{uv_run, &data->loop, UV_RUN_DEFAULT};
-
-#if 0
-      {
             AUTOC contentvec = ::util::slurp_file(fname_raw);
             auto wrap = con->get_packer();
             wrap().add_member("jsonrpc", "2.0");
@@ -709,7 +773,20 @@ NOINLINE void sigh06()
             con->write_object(wrap);
             con->wait();
       }
+      {
+            auto wrap = con->get_packer();
+            wrap().add_member("jsonrpc", "2.0");
+            wrap().add_member("id", 1);
+            wrap().add_member("method", "textDocument/semanticTokens/full");
+            wrap().set_member("params");
+            wrap().set_member("textDocument");
+            wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size()));
+            con->write_object(wrap);
+            con->wait();
+      }
 
+
+#if 0
       {
             OVERLAPPED ov;
             SecureZeroMemory(&ov, sizeof ov);
@@ -731,6 +808,16 @@ NOINLINE void sigh06()
             Sleep(50000);
       }
 #endif
+      Sleep(20000);
+      uv_read_stop(reinterpret_cast<uv_stream_t *>(con->impl().get_uv_handle()));
+      uv_stop(&data->loop);
+      loop_thread.join();
+}
+
+NOINLINE void sigh07()
+{
+      uv_process_t proc;
+
 }
 
 

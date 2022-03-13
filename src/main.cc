@@ -198,11 +198,7 @@ do_main()
 
       // test::suck::test01();
       //::rpc::mpack::test01();
-      //sigh::sigh02();
 
-      //sigh::sigh03();
-      //sigh::sigh04();
-      //sigh::sigh05();
       sigh::sigh04();
 
       // std::cout.flush(); std::cerr.flush(); std::cout << '\n' << barline << barline << "\n\n"; std::cout.flush();

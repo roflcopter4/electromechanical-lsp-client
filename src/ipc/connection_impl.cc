@@ -48,6 +48,30 @@ async_connect_to_unix_socket(socket_info *info) noexcept
       }
 }
 
+#ifdef _WIN32
+__forceinline socket_t
+call_socket_listen(int const family, int const type, int const protocol)
+{
+      return ::WSASocketW(family, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
+}
+__forceinline socket_t
+call_socket_connect(int const family, int const type, int const protocol)
+{
+      return ::WSASocketW(family, type, protocol, nullptr, 0, 0);
+}
+#else
+__forceinline socket_t
+call_socket_listen(int const family, int const type, int const protocol)
+{
+      return ::socket(family, type, protocol);
+}
+__forceinline socket_t
+call_socket_connect(int const family, int const type, int const protocol)
+{
+      return ::socket(family, type, protocol);
+}
+#endif
+
 
 /*======================================================================================*/
 /*======================================================================================*/
@@ -154,38 +178,49 @@ protect_argv(int const argc, char **argv)
 
 
 static procinfo_t
-spawn_connection_common(socket_t const      connected,
+spawn_connection_common(socket_t const      stdin_sock,
+                        socket_t const      stdout_sock,
                         HANDLE const        err_fd,
                         UNUSED size_t const argc,
                         char              **argv)
 {
       PROCESS_INFORMATION pid;
       ZeroMemory(&pid, sizeof pid);
-      HANDLE io = static_cast<intptr_t>(connected) >= 0
-                      ? reinterpret_cast<HANDLE>(connected)
+
+      HANDLE io_in = static_cast<intptr_t>(stdin_sock) >= 0
+                      ? reinterpret_cast<HANDLE>(stdin_sock)
+                      : CreateFileA("NUL", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                    FILE_ATTRIBUTE_NORMAL, nullptr);
+      HANDLE io_out = static_cast<intptr_t>(stdout_sock) >= 0
+                      ? reinterpret_cast<HANDLE>(stdout_sock)
                       : CreateFileA("NUL", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
                                     FILE_ATTRIBUTE_NORMAL, nullptr);
 
       STARTUPINFOW startinfo = {};
       startinfo.cb           = sizeof(startinfo);
       startinfo.dwFlags      = STARTF_USESTDHANDLES;
-      startinfo.hStdInput    = io;
-      startinfo.hStdOutput   = io;
+      startinfo.hStdInput    = io_in;
+      startinfo.hStdOutput   = io_out;
       startinfo.hStdError    = err_fd;
 
-      if (!::SetHandleInformation(io, HANDLE_FLAG_INHERIT, 1))
+      if (!::SetHandleInformation(io_in, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"IO SetHandleInformation");
+      if (io_in != io_out)
+            if (!::SetHandleInformation(io_out, HANDLE_FLAG_INHERIT, 1))
+                  util::win32::error_exit(L"IO SetHandleInformation");
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      AUTOC safe_argv = win32::protect_argv(static_cast<int>(argc), argv);
+      AUTOC safe_argv = protect_argv(static_cast<int>(argc), argv);
       AUTOC ret = ::CreateProcessW(nullptr, const_cast<LPWSTR>(safe_argv.c_str()), nullptr,
                                    nullptr, true, 0, nullptr, nullptr, &startinfo, &pid);
 
       if (!ret)
             util::win32::error_exit(L"CreateProcessW()");
-      if (io != reinterpret_cast<HANDLE>(connected))
-            CloseHandle(io);
+      if (io_in != reinterpret_cast<HANDLE>(stdin_sock))
+            CloseHandle(io_in);
+      if (io_out != reinterpret_cast<HANDLE>(stdout_sock))
+            CloseHandle(io_out);
 
       return pid;
 }
@@ -226,11 +261,6 @@ start_process_with_pipe(UNUSED char const   *exe,
 
       if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
-
-      /* _open_osfhandle() ought to transfer ownership of the handle to the file
-       * descriptor. The original HANDLE isn't leaked when it goes out of scope. */
-      //pipefds[WRITE_FD] = _open_osfhandle(reinterpret_cast<intptr_t>(handles[INPUT_PIPE][WRITE_FD]), _O_APPEND);
-      //pipefds[READ_FD]  = _open_osfhandle(reinterpret_cast<intptr_t>(handles[OUTPUT_PIPE][READ_FD]), _O_RDONLY);
 
       pipefds[WRITE_FD] = handles[INPUT_PIPE][WRITE_FD];
       pipefds[READ_FD]  = handles[OUTPUT_PIPE][READ_FD];
@@ -289,7 +319,7 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
             open();
 
       AUTOC err_handle = get_err_handle();
-      AUTOC pid = spawn_connection_common(connector_, err_handle, argc, argv);
+      AUTOC pid = spawn_connection_common(connector_, connector_, err_handle, argc, argv);
 
       if (err_sink_type_ == sink_type::FILENAME)
             ::CloseHandle(err_handle);
@@ -313,7 +343,7 @@ unix_socket_connection_impl::open_new_socket()
       socket_t listener = static_cast<socket_t>(-1);
 
       if (should_open_listener()) {
-            listener = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+            listener = call_socket_listen(AF_UNIX, SOCK_STREAM, 0);
 
             if (auto const e = ::WSAGetLastError(); e != 0)
                   util::win32::error_exit_explicit(L"socket()", e);
@@ -332,7 +362,7 @@ unix_socket_connection_impl::open_new_socket()
 socket_t
 unix_socket_connection_impl::connect_to_socket()
 {
-      socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const connector = call_socket_connect(AF_UNIX, SOCK_STREAM, 0);
 
       if (auto const e = ::WSAGetLastError(); e != 0)
             util::win32::error_exit_wsa(L"socket(): "s + std::to_wstring(e));
@@ -434,12 +464,12 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 void
 pipe_handle_connection_impl::close()
 {
-      if (read_ != GetStdHandle(STD_INPUT_HANDLE))
+      if (read_ != INVALID_HANDLE_VALUE && read_ != GetStdHandle(STD_INPUT_HANDLE))
             ::CloseHandle(read_);
-      if (write_ != GetStdHandle(STD_OUTPUT_HANDLE))
+      read_ = INVALID_HANDLE_VALUE;
+      if (write_ != INVALID_HANDLE_VALUE && write_ != GetStdHandle(STD_OUTPUT_HANDLE))
             ::CloseHandle(write_);
-      read_  = reinterpret_cast<HANDLE>(-1);
-      write_ = reinterpret_cast<HANDLE>(-1);
+      write_ = INVALID_HANDLE_VALUE;
 }
 
 procinfo_t
@@ -530,13 +560,13 @@ named_pipe_spawn_connection_helper(HANDLE               pipe,
           .bInheritHandle       = TRUE,
       };
 
-      if (!SetHandleInformation(pipe, HANDLE_FLAG_INHERIT, 0))
-            util::win32::error_exit(L"Named pipe SetHandleInformation");
+      //if (!SetHandleInformation(pipe, HANDLE_FLAG_INHERIT, 0))
+      //      util::win32::error_exit(L"Named pipe SetHandleInformation");
 
 
-      HANDLE client_pipe = CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE | WRITE_DAC,
+      HANDLE client_pipe = CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE,
                                        /* FILE_SHARE_READ | FILE_SHARE_WRITE */ 0, &sec_attr,
-                                       OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+                                       OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
 
       if (client_pipe == INVALID_HANDLE_VALUE)
             util::win32::error_exit(L"CreateFileW");
@@ -561,6 +591,8 @@ named_pipe_spawn_connection_helper(HANDLE               pipe,
 
       //CloseHandle(client_pipe);
 }
+
+#if 0
 
 void
 win32_named_pipe_impl::open()
@@ -620,7 +652,136 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
       set_initialized(2);
       return pi;
 }
+#endif
 
+void
+win32_named_pipe_impl::open()
+{
+      throw_if_initialized(typeid(*this), 1);
+
+      {
+            char buf[PATH_MAX + 1];
+            size_t const len = braindead_tempname(buf, R"(\\.\pipe)", MAIN_PROJECT_NAME "-", "-io_pipe");
+            pipe_fname_ = util::unistring::charconv<wchar_t>(buf, len);
+            pipe_narrow_name_ = {buf, len};
+      }
+      //uv_pipe_bind(&uvhandle_, pipe_narrow_name_.c_str());
+      //pipe_   = uvhandle_.handle;
+      //crt_fd_ = _open_osfhandle(intptr_t(pipe_), _O_RDWR | _O_BINARY);
+
+      //uv_pipe_open(&pipe_, nullptr);
+
+      pipe_ = CreateNamedPipeW(
+           pipe_fname_.c_str(),
+           PIPE_ACCESS_DUPLEX | WRITE_DAC | FILE_FLAG_FIRST_PIPE_INSTANCE | FILE_FLAG_OVERLAPPED,
+           PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+           PIPE_UNLIMITED_INSTANCES,
+           65536,     // outbound buffer
+           65536,     // inbound buffer
+           0, nullptr // Default wait time and security attrs.
+      );
+
+      fmt::print(stderr, FC("Using pipe at `{}' with raw value `{}'.\n"), pipe_narrow_name_, pipe_);
+      fflush(stderr);
+      std::wcerr << L"Wide name: "sv << pipe_fname_ << L'\n';
+      std::wcerr.flush();
+
+      //SecureZeroMemory(&overlapped_, sizeof overlapped_);
+      //overlapped_.hEvent = CreateEvent( 
+      //   nullptr,   // default security attribute 
+      //   true,      // manual-reset event 
+      //   true,      // initial state = signaled 
+      //   nullptr);  // unnamed event object
+
+      set_initialized(1);
+}
+
+procinfo_t
+win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
+
+      PROCESS_INFORMATION pi;
+      auto const safe_argv  = win32::protect_argv(static_cast<int>(argc), argv);
+      HANDLE     err_handle = get_err_handle();
+      err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
+
+      //uv_connect_t con{};
+      //uv_pipe_connect(&con, &uvchildhandle_,
+      //                pipe_narrow_name_.c_str(),
+      //                [](uv_connect_t *conp, int status) {
+      //                      if (status != 0)
+      //                            util::win32::error_exit(L"uv_pipe_connect fucked something up?");
+      //                });
+      named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, pipe_fname_, safe_argv);
+      crt_fd_ = _open_osfhandle(intptr_t(pipe_), _O_RDWR | _O_BINARY);
+      uv_pipe_open(&uvhandle_, crt_fd_);
+
+      if (err_sink_type_ != sink_type::DEFAULT && err_handle)
+            CloseHandle(err_handle);
+
+      set_initialized(2);
+      return pi;
+}
+
+
+#if 0
+void
+win32_named_pipe_impl::open()
+{
+      throw_if_initialized(typeid(*this), 1);
+
+      uv_pipe_open(&pipe_);
+
+      set_initialized(1);
+}
+
+procinfo_t
+win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
+
+      //PROCESS_INFORMATION pi;
+      //auto const safe_argv  = win32::protect_argv(static_cast<int>(argc), argv);
+      //HANDLE     err_handle = get_err_handle();
+      //err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
+
+#ifdef _WIN32
+      constexpr int uvflags[2] = {UV_CREATE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE,
+                                  UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE};
+#endif
+
+      uv_stdio_container_t cont[] = {
+            {.flags = static_cast<uv_stdio_flags>(uvflags[0]),
+             .data = { .stream = reinterpret_cast<uv_stream_t *>(&pipe_), }},
+            {.flags = static_cast<uv_stdio_flags>(uvflags[1]),
+             .data = { .stream = reinterpret_cast<uv_stream_t *>(&pipe_), }},
+            {.flags = static_cast<uv_stdio_flags>(UV_INHERIT_FD), .data = { .fd = 2, }},
+      };
+      uv_process_options_t opts = {
+          .file = argv[0],
+          .args = argv,
+          .flags = UV_PROCESS_WINDOWS_HIDE,
+          .stdio_count = std::size(cont),
+          .stdio = cont,
+      };
+
+
+      //named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, pipe_fname_, safe_argv);
+
+      //if (err_sink_type_ != sink_type::DEFAULT && err_handle)
+      //      CloseHandle(err_handle);
+
+      set_initialized(2);
+      return pi;
+}
+#endif
+
+#if 0
 ssize_t
 win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
 {
@@ -629,8 +790,8 @@ win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
       DWORD  n      = 0;
       int    ret;
       //memset(&overlapped_, 0, sizeof overlapped_);
-      overlapped_.hEvent = CreateEvent(nullptr, true, true, nullptr);
-      assert(overlapped_.hEvent != nullptr);
+      //overlapped_.hEvent = CreateEvent(nullptr, true, true, nullptr);
+      //assert(overlapped_.hEvent != nullptr);
 
       if (flags & MSG_WAITALL) {
             do {
@@ -658,8 +819,8 @@ win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
             total = n;
       }
 
-      ResetEvent(overlapped_.hEvent);
-      AUTOC e = GetLastError();
+      //ResetEvent(overlapped_.hEvent);
+      //AUTOC e = GetLastError();
       //if (!ret && e != ERROR_MORE_DATA)
       //if (!ret || e)
             //util::win32::error_exit_explicit(L"ReadFile", e);
@@ -687,8 +848,217 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, int const fl
       total = n;
       return total;
 }
+#endif
+
+
+ssize_t
+win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
+{
+      auto    lock  = std::lock_guard{read_mtx_};
+      ssize_t total = 0;
+      DWORD   n;
+
+      if (flags & MSG_WAITALL) {
+            do {
+                  if (pipe_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                        throw except::connection_closed();
+
+                  bool b = ::ReadFile(pipe_, static_cast<char *>(buf) + total, static_cast<size_t>(nbytes - total), &n, nullptr);
+                  if (!b)
+                        util::win32::error_exit(L"ReadFile()");
+            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+      } else {
+            if (pipe_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                  throw except::connection_closed();
+            bool b = ::ReadFile(pipe_, static_cast<char *>(buf), static_cast<size_t>(nbytes), &n, nullptr);
+            if (!b)
+                  util::win32::error_exit(L"ReadFile()");
+            total = n;
+      }
+
+      return static_cast<ssize_t>(total);
+}
+
+#if 0
+ssize_t
+win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+      DWORD n;
+
+      do {
+            if (pipe_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
+                  throw except::connection_closed();
+            bool b = ::WriteFile(pipe_, static_cast<char const *>(buf) + total, static_cast<size_t>(nbytes - total), &n, nullptr);
+            if (!b)
+                  util::win32::error_exit(L"ReadFile()");
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
+#endif
+
+ssize_t
+win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+      ssize_t n;
+
+      do {
+            if (pipe_ == INVALID_HANDLE_VALUE) [[unlikely]]
+                  throw except::connection_closed();
+            n = ::write(crt_fd_, static_cast<char const *>(buf) + total,
+                        static_cast<size_t>(nbytes - total));
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
 
 # endif
+
+
+/*--------------------------------------------------------------------------------------*/
+
+
+static void
+open_pipeish_socket(socket_t &us, socket_t &peer)
+{
+      socket_t    listener;
+      sockaddr_un addr{};
+      std::string path = util::get_temporary_filename(nullptr, ".sock").string();
+
+            if (path.length() + 1 > sizeof(addr.sun_path))
+            throw std::logic_error(
+                fmt::format(FC("The file path \"{}\" (len: {}) is too large to "
+                               "fit into a UNIX socket address (size: {})"),
+                            path, path.size() + 1, sizeof(addr.sun_path)));
+
+      memcpy(addr.sun_path, path.c_str(), path.length() + 1);
+      addr.sun_family = AF_UNIX;
+
+      listener = ::WSASocketW(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC,
+                              0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+
+      if (auto const e = ::WSAGetLastError(); e != 0)
+            util::win32::error_exit_explicit(L"socket()", e);
+
+      if (::bind(listener, (sockaddr *)&addr, sizeof addr) < 0)
+            util::win32::error_exit_wsa(L"bind()");
+
+      if (::listen(listener, 1) < 0)
+            util::win32::error_exit_wsa(L"listen");
+
+      auto info         = socket_info{path, listener, {}, {}, true};
+      auto start_thread = std::thread{async_connect_to_unix_socket, &info};
+
+      sockaddr_un con_addr = {};
+      int         len      = sizeof(con_addr);
+      socket_t    acceptor = ::accept(listener, (sockaddr *)&con_addr, &len);
+      if (!acceptor || acceptor == uintptr_t(-1))
+            util::win32::error_exit_wsa(L"accept()");
+
+      start_thread.join();
+      us   = acceptor;
+      peer = info.connected_sock;
+      closesocket(listener);
+}
+
+
+procinfo_t
+dual_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 2);
+
+      socket_t our_socks[2];
+      socket_t peer_socks[2];
+
+      for (int i = 0; i < 2; ++i)
+            open_pipeish_socket(our_socks[i], peer_socks[i]);
+
+      write_           = our_socks[0];
+      read_            = our_socks[1];
+      AUTOC err_handle = get_err_handle();
+      AUTOC pid        = spawn_connection_common(peer_socks[0], peer_socks[1], err_handle,
+                                                 static_cast<int>(argc), argv);
+      closesocket(peer_socks[0]);
+      closesocket(peer_socks[1]);
+
+      if (err_sink_type_ == sink_type::FILENAME)
+            ::CloseHandle(err_handle);
+
+      set_initialized(2);
+      return pid;
+}
+
+void
+dual_socket_connection_impl::close()
+{
+      if (intptr_t(write_) != (-1)) {
+            ::shutdown(write_, 2);
+            closesocket(write_);
+      }
+      if (intptr_t(read_) != (-1)) {
+            ::shutdown(read_, 2);
+            closesocket(read_);
+      }
+
+      read_ = write_ = static_cast<SOCKET>(-1);
+}
+
+ssize_t
+dual_socket_connection_impl::read(void *buf, ssize_t size, int flags)
+{
+      auto    lock  = std::lock_guard{read_mtx_};
+      ssize_t total = 0;
+      ssize_t n     = 0;
+
+      if (flags & MSG_WAITALL) {
+            flags &= ~MSG_WAITALL;
+            do {
+                  n = ::recv(read_, static_cast<char *>(buf) + total,
+                             size - total, flags);
+            } while ((n != (-1)) && (total += n) < size);
+      } else {
+            for (;;) {
+                  n = ::recv(read_, static_cast<char *>(buf), size, flags);
+                  if (n != 0)
+                        break;
+                  std::this_thread::sleep_for(10ms);
+            }
+            total = n;
+      }
+
+      if (n == (-1)) [[unlikely]] {
+            if (errno == EBADF)
+                  throw except::connection_closed();
+             util::win32::error_exit_wsa(L"recv");
+      }
+
+      return total;
+}
+
+ssize_t
+dual_socket_connection_impl::write(void const *buf, ssize_t nbytes, int flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+      ssize_t n;
+
+      do {
+            n = ::send(write_, static_cast<char const *>(buf) + total,
+                       nbytes - total, flags);
+      } while (n != (-1) && (total += n) < nbytes);
+
+      if (n == (-1)) [[unlikely]] {
+            if (errno == EBADF)
+                  throw except::connection_closed();
+            err(1, "send() failed");
+      }
+
+      return total;
+}
 
 
 /*======================================================================================*/
@@ -1039,9 +1409,9 @@ static int lazy_getsockname(socket_t const listener, sockaddr *addr, socklen_t c
 }
 
 static
-socket_t open_new_inet_socket(sockaddr const *addr, socklen_t const size, int const type, int const queue = 1)
+socket_t open_new_inet_socket(sockaddr const *addr, socklen_t const size, int const type, int const queue = 1, int const protocol = 0)
 {
-      socket_t const listener = ::socket(type, SOCK_STREAM, 0);
+      socket_t const listener = call_socket_listen(AF_UNIX, SOCK_STREAM, 0);
       if (static_cast<intptr_t>(listener) < 0)
             ERR(1, "socket()");
 
@@ -1059,9 +1429,9 @@ socket_t open_new_inet_socket(sockaddr const *addr, socklen_t const size, int co
 }
 
 socket_t
-connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int const type)
+connect_to_inet_socket(sockaddr const *addr, socklen_t const size, int const type, int const protocol)
 {
-      socket_t const connector = ::socket(type, SOCK_STREAM, type);
+      socket_t const connector = call_socket_connect(AF_UNIX, SOCK_STREAM, 0);
       if (static_cast<intptr_t>(connector) < 0)
             ERR(1, "socket()");
 
@@ -1100,7 +1470,9 @@ inet_any_socket_connection_impl::do_spawn_connection(size_t const argc, char **a
       if (!check_initialized(1))
             open();
       err_fd_   = get_err_handle();
-      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+
+      AUTOC sock = get_connected_socket();
+      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
       set_initialized(2);
       return ret;
 }
@@ -1121,7 +1493,8 @@ inet_any_socket_connection_impl::open_new_socket()
       }
 
       if (should_connect()) {
-            listener_ = open_new_inet_socket(addr_, addr_length_, type_, 255);
+            //listener_ = open_new_inet_socket(addr_, addr_length_, type_, type_ == AF_INET ? IPPROTO_IPV4 : IPPROTO_IPV6, 255);
+            listener_ = open_new_inet_socket(addr_, addr_length_, type_);
             memset(addr_, 0, addr_length_);
             lazy_getsockname(listener_, addr_, addr_length_);
       }
@@ -1249,7 +1622,8 @@ inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       if (!check_initialized(1))
             open();
       err_fd_   = get_err_handle();
-      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+      AUTOC sock = get_connected_socket();
+      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
       set_initialized(2);
       return ret;
 }
@@ -1265,7 +1639,7 @@ inet_ipv4_socket_connection_impl::open_new_socket()
       }
 
       listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                        sizeof(addr_), AF_INET, 255);
+                                        sizeof(addr_), AF_INET);
       memset(&addr_, 0, sizeof(addr_));
       lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
       addr_init_ = true;
@@ -1321,7 +1695,8 @@ inet_ipv6_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       if (!check_initialized(1))
             open();
       err_fd_   = get_err_handle();
-      AUTOC ret = spawn_connection_common(get_connected_socket(), err_fd_, argc, argv);
+      AUTOC sock = get_connected_socket();
+      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
       set_initialized(2);
       return ret;
 }
@@ -1338,7 +1713,7 @@ inet_ipv6_socket_connection_impl::open_new_socket()
 
       if (should_open_listener()) {
             listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                              sizeof(addr_), AF_INET6, 255);
+                                              sizeof(addr_), AF_INET6);
             memset(&addr_, 0, sizeof(addr_));
             lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
       }

@@ -352,7 +352,7 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 /* TCP/IP */
 
 
-extern socket_t connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type);
+extern socket_t connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int protocol = 0);
 
 
 template <typename AddrType>
@@ -386,6 +386,7 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             if (!this->check_initialized(1))
                   throw std::logic_error("Cannot connect to uninitialized address!");
 
+            //int const proto  = get_type() == AF_INET ? IPPROTO_IPV4 : IPPROTO_IPV6;
             this->connector_ = connect_to_inet_socket(get_addr_generic(), get_socklen(), get_type());
             this->main_fd_   = this->connector_;
             return this->connector_;
@@ -713,25 +714,27 @@ class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
  */
 class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
 {
-      HANDLE       pipe_ = nullptr;
+      HANDLE       pipe_ = INVALID_HANDLE_VALUE;
+      std::string  pipe_narrow_name_;
       std::wstring pipe_fname_;
 
       OVERLAPPED  overlapped_ = {};
 
+      uv_loop_t  *loop_     = nullptr;
+      uv_pipe_t   uvhandle_ = {};
+      int         crt_fd_   = -1;
+
     public:
-      win32_named_pipe_impl()
-      {
-            overlapped_.hEvent = CreateEvent(nullptr, true, true, nullptr);
-      }
+      win32_named_pipe_impl() = default;
       ~win32_named_pipe_impl() override
       {
             close();
-            CloseHandle(overlapped_.hEvent);
+            //CloseHandle(overlapped_.hEvent);
       }
 
       void close() override
       {
-            if (pipe_) {
+            if (pipe_ != INVALID_HANDLE_VALUE) {
                   CloseHandle(pipe_);
                   DeleteFileW(pipe_fname_.c_str());
             }
@@ -750,8 +753,55 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
       ND HANDLE fd() const noexcept override { return pipe_; }
       ND size_t available() const noexcept(false) override { throw util::except::not_implemented(); }
 
+      void set_loop(uv_loop_t *loop)
+      {
+            loop_ = loop;
+            uv_pipe_init(loop, &uvhandle_, 0);
+      }
+
+      uv_pipe_t *get_uv_handle() { return &uvhandle_; }
+
       DELETE_COPY_CTORS(win32_named_pipe_impl);
       DEFAULT_MOVE_CTORS(win32_named_pipe_impl);
+};
+
+#endif
+
+#ifdef _WIN32
+
+class dual_socket_connection_impl final : public base_connection_interface<SOCKET>
+{
+      using this_type = dual_socket_connection_impl;
+      using base_type = base_connection_interface<SOCKET>;
+
+      socket_t read_  = static_cast<socket_t>(-1);
+      socket_t write_ = static_cast<socket_t>(-1);
+
+    public:
+      dual_socket_connection_impl()           = default;
+      ~dual_socket_connection_impl() override
+      {
+            close();
+      }
+
+      DELETE_COPY_CTORS(dual_socket_connection_impl);
+      DEFAULT_MOVE_CTORS(dual_socket_connection_impl);
+
+      using base_type::read;
+      using base_type::write;
+
+      ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
+      ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
+
+      void       open() override { /* Do nothing. This method makes no sense for pipes. */ }
+      void       close() override;
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+
+      ND descriptor_type fd()        const noexcept override { return read_; }
+      ND size_t          available() const noexcept override { return util::available_in_fd(read_); }
+
+      ND SOCKET read_fd()  const noexcept { return read_; }
+      ND SOCKET write_fd() const noexcept { return write_; }
 };
 
 #endif
