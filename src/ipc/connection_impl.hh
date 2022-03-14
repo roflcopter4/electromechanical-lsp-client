@@ -31,7 +31,7 @@ class base_connection_interface
 {
 #ifdef _WIN32
       using err_descriptor_type = HANDLE;
-      static constexpr HANDLE invalid_err_handle() { return reinterpret_cast<HANDLE>(-1); }
+      static constexpr HANDLE invalid_err_handle() { return INVALID_HANDLE_VALUE; }
       static constexpr char dev_null[] = "NUL";
 #else
       using err_descriptor_type = int;
@@ -47,12 +47,12 @@ class base_connection_interface
             DEFAULT,
             DEVNULL,
             FILENAME,
-            FD
+            FD,
       };
 
       sink_type           err_sink_type_ = sink_type::DEFAULT;
       err_descriptor_type err_fd_        = invalid_err_handle();
-      std::string         fname_         = {};
+      std::string         err_fname_     = {};
       std::mutex          read_mtx_      = {};
       std::mutex          write_mtx_     = {};
 
@@ -76,7 +76,7 @@ class base_connection_interface
           : initialized_ (other.initialized_)
           , err_sink_type_ (other.err_sink_type_)
           , err_fd_ (other.err_fd_)
-          , fname_ (std::move(other.fname_))
+          , err_fname_ (std::move(other.err_fname_))
       {
             other.err_sink_type_ = sink_type::DEFAULT;
             other.err_fd_        = invalid_err_handle();
@@ -113,13 +113,20 @@ class base_connection_interface
             if (err_sink_type_ == sink_type::FILENAME)
                   util::close_descriptor(err_fd_);
             err_sink_type_ = sink_type::FILENAME;
-            fname_         = fname;
+            err_fname_         = fname;
       }
 
       void should_open_listener(bool const val) { open_listener_ = val; }
 
-      virtual ssize_t read(void *buf, ssize_t nbytes)        { return read (buf, nbytes, default_read_flags); }
-      virtual ssize_t write(void const *buf, ssize_t nbytes) { return write(buf, nbytes, default_write_flags); }
+      virtual ssize_t read(void *buf, ssize_t const nbytes)
+      {
+            return read(buf, nbytes, default_read_flags);
+      }
+
+      virtual ssize_t write(void const *buf, ssize_t const nbytes)
+      {
+            return write(buf, nbytes, default_write_flags);
+      }
 
       virtual ssize_t    read (void       *buf, ssize_t nbytes, int flags) = 0;
       virtual ssize_t    write(void const *buf, ssize_t nbytes, int flags) = 0;
@@ -138,7 +145,8 @@ class base_connection_interface
       ND bool check_initialized(uint8_t const val) const { return initialized_ >= val; }
       void    set_initialized(uint8_t const val = 1) { initialized_ = val; }
 
-      void throw_if_initialized(std::type_info const &id, uint8_t const val = 1) const noexcept(false)
+      void throw_if_initialized(std::type_info const &id, uint8_t const val = 1) const
+          noexcept(false)
       {
             if (check_initialized(val))
                   throw std::logic_error{
@@ -352,11 +360,13 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 /* TCP/IP */
 
 
-extern socket_t connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int protocol = 0);
+extern socket_t
+connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int protocol = 0);
 
 
 template <typename AddrType>
-      REQUIRES (IsInetSockaddr<AddrType>;)
+      REQUIRES (IsInetSockaddr<AddrType>;
+                std::same_as<AddrType, sockaddr *>;)
 class inet_socket_connection_base_impl : public socket_connection_base_impl<AddrType>
 {
       using this_type = inet_socket_connection_base_impl;
@@ -386,8 +396,8 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             if (!this->check_initialized(1))
                   throw std::logic_error("Cannot connect to uninitialized address!");
 
-            //int const proto  = get_type() == AF_INET ? IPPROTO_IPV4 : IPPROTO_IPV6;
-            this->connector_ = connect_to_inet_socket(get_addr_generic(), get_socklen(), get_type());
+            this->connector_ = connect_to_inet_socket(get_addr_generic(),
+                                                      get_socklen(), get_type());
             this->main_fd_   = this->connector_;
             return this->connector_;
       }
@@ -396,8 +406,10 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
       {
             if (!this->check_initialized(1))
                   throw std::logic_error("Cannot accept from uninitialized address!");
+
             socklen_t size  = get_socklen();
-            this->acceptor_ = ::accept(this->listener_, const_cast<sockaddr *>(get_addr_generic()), &size);
+            this->acceptor_ = ::accept(this->listener_,
+                                       const_cast<sockaddr *>(get_addr_generic()), &size);
             if (static_cast<intptr_t>(this->acceptor_) < 0 || size != get_socklen())
                   ERR(1, "accept");
 
@@ -485,9 +497,12 @@ class inet_ipv4_socket_connection_impl final
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
 
-      ND sockaddr const *get_addr_generic() const override { return reinterpret_cast<sockaddr const *>(&addr_); }
-      ND socklen_t       get_socklen() const override { return sizeof(sockaddr_in); }
-      ND int             get_type() const override { return AF_INET; }
+      ND sockaddr const *get_addr_generic() const override
+      {
+            return reinterpret_cast<sockaddr const *>(&addr_);
+      }
+      ND socklen_t get_socklen() const override { return sizeof(sockaddr_in); }
+      ND int       get_type()    const override { return AF_INET; }
 };
 
 /*--------------------------------------------------------------------------------------*/
@@ -514,9 +529,12 @@ class inet_ipv6_socket_connection_impl final
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
 
-      ND sockaddr const *get_addr_generic() const override { return reinterpret_cast<sockaddr const *>(&addr_); }
-      ND socklen_t       get_socklen() const override { return sizeof(sockaddr_in6); }
-      ND int             get_type() const override { return AF_INET6; }
+      ND sockaddr const *get_addr_generic() const override
+      {
+            return reinterpret_cast<sockaddr const *>(&addr_);
+      }
+      ND socklen_t get_socklen() const override { return sizeof(sockaddr_in6); }
+      ND int       get_type()    const override { return AF_INET6; }
 };
 
 
@@ -729,7 +747,6 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
       ~win32_named_pipe_impl() override
       {
             close();
-            //CloseHandle(overlapped_.hEvent);
       }
 
       void close() override
@@ -751,7 +768,10 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
       ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
 
       ND HANDLE fd() const noexcept override { return pipe_; }
-      ND size_t available() const noexcept(false) override { throw util::except::not_implemented(); }
+      ND size_t available() const noexcept(false) override
+      {
+            throw util::except::not_implemented();
+      }
 
       void set_loop(uv_loop_t *loop)
       {
@@ -778,7 +798,7 @@ class dual_socket_connection_impl final : public base_connection_interface<SOCKE
       socket_t write_ = static_cast<socket_t>(-1);
 
     public:
-      dual_socket_connection_impl()           = default;
+      dual_socket_connection_impl() = default;
       ~dual_socket_connection_impl() override
       {
             close();
@@ -793,7 +813,7 @@ class dual_socket_connection_impl final : public base_connection_interface<SOCKE
       ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
       ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
 
-      void       open() override { /* Do nothing. This method makes no sense for pipes. */ }
+      void       open() override { /* Do nothing. */ }
       void       close() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
@@ -831,7 +851,7 @@ base_connection_interface<DescriptorType>::get_err_handle()
             err_handle = err_fd_;
             break;
       case sink_type::FILENAME:
-            err_handle = CreateFileA(fname_.c_str(), GENERIC_WRITE, 0, nullptr,
+            err_handle = CreateFileA(err_fname_.c_str(), GENERIC_WRITE, 0, nullptr,
                                      CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             err_fd_ = err_handle;
             break;
@@ -857,7 +877,7 @@ base_connection_interface<DescriptorType>::get_err_handle()
             err_fd_ = fd;
             break;
       case sink_type::FILENAME:
-            fd = ::open(fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0600);
+            fd = ::open(err_fname_.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0600);
             err_fd_ = fd;
             break;
       case sink_type::FD:
@@ -913,9 +933,9 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
                              static_cast<sock_int_type>(nbytes - total), flags);
             } while ((n != (-1)) && (total += n) < static_cast<ssize_t>(nbytes));
       } else {
-            //while (available() == 0)
             for (;;) {
-                  n = ::recv(main_fd_, static_cast<char *>(buf), static_cast<sock_int_type>(nbytes), flags);
+                  n = ::recv(main_fd_, static_cast<char *>(buf),
+                             static_cast<sock_int_type>(nbytes), flags);
                   if (n != 0)
                         break;
                   std::this_thread::sleep_for(10ms);
@@ -926,7 +946,6 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
       if (n == (-1)) [[unlikely]] {
             if (errno == EBADF)
                   throw except::connection_closed();
-            // util::win32::error_exit_wsa(L"recv");
             err(1, "recv() failed");
       }
 

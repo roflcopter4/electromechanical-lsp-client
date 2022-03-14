@@ -44,7 +44,8 @@ class connection_closed final : public std::runtime_error
 namespace detail {
 
 template<typename T>
-concept IsInetSockaddr = std::same_as<T, sockaddr_in> || std::same_as<T, sockaddr_in6> || std::same_as<T, sockaddr *>;
+concept IsInetSockaddr = std::same_as<T, sockaddr_in> ||
+                         std::same_as<T, sockaddr_in6>;
 
 } // namespace detail
 

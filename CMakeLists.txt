@@ -172,7 +172,6 @@ CHECK_SYMBOL_EXISTS (pipe2          "unistd.h"     HAVE_PIPE2)
 
 CHECK_INCLUDE_FILE ("execinfo.h"    HAVE_EXECINFO_H)
 CHECK_INCLUDE_FILE ("stdatomic.h"   HAVE_STDATOMIC_H)
-CHECK_INCLUDE_FILE ("stdnoreturn.h" HAVE_STDNORETURN_H)
 CHECK_INCLUDE_FILE ("threads.h"     HAVE_THREADS_H)
 CHECK_INCLUDE_FILE ("unistd.h"      HAVE_UNISTD_H)
 
@@ -476,10 +475,7 @@ add_executable(lsp-thing
     "src/libevent.cc"
     "src/util/charconv.cc"
     "src/util/charconv.hh"
-
-    "src/ipc/base_connection.cc"
     "src/ipc/connection_impl.cc"
-
     "src/ipc/lsp/static-data.cc"
 
     "src/util/c_util.c"
@@ -492,16 +488,16 @@ add_executable(lsp-thing
 
     # Include headers to make using MSVC less infuriatingly tedious.
     "src/Common.hh"
-    "src/ipc/base_connection.hh"
-    "src/ipc/connection_impl.hh"
-    "src/ipc/dialer.hh"
-    "src/ipc/forward.hh"
-    "src/ipc/lsp/static-data.hh"
-    "src/ipc/main_loop.hh"
-    "src/ipc/totality.hh"
-    "src/ipc/rpc/basic_wrapper.hh"
     "src/pch.hh"
     "src/rapid.hh"
+    "src/ipc/basic_connection.hh"
+    "src/ipc/basic_dialer.hh"
+    "src/ipc/basic_wrapper.hh"
+    "src/ipc/basic_io_connection.hh"
+    "src/ipc/connection_impl.hh"
+    "src/ipc/forward.hh"
+    "src/ipc/totality.hh"
+    "src/ipc/lsp/static-data.hh"
     "src/util/concepts.hh"
     "src/util/exceptions.hh"
     "src/util/util.hh"

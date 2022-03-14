@@ -4,7 +4,7 @@
 
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
-#include "ipc/dialer.hh"
+#include "ipc/basic_dialer.hh"
 
 inline namespace emlsp {
 namespace ipc {

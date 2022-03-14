@@ -1,6 +1,6 @@
 #pragma once
-#ifndef HGUARD__IPC__DIALER_HH_
-#define HGUARD__IPC__DIALER_HH_ //NOLINT
+#ifndef HGUARD__IPC__BASIC_DIALER_HH_
+#define HGUARD__IPC__BASIC_DIALER_HH_ //NOLINT
 
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
@@ -214,4 +214,4 @@ concept IsDialerVariant = std::derived_from<T, basic_dialer<typename T::connecti
 /****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp
-#endif // dialer.hh
+#endif
