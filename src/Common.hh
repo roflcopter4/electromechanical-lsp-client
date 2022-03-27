@@ -3,13 +3,6 @@
 #pragma once
 /****************************************************************************************/
 
-#define _GLIBCXX_ASSERTIONS 1
-#define _GLIBCXX_PARALLEL 1
-#define _GLIBCXX_PARALLEL_ASSERTIONS 1
-#undef NDEBUG
-
-#define __PTW32_CLEANUP_C 1
-
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif

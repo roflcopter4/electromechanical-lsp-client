@@ -1,6 +1,6 @@
 #pragma once
-#ifndef HGUARD__IPC__LSP___STATIC_DATA_HH_
-#define HGUARD__IPC__LSP___STATIC_DATA_HH_ //NOLINT
+#ifndef HGUARD__IPC__RPC__LSP___STATIC_DATA_HH_
+#define HGUARD__IPC__RPC__LSP___STATIC_DATA_HH_ //NOLINT
 /****************************************************************************************/
 
 #include "Common.hh"

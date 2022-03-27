@@ -7,8 +7,12 @@
 #include "util/c_util.h"
 #include "util/concepts.hh"
 #include "util/exceptions.hh"
+#include "util/formatters.hh"
+#include "util/strings.hh"
 
 #include "hackish_templates.hh"
+
+#include "util/charconv.hh"
 
 inline namespace emlsp {
 namespace util {
@@ -36,6 +40,7 @@ template <typename T>
 ND __forceinline T *
 xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(false)
 {
+      //NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
       void *ret = calloc(nmemb, size);
       if (ret == nullptr) [[unlikely]]
             throw std::runtime_error("Out of memory.");
@@ -71,6 +76,10 @@ void      close_descriptor(intptr_t &fd);
 ND size_t available_in_fd(int s) noexcept(false);
 
 int kill_process(detail::procinfo_t const &pid);
+
+/*--------------------------------------------------------------------------------------*/
+
+inline int putenv(char const *str) { return ::putenv(const_cast<char *>(str)); }
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -112,6 +121,12 @@ ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2)
                                     reinterpret_cast<ptrdiff_t>(ptr2));
 }
 
+template <typename ...Types>
+void eprint(Types &&...args)
+{
+      fmt::print(stderr, args...);
+}
+
 /*--------------------------------------------------------------------------------------*/
 
 namespace ipc {
@@ -145,5 +160,11 @@ NORETURN inline void error_exit_errno(std::wstring const &msg) { error_exit_expl
 /****************************************************************************************/
 } // namespace util
 } // namespace emlsp
+
+
+using emlsp::util::putenv;
+
+
+/****************************************************************************************/
 #endif /* util.hh */
 // vim: ft=cpp

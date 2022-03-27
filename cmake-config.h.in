@@ -27,9 +27,9 @@
 #cmakedefine HAVE_STRSEP
 #cmakedefine HAVE_TIMESPEC_GET
 
+#cmakedefine HAVE_AFUNIX_H
 #cmakedefine HAVE_EXECINFO_H
 #cmakedefine HAVE_STDATOMIC_H
-#cmakedefine HAVE_STDNORETURN_H
 #cmakedefine HAVE_THREADS_H
 #cmakedefine HAVE_UNISTD_H
 

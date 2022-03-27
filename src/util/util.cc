@@ -5,6 +5,10 @@
 #include "util/myerr.h"
 #include "util/util.hh"
 
+#ifdef HAVE_EXECINFO_H
+# include <execinfo.h>
+#endif
+
 #if defined HAVE_MKDTEMP
 #  define MKDTEMP(x) mkdtemp(x)
 #else
@@ -23,11 +27,11 @@
 #else
 #  define FILESEP_CHR  '/'
 #  define FILESEP_STR  "/"
-#  define FATAL_ERROR(msg)                                                           \
-      do {                                                                           \
-            char buf[128];                                                           \
+#  define FATAL_ERROR(msg)                                                             \
+      do {                                                                             \
+            char buf[128];                                                             \
             std::string s_ = std::string(msg) + ": " + ::my_strerror(errno, buf, 128); \
-            throw std::runtime_error(s_);                                            \
+            throw std::runtime_error(s_);                                              \
       } while (0)
 #endif
 #define IF if constexpr
@@ -47,11 +51,9 @@ class cleanup_c
       std::recursive_mutex              mut_{};
 
       template <typename ...Types>
-      static constexpr void dbg_log(Types &&...args)
+      static constexpr void dbg_log(UNUSED Types &&...args)
       {
-#ifdef NDEBUG
-            (void)args...;
-#else
+#ifndef NDEBUG
             fmt::print(stderr, std::forward<Types &&>(args)...);
 #endif
       }
@@ -124,10 +126,8 @@ class cleanup_c
             act.sa_flags   = static_cast<int>(SA_NOCLDWAIT | SA_RESETHAND | SA_RESTART);
             sigaction(SIGABRT, &act, nullptr);
             sigaction(SIGFPE,  &act, nullptr);
-            sigaction(SIGHUP,  &act, nullptr);
             sigaction(SIGILL,  &act, nullptr);
             sigaction(SIGINT,  &act, nullptr);
-            sigaction(SIGPIPE, &act, nullptr);
             sigaction(SIGSEGV, &act, nullptr);
             sigaction(SIGTERM, &act, nullptr);
 #endif
@@ -148,7 +148,7 @@ cleanup_sighandler(int const signum)
       signal(signum, SIG_DFL);
 #else
       struct sigaction act {};
-      act.sa_handler = SIG_DFL;
+      act.sa_handler = SIG_DFL;  //NOLINT(*-union-access)
       sigaction(signum, &act, nullptr);
 #endif
 
@@ -166,7 +166,7 @@ do_mkdtemp(std::filesystem::path const &dir)
       auto const &dir_str = dir.string();
       size_t      size    = dir_str.size();
 
-      memcpy(buf, dir_str.data(), size); // NOLINT(bugprone-not-null-terminated-result)
+      memcpy(buf, dir_str.data(), size); // NOLINT(*-not-null-terminated-result)
       memcpy(buf + size, "XXXXXX", SIZE_C(7));
       size += SIZE_C(6);
 
@@ -185,11 +185,11 @@ get_temporary_directory(char const *prefix)
       if (prefix)
             tmp_dir /= prefix;
 
-      auto ret = std::filesystem::path(do_mkdtemp(tmp_dir));
+      auto ret = do_mkdtemp(tmp_dir);
 
       /* Paranoia; justified paranoia: on Windows g_mkdtemp doesn't set any
        * permissions at all. */
-      std::filesystem::permissions(ret, std::filesystem::perms::owner_all);
+      permissions(ret, std::filesystem::perms::owner_all);
 
       cleanup.push(ret);
       return ret;
@@ -406,7 +406,98 @@ error_exit_explicit(wchar_t const *msg, DWORD const errval)
 } // namespace win32
 #endif
 
-void
+#ifdef HAVE_EXECINFO_H
+static void
+add_backtrace(std::string &buf)
+{
+      void     *arr[256];
+      int const num  = ::backtrace(arr, 256);
+      char **symbols = ::backtrace_symbols(const_cast<void *const *>(arr), num);
+
+      buf.append("\n\n\033[1mBACKTRACE:\033[0m"sv);
+
+      for (int i = 0; i < num; ++i) {
+            char *ptr = strchr(symbols[i], '(');
+            if (!ptr || !*++ptr)
+                  continue;
+
+            ptrdiff_t const len = ptr - symbols[i];
+
+            if (ptr[0] == '_' && ptr[1] == 'Z') {
+                  buf += fmt::format(FC("\n{:3}: {}"),
+                                     i, std::string_view(symbols[i], len));
+
+                  char *end = strchr(ptr, '+');
+                  if (end) {
+                        bool success = true;
+                        *end = '\0';
+                        try {
+                              buf += fmt::format(FC("\033[0;36m{}\033[0m + "),
+                                                 util::demangle(ptr));
+                        } catch (...) {
+                              success = false;
+                        }
+                        if (success)
+                              ptr = end + 1;
+                        else
+                              *end = '+';
+                  }
+
+                  buf += ptr;
+            } else if (ptr[0] != '+') {
+                  char *end = strchr(ptr, '+');
+                  if (end) {
+                        *end = '\0';
+                        buf += fmt::format(FC("\n{:3}: {}\033[0;36m{}\033[0m + "),
+                                           i, std::string_view(symbols[i], len),
+                                           std::string_view(ptr, end - ptr));
+                        ptr = end + 1;
+                  }
+                  buf += ptr;
+            } else {
+                  buf += fmt::format(FC("\n{:3}: {}"), i, symbols[i]);
+            }
+      }
+
+      free(symbols);  //NOLINT(*-no-malloc)
+}
+
+#elif defined _WIN32
+
+static void
+add_backtrace(std::string const &buf)
+{
+      unsigned int   i;
+      void          *stack[256];
+      unsigned short frames;
+      SYMBOL_INFO   *symbol;
+      HANDLE         process = GetCurrentProcess();
+
+      SymInitialize(process, NULL, TRUE);
+
+      frames = CaptureStackBackTrace(0, 256, stack, NULL);
+      symbol = calloc(sizeof(SYMBOL_INFO) + (SIZE_C(1024) * sizeof(char)), 1LLU);
+      symbol->MaxNameLen   = 1023;
+      symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+
+      buf.append("\n\n\033[1mBACKTRACE:\033[0m"sv);
+
+      for (i = 0; i < frames; i++) {
+            SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+            buf += fmt::format(FC("\n{:3}: {}  -  [0x{:08X}]"),
+                               frames - i - 1,
+                               symbol->Name,
+                               symbol->Address);
+      }
+
+      free(symbol);
+}
+
+#else
+static void add_backtrace(std::string const &) {}
+#endif
+
+void  //NOLINTNEXTLINE(cert-dcl50-cpp)
 my_err_throw(UNUSED int const     status,
              bool const           print_err,
              char const *restrict file,
@@ -418,6 +509,7 @@ my_err_throw(UNUSED int const     status,
 {
       int const e = errno;
       std::string buf;
+      buf.reserve(2048);
 
       buf += fmt::format(FC("\033[1;31m" "Exception at:"
                             "\033[0m"    " `{}:{}' - func `{}':\n  "
@@ -441,6 +533,8 @@ my_err_throw(UNUSED int const     status,
       if (print_err)
             buf += fmt::format(FMT_COMPILE("`  (errno {}: `{}')"), e, errstr);
 
+      add_backtrace(buf);
+
       throw std::runtime_error(buf);
 }
 
@@ -450,7 +544,7 @@ std::string
 slurp_file(char const *fname, bool const binary)
 {
       std::string  buf;
-      struct stat  st; // NOLINT(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
+      struct stat  st;  //NOLINT(*-member-init)
       FILE        *fp = ::fopen(fname, binary ? "rb" : "r");
       if (!fp)
             err(1, "fopen()");
@@ -463,7 +557,7 @@ slurp_file(char const *fname, bool const binary)
       ::fclose(fp);
 
       resize_string_hack(buf, nread);
-      buf.data()[nread] = '\0';
+      buf.data()[nread] = '\0';  //NOLINT(*-simplify-subscript-expr)
       return buf;
 }
 

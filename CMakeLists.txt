@@ -12,8 +12,8 @@ include (FindPkgConfig)
 ###############################################################################
 # Options
 
-option(USE_JEMALLOC "Use jemalloc" OFF)
-option(VCPKG_ROOT "Directory in which VCPKG resides (Windows only)" "")
+set (USE_JEMALLOC OFF CACHE BOOL "Use jemalloc")
+set (VCPKG_ROOT "" CACHE STRING "Directory in which VCPKG resides (Windows only)")
 
 ###############################################################################
 # Includes and defines
@@ -60,22 +60,6 @@ if (WIN32)
     unset(_temp_pkgconfig_path)
 endif()
 
-#if (MSVC)
-#    execute_process(COMMAND pkgconf.exe --cflags glib-2.0
-#                    RESULT_VARIABLE _my_pkgconfig_retval
-#                    OUTPUT_VARIABLE GLib_PKG_CFLAGS
-#                    ERROR_VARIABLE _my_pkgconfig_error
-#                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
-#
-#    if (${_my_pkgconfig_retval} GREATER 0)
-#        message(FATAL_ERROR "Failed to locate glib: ${_my_pkgconfig_error}")
-#    endif()
-#    execute_process(COMMAND pkgconf.exe --libs glib-2.0
-#                    OUTPUT_VARIABLE GLib_PKG_LIBS
-#                    OUTPUT_STRIP_TRAILING_WHITESPACE)
-#
-#endif()
-
 
 #####################################################################################################
 ## Library search ##
@@ -88,7 +72,7 @@ list(APPEND CMAKE_MODULE_PATH
      # "${CMAKE_SOURCE_DIR}/cmake/libevent")
      "${CMAKE_SOURCE_DIR}/cmake/gnome-cmake/modules")
 
-if (NOT MINGW)
+if (NOT MINGW AND NOT MSYS)
     if (WIN32)
         if (NOT VCPKG_ROOT)
             message(FATAL_ERROR "Must provide a definition for VCPKG_ROOT (ie the directory with vcpkg.exe")
@@ -96,11 +80,11 @@ if (NOT MINGW)
         message( "INSTALLED DIR IS \"${VCPKG_ROOT}\"" )
         list(APPEND CMAKE_MODULE_PATH "${VCPKG_ROOT}/scripts/buildsystems")
         #set (VCPKG_ENABLED "YES")
-		#set (VcpkgEnabled CACHE BOOL TRUE)
+        #set (VcpkgEnabled CACHE BOOL TRUE)
         include (vcpkg)
     else()
-        # list (APPEND CMAKE_MODULE_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
-        # list (APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
+        list (APPEND CMAKE_MODULE_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
+        list (APPEND CMAKE_PREFIX_PATH "/usr/lib/cmake" "/usr/share/cmake" "/usr/local/share/cmake" "/usr/local/lib/cmake")
     endif()
 endif()
 
@@ -109,13 +93,25 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package (Threads REQUIRED)
 find_package (Boost REQUIRED)
-find_package (Libevent)
+find_package (Libevent CONFIG)
+if (NOT LIBEVENT_FOUND)
+    find_package(Libevent)
+endif()
+
+list (APPEND CMAKE_PREFIX_PATH
+    "/usr/lib/llvm/14/lib64/cmake/llvm"
+    "/usr/lib/llvm/14/lib64/cmake/clang"
+)
+
+find_package (Clang CONFIG REQUIRED)
+find_package (LLVM CONFIG REQUIRED)
 
 if (NOT MSVC AND NOT LIBEVENT_FOUND)
     pkg_check_modules(LIBEVENT_BASE libevent REQUIRED)
     pkg_check_modules(LIBEVENT_CORE libevent_core REQUIRED)
     pkg_check_modules(LIBEVENT_EXTRA libevent_extra REQUIRED)
     pkg_check_modules(LIBEVENT_PTHREADS libevent_pthreads)
+
     set (LIBEVENT_LIBRARIES
         ${LIBEVENT_BASE_LDFLAGS} ${LIBEVENT_CORE_LDFLAGS}
         ${LIBEVENT_EXTRA_LDFLAGS} ${LIBEVENT_PTHREADS_LDFLAGS})
@@ -129,6 +125,7 @@ if (MSVC)
 else ()
     find_package (GLib REQUIRED)
     find_package (LibUV REQUIRED)
+    find_package (Unistring REQUIRED)
     #find_package (fmt 8.0.0)
     #find_package (nlohmann_json REQUIRED)
     #find_package (RapidJSON REQUIRED)
@@ -170,6 +167,7 @@ CHECK_SYMBOL_EXISTS (fork           "unistd.h"     HAVE_FORK)
 CHECK_SYMBOL_EXISTS (pause          "unistd.h"     HAVE_PAUSE)
 CHECK_SYMBOL_EXISTS (pipe2          "unistd.h"     HAVE_PIPE2)
 
+CHECK_INCLUDE_FILE ("afunix.h"      HAVE_AFUNIX_H)
 CHECK_INCLUDE_FILE ("execinfo.h"    HAVE_EXECINFO_H)
 CHECK_INCLUDE_FILE ("stdatomic.h"   HAVE_STDATOMIC_H)
 CHECK_INCLUDE_FILE ("threads.h"     HAVE_THREADS_H)
@@ -178,18 +176,6 @@ CHECK_INCLUDE_FILE ("unistd.h"      HAVE_UNISTD_H)
 if (NOT HAVE_SOCKETPAIR)
     CHECK_SYMBOL_EXISTS (socketpair "socket.h" HAVE_SOCKETPAIR)
 endif()
-
-#if (NOT HAVE_THREADS_H)
-#    if (WIN32)
-#        find_package (tinycthread REQUIRED)
-#    else()
-#        message(WARNING
-#            "C11 threads library is required. I'm going to assume you have "
-#            "tinycthreads installed because I'm too lazy to write anything "
-#            "to search for it. If you do not, this will not go well."
-#        )
-#    endif()
-#endif()
 
 configure_file(cmake-config.h.in config.h)
 
@@ -284,6 +270,11 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
          -Werror=inline-namespace-reopened-noninline
     )
 
+    set (_debug_flags 
+        -g -gdwarf-3
+        # -fstandalone-debug
+    )
+
     if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
         set (LTO_STR -flto=full
                      -fwhole-program-vtables
@@ -319,10 +310,15 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     else()
         set (LTO_STR -flto=full
                      -fwhole-program-vtables
-                     #-fvirtual-function-elimination
-                     # -fsplit-lto-unit
-                     -g1 -gdwarf-5)
-        set (LTO_LINK_STR  ${LTO_STR})
+                     -fvirtual-function-elimination
+                     -fsplit-lto-unit
+                     )
+
+        if (MINGW OR WIN32)
+            set (LTO_LINK_STR ${LTO_STR})
+        else()
+            set (LTO_LINK_STR ${LTO_STR} -Wl,--lto-whole-program-visibility -Wl,--lto-O1)
+        endif()
     endif()
 
     if (WIN32 OR MINGW OR MSYS)
@@ -346,8 +342,8 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     else() # NOT WIN32
 
-        # set (CLANG_STDLIB -stdlib=libc++)
-        set (CLANG_STDLIB -stdlib=libstdc++)
+        set (CLANG_STDLIB -stdlib=libc++)
+        # set (CLANG_STDLIB -stdlib=libstdc++)
         string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                 -fuse-ld=lld
                 # -rtlib=libgcc
@@ -363,9 +359,12 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     set (__EXTRA_C_CXX_RELEASE_FLAGS -fslp-vectorize)
 
-    set (BASE ${BASE} ${WARNS} #-fPIC -fpie -masm=intel
+    set (BASE ${BASE} ${WARNS}
               -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager
+              ${_debug_flags}
     )
+    string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
+            ${_debug_flags})
 
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frtti ${CLANG_STDLIB} -std=gnu++20")
 
@@ -378,6 +377,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
 #-----------------------------------------------------------------------------------------
 #-- GCC --
+
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 
     set (WARNS ${WARNS}
@@ -386,7 +386,7 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
          -Wsuggest-attribute=cold -Wsuggest-attribute=malloc
          -Wattributes -fdiagnostics-show-option
     )
-    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5)
+    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5 -fopenmp)
     set (LTO_STR "-flto -fuse-linker-plugin")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frtti -std=gnu++20")
 
@@ -400,7 +400,6 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
             -rdynamic
         )
     endif()
-    
 
 #-----------------------------------------------------------------------------------------
 #-- MSVC --
@@ -425,8 +424,8 @@ if (MINGW)
 endif()
 
 if (MSVC)
-    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /utf-8")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8")
+    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP /utf-8")
+    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /utf-8")
 else()
     list(APPEND CMAKE_C_FLAGS_DEBUG ${CFLAGS_DEBUG_COMMON} ${BASE} ${CMAKE_C_FLAGS} ${LTO_STR})
     list(APPEND CMAKE_C_FLAGS_MINSIZEREL ${CFLAGS_RELEASE_COMMON} ${BASE} -Os -s ${CMAKE_C_FLAGS})
@@ -468,15 +467,26 @@ set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
+### Sources
+### SEARCHFORME
 add_executable(lsp-thing
     "src/main.cc"
-    "src/dothemsg.cc"
     "src/sigh.cc"
-    "src/libevent.cc"
+    "src/clang.cc"
+    "src/tagged-union.cc"
+    "src/finally.cc"
+
+    "src/msgpack/dumper.cc"
+    "src/util/signals.cc"
+    
+    "src/ipc/connection_impl.cc"
+    "src/ipc/rpc/lsp/static-data.cc"
+
+    # "src/libevent.cc"
+    # "src/dothemsg.cc"
+
     "src/util/charconv.cc"
     "src/util/charconv.hh"
-    "src/ipc/connection_impl.cc"
-    "src/ipc/lsp/static-data.cc"
 
     "src/util/c_util.c"
     "src/util/err.c"
@@ -492,12 +502,12 @@ add_executable(lsp-thing
     "src/rapid.hh"
     "src/ipc/basic_connection.hh"
     "src/ipc/basic_dialer.hh"
-    "src/ipc/basic_wrapper.hh"
+    "src/ipc/basic_io_wrapper.hh"
     "src/ipc/basic_io_connection.hh"
+    "src/ipc/basic_rpc_connection.hh"
     "src/ipc/connection_impl.hh"
-    "src/ipc/forward.hh"
     "src/ipc/totality.hh"
-    "src/ipc/lsp/static-data.hh"
+    "src/ipc/rpc/lsp/static-data.hh"
     "src/util/concepts.hh"
     "src/util/exceptions.hh"
     "src/util/util.hh"
@@ -525,7 +535,7 @@ list(JOIN GLib_PKG_CFLAGS " " _glib_cflags )
 list(JOIN GLib_PKG_LIBS " " _glib_ldflags)
 set_property(TARGET lsp-thing APPEND PROPERTY COMPILE_FLAGS "${_glib_cflags}")
 
-set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
+target_include_directories(lsp-thing AFTER PRIVATE
              "${CMAKE_CURRENT_BINARY_DIR}"
              "${CMAKE_SOURCE_DIR}/src"
              "${CMAKE_SOURCE_DIR}/contrib/rapidjson/include"
@@ -536,7 +546,6 @@ set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
              ${LIBUV_INCLUDE_DIRS}
 )
 
-
 #####################################################################################################
 ## Linking ##
 #####################################################################################################
@@ -544,122 +553,95 @@ set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
 
 if (MSVC)
     set (_unistring_location "${CMAKE_SOURCE_DIR}/contrib/libunistring")
-    set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
+    target_include_directories(lsp-thing AFTER PRIVATE
         "${_unistring_location}/include")
     target_link_libraries(lsp-thing
         "${_unistring_location}/lib/libunistring.dll.a")
-else()
-    if (MINGW)
-    #target_link_libraries(lsp-thing "dbghelp.lib")
-    else()
-        set_property(TARGET lsp-thing APPEND PROPERTY LINK_FLAGS "-Wl,--as-needed")
-    endif()
-    target_link_libraries(lsp-thing -lunistring)
-    set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
-            -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
-    )
-endif()
 
-if (MSVC AND NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    # FIXME: This is clearly trash and needs to be re-written.
+    if (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        # FIXME: This is clearly trash and needs to be re-written.
+        if (NOT _VCPKG_INSTALLED_DIR)
+            message(FATAL_ERROR "No vcpkg found")
+        endif()
+        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+            set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/debug/lib")
+        else()
+            set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/lib")
+        endif()
+    endif ()
 
-    if (NOT _VCPKG_INSTALLED_DIR)
-        message(FATAL_ERROR "No vcpkg found")
-    endif()
-
-    if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/debug/lib")
-        #target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_DEBUG})
-    else()
-        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/lib")
-        #target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_RELEASE})
-    endif()
-
-endif()
-#elseif (NOT HAVE_THREADS_H)
-#if(NOT HAVE_THREADS_H)
-#    add_library(tinycthread OBJECT "${CMAKE_SOURCE_DIR}/contrib/tinycthread/source/tinycthread.c")
-#    target_link_libraries(lsp-thing tinycthread)
-#    set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
-#                 "${CMAKE_SOURCE_DIR}/contrib/tinycthread/source")
-#endif()
-
-# set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
-#              "${CMAKE_SOURCE_DIR}/contrib/uvw/include")
-
-#----------------------------------------------------------------------------------------------------
-
-target_link_libraries(lsp-thing
-    ${CMAKE_THREAD_LIBS_INIT}
-    ${LIBEVENT_LIBRARIES}
-    Threads::Threads
-    #-luv -ltbb
-    # uvw::uvw
-    #-levent_core
-    #-lunistring
-    #-ljsoncpp -ljsonrpccpp-client -ljsonrpccpp-common -ljsonrpccpp-stub -ljsonrpccpp-server
-)
-
-#----------------------------------------------------------------------------------------------------
-
-if (NOT Libevent_FOUND)
-    if (MSVC)
-        message(FATAL_ERROR "BAD BAD")
-    #    # Obvious temporary rage-induced workaround
-    #    set (_libevent_location "D:\\ass\\GIT\\libevent\\mingw\\")
-    #    set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
-    #        "${_libevent_location}/include"
-    #    )
-    #    set_property(TARGET lsp-thing APPEND PROPERTY CMAKE_LIBRARY_PATH
-    #        "${_libevent_location}/lib" "${_libevent_location}/bin"
-    #    )
-
-    #    target_link_libraries(lsp-thing
-    #        "${_libevent_location}\\lib\\libevent.dll.a"
-    #        "${_libevent_location}\\lib\\libevent_core.dll.a"
-    #        "${_libevent_location}\\lib\\libevent_extra.dll.a"
-    #        "${_libevent_location}\\lib\\libevent_openssl.dll.a"
-    #    )
-    else ()
-        message (WARNING "Libevent not found. Assuming it's there anyway.")
-        target_link_libraries(lsp-thing -levent_openssl -levent -levent_core -levent_extra)
-    endif()
-endif()
-
-
-if (fmt_FOUND)
-    target_link_libraries(lsp-thing fmt::fmt-header-only)
-endif()
-
-
-if (MSVC)
-    set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
+    target_include_directories(lsp-thing AFTER PRIVATE
         "${VCPKG_ROOT}/installed/x64-windows/include/glib-2.0"
-		"${VCPKG_ROOT}/installed/x64-windows/include/gio-win32-2.0"
-		"${VCPKG_ROOT}/installed/x64-windows/lib/glib-2.0/include"
-        "D:/Program Files (x86)/Visual Leak Detector/include"
-	)
+        "${VCPKG_ROOT}/installed/x64-windows/include/gio-win32-2.0"
+        "${VCPKG_ROOT}/installed/x64-windows/lib/glib-2.0/include"
+        "D:/Program Files (x86)/Visual Leak Detector/include" # FIXME duh...
+    )
     target_link_libraries(lsp-thing
         "${_WIN32_VCPKG_LIB_PATH}/libuv.lib"
         "${_WIN32_VCPKG_LIB_PATH}/glib-2.0.lib"
         "${_WIN32_VCPKG_LIB_PATH}/intl.lib"
         "${_WIN32_VCPKG_LIB_PATH}/iconv.lib"
         "${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
-		PThreads4W::PThreads4W
+        PThreads4W::PThreads4W
         "D:/Program Files (x86)/Visual Leak Detector/lib/Win64/vld.lib"
     )
-
-else()
+else() # NOT MSVC
+    if (NOT MINGW)
+        set_property(TARGET lsp-thing APPEND PROPERTY LINK_FLAGS "-Wl,--as-needed")
+    endif()
+    set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
+                 -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
+    )
+    target_include_directories(lsp-thing AFTER PRIVATE ${UNISTRING_INCLUDE_DIR})
     target_link_libraries(lsp-thing
         ${GLib_LIBRARY}
         ${GLib_PKG_LIBS}
         ${GLib_LIBRARIES}
         ${LIBUV_LIBRARIES}
+        ${UNISTRING_LIBRARY}
     )
 endif()
 
+# set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
+#              "${CMAKE_SOURCE_DIR}/contrib/uvw/include")
 
-if (USE_JEMALLOC STREQUAL "YES")
+#----------------------------------------------------------------------------------------------------
+
+add_definitions(${${LLVM_AVAILABLE_LIBS}})
+target_include_directories(lsp-thing AFTER PRIVATE
+    ${LLVM_INCLUDE_DIRS}
+)
+target_link_libraries(lsp-thing
+    -L${LLVM_LIBRARY_DIRS}
+    -lLLVM
+    -lclang
+    -lclang-cpp
+)
+
+target_link_libraries(lsp-thing
+    ${CMAKE_THREAD_LIBS_INIT}
+    ${LIBEVENT_LIBRARIES}
+    Threads::Threads
+    Boost::boost
+    -ltbb
+)
+
+#----------------------------------------------------------------------------------------------------
+
+if (NOT Libevent_FOUND)
+    if (MSVC)
+        message(FATAL_ERROR "Libevent not found. This means something has gone _terribly_ wrong.")
+    else ()
+        message (WARNING "Libevent not found. Assuming it's there anyway.")
+        target_link_libraries(lsp-thing -levent_openssl -levent -levent_core -levent_extra)
+    endif()
+endif()
+
+if (fmt_FOUND)
+    target_link_libraries(lsp-thing fmt::fmt-header-only)
+endif()
+
+if (USE_JEMALLOC)
     if (NOT JEMALLOC_FOUND)
         # The cmake module to find jemalloc is pretty lousy. It doesn't hurt
         # too much to just try linking it anyway.
@@ -668,7 +650,6 @@ if (USE_JEMALLOC STREQUAL "YES")
         target_link_libraries(lsp-thing ${JEMALLOC_LIBRARY})
     endif()
 endif()
-
 
 if (WIN32)
     target_link_libraries(lsp-thing ws2_32.lib)

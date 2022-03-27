@@ -3,7 +3,11 @@
 #define HGUARD__MACROS_H_
 /****************************************************************************************/
 
-#include <limits.h>
+#ifdef __cplusplus
+# include <climits>
+#else
+# include <limits.h>
+#endif
 
 #if !defined __GNUC__ && !defined __clang__ && !defined __attribute__
 # define __attribute__(x)
@@ -66,6 +70,14 @@
 # define DEFAULT_MOVE_CTORS(t)               \
       t(t &&) noexcept            = default; \
       t &operator=(t &&) noexcept = default
+
+# define DELETE_ALL_CTORS(t) \
+      DELETE_COPY_CTORS(t);  \
+      DELETE_MOVE_CTORS(t)
+
+#define DEFAULT_ALL_CTORS(t) \
+      DEFAULT_COPY_CTORS(t); \
+      DEFAULT_MOVE_CTORS(t)
 
 # define DUMP_EXCEPTION(e)                                                                                     \
       do {                                                                                                     \

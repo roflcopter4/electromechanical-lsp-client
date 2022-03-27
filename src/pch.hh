@@ -6,6 +6,20 @@
 #  include "config.h"
 #endif
 
+#ifdef DEBUG
+# define _LIBCPP_DEBUG_LEVEL 2
+# define _GLIBCXX_ASSERTIONS 1
+# define _GLIBCXX_PARALLEL 1
+# define _GLIBCXX_PARALLEL_ASSERTIONS 1
+# undef NDEBUG
+#else
+// # error "wtf?"
+#endif
+
+#define __PTW32_CLEANUP_C 1
+
+// #include "all_the_clang.hh"
+
 #include <algorithm>
 #include <any>
 #include <array>
@@ -126,7 +140,11 @@
 #include <fmt/ranges.h>
 #include <fmt/xchar.h>
 
+
 #include "rapid.hh"
+#include "util/util.hh"
+
+
 #include <msgpack.hpp>
 
 #include <event2/event.h>
@@ -166,8 +184,6 @@
 #endif
 
 // #include <rapidjson/rapidjson.h>
-
-#include "util/formatters.hh"
 
 /****************************************************************************************/
 #endif

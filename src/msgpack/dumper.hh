@@ -6,7 +6,7 @@
 #include <msgpack.hpp>
 
 inline namespace emlsp {
-namespace ipc::mpack {
+namespace util::mpack {
 
 class dumper
 {
@@ -27,10 +27,14 @@ class dumper
             dump_object(val);
       }
 
+      explicit dumper(msgpack::object const &val, std::ostream &out = std::cout)
+          : dumper(&val, out)
+      {}
+
       void dump_object(msgpack::object const *val);
       void dump_array(msgpack::object_array const *arr);
       void dump_dict(msgpack::object_map const *dict);
 };
 
-} // namespace ipc::mpack
+} // namespace util::mpack
 } // namespace emlsp

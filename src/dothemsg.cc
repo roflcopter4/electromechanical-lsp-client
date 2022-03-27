@@ -1,5 +1,5 @@
 #include "Common.hh"
-#include "ipc/lsp/static-data.hh"
+#include "ipc/rpc/lsp/static-data.hh"
 #include "ipc/basic_wrapper.hh"
 #include "ipc/totality.hh"
 #include "ipc/basic_io_connection.hh"
@@ -266,7 +266,7 @@ test01()
             //auto x   = std::make_unique<ipc::rpc::ms_jsonrpc_io_wrapper<ipc::connections::pipe>>(con.get());
 
             auto reet = ipc::totality<ipc::connections::unix_socket,
-                                      ipc::rpc::ms_jsonrpc_io_wrapper,
+                                      ipc::detail::ms_jsonrpc_io_wrapper,
                                       ipc::event_tags::libevent
                         >::new_unique();
 

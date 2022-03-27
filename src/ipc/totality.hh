@@ -5,7 +5,7 @@
 #include "Common.hh"
 
 #include "ipc/basic_connection.hh"
-#include "ipc/basic_wrapper.hh"
+#include "ipc/basic_io_wrapper.hh"
 
 inline namespace emlsp {
 namespace ipc {
@@ -32,16 +32,16 @@ concept IsEventTag = requires
 /****************************************************************************************/
 /****************************************************************************************/
 
-template <typename ConnectionType,
+template <typename Connection,
           template <typename>
-          typename WrapperType,
+          class    IOWrapper,
           typename EventTag>
     REQUIRES (
-          requires IsBasicConnectionVariant<ConnectionType>;
-          requires rpc::IsIOWrapperVariant<WrapperType<ConnectionType>>;
-          requires event_tags::IsEventTag<EventTag>;
+          IsBasicConnectionVariant<Connection>;
+          io::IsWrapperVariant<IOWrapper<Connection>>;
+          event_tags::IsEventTag<EventTag>;
     )
-class base_totality_iface : public ConnectionType
+class base_totality_iface : public Connection
 {
     public:
       base_totality_iface() : wrapper_(this) {}
@@ -51,11 +51,11 @@ class base_totality_iface : public ConnectionType
       DELETE_COPY_CTORS(base_totality_iface);
       DEFAULT_MOVE_CTORS(base_totality_iface);
 
-      using wrapper_type = WrapperType<ConnectionType>;
+      using wrapper_type = IOWrapper<Connection>;
       wrapper_type &wrapper() & { return wrapper_; }
 
     protected:
-      WrapperType<ConnectionType> wrapper_;
+      IOWrapper<Connection> wrapper_;
 };
 
 
@@ -63,9 +63,9 @@ class base_totality_iface : public ConnectionType
 /*--------------------------------------------------------------------------------------*/
 
 
-template <typename ConnectionType,
+template <typename Connection,
           template <typename>
-          typename WrapperType,
+          class    IOWrapper,
           typename EventTag>
 class totality;
 
@@ -73,25 +73,25 @@ class totality;
 /*--------------------------------------------------------------------------------------*/
 
 
-template <typename ConnectionType, template <typename> typename WrapperType>
-class totality<ConnectionType, WrapperType, event_tags::libevent>
-    : public base_totality_iface<ConnectionType, WrapperType, event_tags::libevent>
+template <typename Connection, template <typename> class IOWrapper>
+class totality<Connection, IOWrapper, event_tags::libevent>
+    : public base_totality_iface<Connection, IOWrapper, event_tags::libevent>
 {
-      using base_type       = base_totality_iface<ConnectionType, WrapperType, event_tags::libevent>;
-      using this_type       = totality<ConnectionType, WrapperType, event_tags::libevent>;
-      using connection_type = ConnectionType;
-      using wrapper_type    = WrapperType<ConnectionType>;
-      using value_type      = typename WrapperType<ConnectionType>::value_type;
+      using base_type       = base_totality_iface<Connection, IOWrapper, event_tags::libevent>;
+      using this_type       = totality<Connection, IOWrapper, event_tags::libevent>;
+      using connection_type = Connection;
+      using wrapper_type    = IOWrapper<Connection>;
+      using value_type      = typename IOWrapper<Connection>::value_type;
 
     public:
-      totality()
+      totality() : base_(event_base_new())
       {
             //event_config *cfg = ::event_config_new();
             //::event_config_require_features(cfg, EV_FEATURE_EARLY_CLOSE);
             //::event_config_set_flag(cfg, EVENT_BASE_FLAG_STARTUP_IOCP );
             //base_ = ::event_base_new_with_config(cfg);
             //::event_config_free(cfg);
-            base_ = event_base_new();
+            
             if (!base_)
                   throw std::runtime_error("BAD BAD BAD");
       }

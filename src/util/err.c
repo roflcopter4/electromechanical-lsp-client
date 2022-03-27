@@ -28,11 +28,6 @@
 
 /*--------------------------------------------------------------------------------------*/
 
-#if 0
-static pthread_mutex_t util_c_error_write_mutex;
-INITIALIZER_HACK(mutex_init) { pthread_mutex_init(&util_c_error_write_mutex, NULL); }
-#endif
-
 #if defined _WIN32
 static CRITICAL_SECTION error_write_mtx;
 INITIALIZER_HACK(mutex_init) { InitializeCriticalSection(&error_write_mtx); }
@@ -41,8 +36,8 @@ static void dumb_wrapper_mutex_unlock(CRITICAL_SECTION *mtx) { LeaveCriticalSect
 #else
 static pthread_mutex_t error_write_mtx;
 INITIALIZER_HACK(mutex_init) { pthread_mutex_init(&error_write_mtx, NULL); }
-static void dumb_wrapper_mutex_lock(CRITICAL_SECTION *mtx)   { pthread_mutex_lock(mtx); }
-static void dumb_wrapper_mutex_unlock(CRITICAL_SECTION *mtx) { pthread_mutex_unlock(mtx); }
+static void dumb_wrapper_mutex_lock(pthread_mutex_t *mtx)   { pthread_mutex_lock(mtx); }
+static void dumb_wrapper_mutex_unlock(pthread_mutex_t *mtx) { pthread_mutex_unlock(mtx); }
 #endif
 
 static __inline void dump_error(int const errval)

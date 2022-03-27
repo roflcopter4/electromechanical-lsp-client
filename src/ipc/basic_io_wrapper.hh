@@ -1,35 +1,37 @@
 #pragma once
-#ifndef HGUARD__IPC__RPC__BASIC_WRAPPER_HH_
-#define HGUARD__IPC__RPC__BASIC_WRAPPER_HH_ //NOLINT
+#ifndef HGUARD__IPC__BASIC_WRAPPER_HH_
+#define HGUARD__IPC__BASIC_WRAPPER_HH_ //NOLINT
 
 #include "Common.hh"
 #include "ipc/basic_connection.hh"
 
 inline namespace emlsp {
-namespace ipc::rpc {
+namespace ipc::io {
 /****************************************************************************************/
 
 
 template <typename ConnectionType, typename Packer, typename Unpacker>
       REQUIRES(IsBasicConnectionVariant<ConnectionType>;)
-class basic_io_wrapper
+class basic_wrapper
 {
-      using this_type     = basic_io_wrapper;
-      using connection_type     = ConnectionType;
-      using packer_type   = Packer;
-      using unpacker_type = Unpacker;
-      using value_type    = typename packer_type::value_type;
+      using this_type       = basic_wrapper;
+      using connection_type = ConnectionType;
+      using packer_type     = Packer;
+      using unpacker_type   = Unpacker;
+      using value_type      = typename packer_type::value_type;
 
       friend Packer;
 
     public:
-      explicit basic_io_wrapper(connection_type *con) : con_(con) {}
-      virtual ~basic_io_wrapper() = default;
+      explicit basic_wrapper(connection_type *con) : con_(con) {}
+      virtual ~basic_wrapper() = default;
 
-      DELETE_COPY_CTORS(basic_io_wrapper);
-      DELETE_MOVE_CTORS(basic_io_wrapper);
+      basic_wrapper(basic_wrapper const &)                = delete;
+      basic_wrapper(basic_wrapper &&) noexcept            = delete;
+      basic_wrapper &operator=(basic_wrapper const &)     = delete;
+      basic_wrapper &operator=(basic_wrapper &&) noexcept = delete;
 
-    /*----------------------------------------------------------------------------------*/
+      /*----------------------------------------------------------------------------------*/
 
       class packer_container
       {
@@ -177,13 +179,13 @@ class msgpack_packer
 
 
 template <typename ConnectionType>
-class msgpack_io_wrapper
-      : public basic_io_wrapper<ConnectionType, detail::msgpack_packer, msgpack::unpacker>
+class msgpack_wrapper
+      : public basic_wrapper<ConnectionType, detail::msgpack_packer, msgpack::unpacker>
 {
       static constexpr size_t  read_buffer_size = SIZE_C(8'388'608);
 
-      using this_type = msgpack_io_wrapper<ConnectionType>;
-      using base_type = basic_io_wrapper<ConnectionType,
+      using this_type = msgpack_wrapper<ConnectionType>;
+      using base_type = basic_wrapper<ConnectionType,
                                          detail::msgpack_packer, msgpack::unpacker>;
 
     public:
@@ -196,16 +198,16 @@ class msgpack_io_wrapper
 
     /*----------------------------------------------------------------------------------*/
 
-      explicit msgpack_io_wrapper(connection_type *con) : base_type(con)
+      explicit msgpack_wrapper(connection_type *con) : base_type(con)
       {
             this->unpacker_.m_user_data = this;
             this->unpacker_.reserve_buffer(read_buffer_size);
       }
 
-      ~msgpack_io_wrapper() override = default;
+      ~msgpack_wrapper() override = default;
 
-      DELETE_COPY_CTORS(msgpack_io_wrapper);
-      DELETE_MOVE_CTORS(msgpack_io_wrapper);
+      DELETE_COPY_CTORS(msgpack_wrapper);
+      DELETE_MOVE_CTORS(msgpack_wrapper);
 
     /*----------------------------------------------------------------------------------*/
 
@@ -223,16 +225,22 @@ class msgpack_io_wrapper
             std::lock_guard lock{read_mtx_};
             auto    obj  = msgpack::object_handle{};
             ssize_t nread;
+            errno = 0;
 
             while (!unpacker_.next(obj)) {
                   if (unpacker_.buffer_capacity() == 0)
                         unpacker_.reserve_buffer();
 
                   do {
+                        // errno = 0;
                         nread = con_->raw_read(unpacker_.buffer(),
                                                unpacker_.buffer_capacity(), 0);
-                        if (nread == (-1) && errno != EAGAIN)
-                              err(1, "read()");
+                        if (nread == (-1) || (errno && errno != EAGAIN)) {
+                              perror("uhhhhh");
+                              fflush(stdout);
+                              fflush(stderr);
+                              err_nothrow(1, "read()");
+                        }
                   } while (nread <= 0);
 
                   unpacker_.buffer_consumed(nread);
@@ -278,7 +286,7 @@ class msgpack_io_wrapper
 
 namespace detail {
 
-class jsonrpc_packer
+class ms_jsonrpc2_packer
 {
       std::condition_variable &cond_;
       std::mutex               mtx_     = {};
@@ -288,7 +296,7 @@ class jsonrpc_packer
       using value_type      = rapidjson::Document;
       using marshaller_type = ipc::json::rapid_doc<>;
 
-      jsonrpc_packer *get_packer() noexcept 
+      ms_jsonrpc2_packer *get_packer() noexcept 
       {
             mtx_.lock();
             bool expect = true;
@@ -310,10 +318,10 @@ class jsonrpc_packer
             mtx_.unlock();
       }
 
-      explicit jsonrpc_packer(std::condition_variable &cond) : cond_(cond) {}
-      ~jsonrpc_packer() = default;
-      DELETE_MOVE_CTORS(jsonrpc_packer);
-      DELETE_COPY_CTORS(jsonrpc_packer);
+      explicit ms_jsonrpc2_packer(std::condition_variable &cond) : cond_(cond) {}
+      ~ms_jsonrpc2_packer() = default;
+      DELETE_MOVE_CTORS(ms_jsonrpc2_packer);
+      DELETE_COPY_CTORS(ms_jsonrpc2_packer);
 
       marshaller_type pk = {};
 };
@@ -323,21 +331,21 @@ class jsonrpc_packer
 
 
 template <typename ConnectionType>
-class ms_jsonrpc_io_wrapper
-      : public basic_io_wrapper<ConnectionType, detail::jsonrpc_packer, rapidjson::Document>
+class ms_jsonrpc2_wrapper
+      : public basic_wrapper<ConnectionType, detail::ms_jsonrpc2_packer, rapidjson::Document>
 {
-      using base_type = basic_io_wrapper<ConnectionType, detail::jsonrpc_packer, rapidjson::Document>;
-      using this_type = msgpack_io_wrapper<ConnectionType>;
+      using base_type = basic_wrapper<ConnectionType, detail::ms_jsonrpc2_packer, rapidjson::Document>;
+      using this_type = ms_jsonrpc2_wrapper<ConnectionType>;
 
     public:
       using connection_type = ConnectionType;
-      using packer_type     = detail::jsonrpc_packer;
+      using packer_type     = detail::ms_jsonrpc2_packer;
       using unpacker_type   = rapidjson::Document;
 
       using value_type      = rapidjson::Document;
       using marshaller_type = ipc::json::rapid_doc<>;
 
-      explicit ms_jsonrpc_io_wrapper(connection_type *con) : base_type(con)
+      explicit ms_jsonrpc2_wrapper(connection_type *con) : base_type(con)
       {}
 
     private:
@@ -451,13 +459,13 @@ class ms_jsonrpc_io_wrapper
 
 
 template <typename T>
-concept IsIOWrapperVariant = std::derived_from<T,
-                                               basic_io_wrapper<typename T::connection_type,
-                                                                typename T::packer_type,
-                                                                typename T::unpacker_type>>;
+concept IsWrapperVariant = std::derived_from<T,
+                                             basic_wrapper<typename T::connection_type,
+                                                           typename T::packer_type,
+                                                           typename T::unpacker_type>>;
 
 
 /****************************************************************************************/
-} // namespace ipc::rpc
+} // namespace ipc::io
 } // namespace emlsp
 #endif

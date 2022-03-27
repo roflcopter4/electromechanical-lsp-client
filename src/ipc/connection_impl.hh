@@ -6,6 +6,7 @@
 
 #include "Common.hh"
 #include "ipc/misc.hh"
+#include "util/debug_trap.h"
 
 #define WIN32_USE_PIPE_IMPL
 
@@ -73,7 +74,8 @@ class base_connection_interface
       operator=(base_connection_interface &&) noexcept = default;
 
       base_connection_interface(base_connection_interface &&other) noexcept
-          : initialized_ (other.initialized_)
+          : open_listener_ (other.open_listener_)
+          , initialized_ (other.initialized_)
           , err_sink_type_ (other.err_sink_type_)
           , err_fd_ (other.err_fd_)
           , err_fname_ (std::move(other.err_fname_))
@@ -192,12 +194,14 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
       bool should_open_listener_  = true;
       bool should_close_listener_ = true;
       bool should_connect_        = true;
+      bool use_dual_sockets_      = false;
 
     protected:
       socket_t  listener_  = static_cast<socket_t>(-1);
-      socket_t  connector_ = static_cast<socket_t>(-1);
-      socket_t  acceptor_  = static_cast<socket_t>(-1);
-      socket_t &main_fd_   = acceptor_;
+      socket_t  con_read_  = static_cast<socket_t>(-1);
+      socket_t  con_write_ = static_cast<socket_t>(-1);
+      socket_t  acc_read_  = static_cast<socket_t>(-1);
+      socket_t  acc_write_ = static_cast<socket_t>(-1);
       AddrType  addr_      = {};
 
     public:
@@ -205,7 +209,7 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
 
       socket_connection_base_impl() = default;
       explicit socket_connection_base_impl(socket_t const sock)
-            : acceptor_(sock)
+            : acc_read_(sock)
       {}
 
       ~socket_connection_base_impl() override
@@ -219,20 +223,31 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
 
       socket_connection_base_impl(socket_connection_base_impl &&other) noexcept
           : base_type (std::move(other)),
+            should_open_listener_ (other.should_open_listener_),
+            should_close_listener_ (other.should_close_listener_),
+            should_connect_ (other.should_connect_),
+            use_dual_sockets_ (other.use_dual_sockets_),
             listener_ (other.listener_),
-            acceptor_ (other.acceptor_),
+            acc_read_ (other.acc_read_),
+            acc_write_ (other.acc_write_),
             addr_ (std::move(other.addr_))
       {
-            other.listener_ = static_cast<socket_t>(-1);
-            other.acceptor_ = static_cast<socket_t>(-1);
+            other.listener_  = static_cast<socket_t>(-1);
+            other.acc_read_  = static_cast<socket_t>(-1);
+            other.acc_write_ = static_cast<socket_t>(-1);
       }
 
       //--------------------------------------------------------------------------------
 
+      ND bool should_open_listener()   const { return should_open_listener_; }
+      ND bool should_close_listnener() const { return should_close_listener_; }
+      ND bool should_connect()         const { return should_connect_; }
+      ND bool use_dual_sockets()       const { return use_dual_sockets_; }
 
-      bool &should_open_listener()   & { return should_open_listener_; }
-      bool &should_close_listnener() & { return should_close_listener_; }
-      bool &should_connect()         & { return should_connect_; }
+      void should_open_listener(bool val)   { should_open_listener_  = val; }
+      void should_close_listnener(bool val) { should_close_listener_ = val; }
+      void should_connect(bool val)         { should_connect_        = val; }
+      void use_dual_sockets(bool val)       { use_dual_sockets_      = val; }
 
       using base_type::read;
       using base_type::write;
@@ -243,13 +258,13 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
 
       ND size_t available() const noexcept(false) override
       {
-            return util::available_in_fd(main_fd_);
+            return util::available_in_fd(acc_read_);
       }
 
-      ND socket_t fd() const noexcept final { return main_fd_; }
+      ND socket_t fd() const noexcept final { return acc_read_; }
       ND socket_t listener() const { return listener_; }
-      ND socket_t peer() const { return connector_; }
-      ND socket_t acceptor() const { return acceptor_; }
+      ND socket_t peer() const { return con_read_; }
+      ND socket_t acceptor() const { return acc_read_; }
 
       ND virtual AddrType &addr() & { return addr_; }
 
@@ -301,7 +316,7 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
     protected:
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
-      socket_t get_connected_socket() override { return connector_; }
+      socket_t get_connected_socket() override { return con_read_; }
 };
 
 
@@ -313,8 +328,6 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
 {
       using this_type = socketpair_connection_impl;
       using base_type = socket_connection_base_impl<sockaddr_un>;
-
-      socket_t fds_[2] = {-1, -1};
 
     public:
       socketpair_connection_impl()           = default;
@@ -334,9 +347,6 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
       socketpair_connection_impl(socketpair_connection_impl &&other) noexcept
           : base_type(std::move(other))
       {
-            memcpy(fds_, other.fds_, sizeof(fds_));
-            other.fds_[0] = (-1);
-            other.fds_[1] = (-1);
       }
 
       //--------------------------------------------------------------------------------
@@ -373,11 +383,13 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
       using base_type = socket_connection_base_impl<AddrType>;
 
     protected:
-      bool addr_init_ = false;
+      uint16_t    hport_     = 0;
+      bool        addr_init_ = false;
+      std::string addr_string_{};
 
     public:
-      inet_socket_connection_base_impl()           = default;
-      ~inet_socket_connection_base_impl() override = default;
+      inet_socket_connection_base_impl()            = default;
+       ~inet_socket_connection_base_impl() override = default;
 
       DELETE_COPY_CTORS(inet_socket_connection_base_impl);
       DEFAULT_MOVE_CTORS(inet_socket_connection_base_impl);
@@ -386,7 +398,7 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
 
       void set_listener(socket_t const sock, AddrType const &addr) override
       {
-            this->should_close_listnener() = true;
+            this->should_close_listnener(true);
             this->listener_ = sock;
             this->addr_     = addr;
       }
@@ -396,10 +408,12 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             if (!this->check_initialized(1))
                   throw std::logic_error("Cannot connect to uninitialized address!");
 
-            this->connector_ = connect_to_inet_socket(get_addr_generic(),
-                                                      get_socklen(), get_type());
-            this->main_fd_   = this->connector_;
-            return this->connector_;
+            /* XXX Code implicitly assumes that we read and write to and from the
+             * acc_* sockets, so use those to connect. Ugh. */
+            this->acc_read_ = connect_to_inet_socket(get_addr_generic(),
+                                                     get_socklen(), get_type());
+            this->acc_write_ = this->acc_read_;
+            return this->con_read_;
       }
 
       socket_t accept() override
@@ -408,17 +422,20 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
                   throw std::logic_error("Cannot accept from uninitialized address!");
 
             socklen_t size  = get_socklen();
-            this->acceptor_ = ::accept(this->listener_,
+            this->acc_read_ = ::accept(this->listener_,
                                        const_cast<sockaddr *>(get_addr_generic()), &size);
-            if (static_cast<intptr_t>(this->acceptor_) < 0 || size != get_socklen())
+            if (static_cast<intptr_t>(this->acc_read_) < 0 || size != get_socklen())
                   ERR(1, "accept");
 
-            this->main_fd_ = this->acceptor_;
-            return this->acceptor_;
+            this->acc_write_ = this->acc_read_;
+            return this->acc_read_;
       }
 
+      ND std::string const &get_addr_string() const & { return addr_string_; }
+      ND uint16_t           get_port()        const   { return hport_; }
+
     protected:
-      socket_t get_connected_socket() override { return this->connector_; }
+      socket_t get_connected_socket() override { return this->con_read_; }
       ND virtual sockaddr const *get_addr_generic() const = 0;
       ND virtual socklen_t       get_socklen() const      = 0;
       ND virtual int             get_type() const         = 0;
@@ -437,15 +454,8 @@ class inet_any_socket_connection_impl final
       int       type_        = AF_UNSPEC;
 
     public:
-      inet_any_socket_connection_impl() 
-      {
-            addr_ = nullptr;
-      }
-
-      ~inet_any_socket_connection_impl() override
-      {
-            free(this->addr_); //NOLINT
-      }
+      inet_any_socket_connection_impl();
+      ~inet_any_socket_connection_impl() override;
 
       DELETE_MOVE_CTORS(inet_any_socket_connection_impl);
       DELETE_COPY_CTORS(inet_any_socket_connection_impl);
@@ -465,8 +475,8 @@ class inet_any_socket_connection_impl final
       socket_t connect_to_socket() override;
 
       ND sockaddr const *get_addr_generic() const override { return addr_; }
-      ND socklen_t       get_socklen() const override { return addr_length_; }
-      ND int             get_type() const override { return type_; }
+      ND socklen_t       get_socklen()      const override { return addr_length_; }
+      ND int             get_type()         const override { return type_; }
 
     private:
       void set_listener(socket_t const /*sock*/, sockaddr *const & /*addr*/) override
@@ -898,21 +908,25 @@ base_connection_interface<DescriptorType>::get_err_handle()
 /*--------------------------------------------------------------------------------------*/
 /* Out of line implementations for socket connections. */
 
+inline void close_socket(socket_t &sock)
+{
+      if (sock != static_cast<socket_t>(-1)) {
+            ::shutdown(sock, 2);
+            util::close_descriptor(sock);
+      }
+}
+
 template <typename AddrType>
 void socket_connection_base_impl<AddrType>::close()
 {
-      if (acceptor_ != static_cast<socket_t>(-1)) {
-            ::shutdown(acceptor_, 2);
-            util::close_descriptor(acceptor_);
-      }
-      if (connector_ != static_cast<socket_t>(-1)) {
-            ::shutdown(acceptor_, 2);
-            util::close_descriptor(connector_);
-      }
-      if (listener_ != static_cast<socket_t>(-1) && should_close_listener_) {
-            ::shutdown(listener_, 2);
-            util::close_descriptor(listener_);
-      }
+      if (acc_write_ != acc_read_)
+            close_socket(acc_write_);
+      if (con_write_ != con_read_)
+            close_socket(con_write_);
+      if (should_close_listener_)
+            close_socket(listener_);
+      close_socket(acc_read_);
+      close_socket(con_read_);
 }
 
 template <typename AddrType>
@@ -929,13 +943,18 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
             // Put it in a loop just in case...
             flags &= ~MSG_WAITALL;
             do {
-                  n = ::recv(main_fd_, static_cast<char *>(buf) + total,
-                             static_cast<sock_int_type>(nbytes - total), flags);
-            } while ((n != (-1)) && (total += n) < static_cast<ssize_t>(nbytes));
+                  n = ::recv(acc_read_, static_cast<char *>(buf) + total,
+                             sock_int_type(nbytes - total), flags);
+            } while ((n != (-1)) && (total += n) < ssize_t(nbytes));
       } else {
             for (;;) {
-                  n = ::recv(main_fd_, static_cast<char *>(buf),
-                             static_cast<sock_int_type>(nbytes), flags);
+                  // n = ::recv(acc_read_, static_cast<char *>(buf),
+                             // sock_int_type(nbytes), flags);
+                  errno = 0;
+                  n = 0;
+                  n = ::read(acc_read_, static_cast<char *>(buf),
+                             sock_int_type(nbytes));
+                  // psnip_dbg_assert(n > 0);
                   if (n != 0)
                         break;
                   std::this_thread::sleep_for(10ms);
@@ -963,9 +982,9 @@ socket_connection_base_impl<AddrType>::write(void    const *buf,
       ssize_t n;
 
       do {
-            n = ::send(main_fd_, static_cast<char const *>(buf) + total,
-                       static_cast<sock_int_type>(nbytes - total), flags);
-      } while (n != (-1) && (total += n) < static_cast<ssize_t>(nbytes));
+            n = ::send(acc_write_, static_cast<char const *>(buf) + total,
+                       sock_int_type(nbytes - total), flags);
+      } while (n != (-1) && (total += n) < ssize_t(nbytes));
 
       if (n == (-1)) [[unlikely]] {
             if (errno == EBADF)

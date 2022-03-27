@@ -1,8 +1,13 @@
 #include "Common.hh"
 #include "ipc/basic_io_connection.hh"
-#include "ipc/lsp/static-data.hh"
+#include "ipc/basic_rpc_connection.hh"
+#include "ipc/rpc/lsp.hh"
+#include "ipc/rpc/lsp/static-data.hh"
 
 #include <boost/asio.hpp>
+#include <nlohmann/json.hpp>
+
+#include <nlohmann/adl_serializer.hpp>
 
 #define AUTOC auto const
 
@@ -12,16 +17,28 @@ namespace sigh {
 
 namespace asio = boost::asio;
 
-//using con_type = ipc::rpc::basic_io_connection<ipc::connections::unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
-using con_type = ipc::rpc::basic_io_connection<ipc::connections::dual_unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
-//using con_type = ipc::rpc::basic_io_connection<ipc::connections::inet_ipv6_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
-//using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
-//using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_handle_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
+using con_type = ipc::rpc::lsp_conection<ipc::connections::inet_socket>;
+
+// using con_type = ipc::basic_io_connection<ipc::connections::inet_ipv4_socket,
+//                                           ipc::io::ms_jsonrpc2_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::Default,           ipc::io::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::unix_socket,       ipc::io::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::dual_unix_socket,  ipc::io::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::pipe,              ipc::io::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::win32_named_pipe,  ipc::io::ms_jsonrpc_io_wrapper>;
+//using con_type = ipc::basic_io_connection<ipc::connections::win32_handle_pipe, ipc::io::ms_jsonrpc_io_wrapper>;
 
 static constexpr auto timeout_len = UINT64_C(1000);
+
+#ifdef _WIN32
 static constexpr auto fname_raw   = R"(D:\ass\VisualStudio\emlsp\src\sigh.cc)"sv;
 static constexpr auto fname_uri   = R"(file://D:/ass/VisualStudio/emlsp/src/sigh.cc)"sv;
 static constexpr auto fname_path  = R"(file://D:/ass/VisualStudio/emlsp)"sv;
+#else
+static constexpr auto fname_raw   = R"(/home/bml/files/projects/emlsp-win/src/sigh.cc)"sv;
+static constexpr auto fname_uri   = R"(file://home/bml/files/projects/emlsp-win/src/sigh.cc)"sv;
+static constexpr auto fname_path  = R"(file://home/bml/files/projects/emlsp-win)"sv;
+#endif
 
 
 UNUSED static void
@@ -132,7 +149,7 @@ NOINLINE void sigh01()
       obj = con->read_object();
       dump_read(obj);
       fflush(stderr);
-      Sleep(1000);
+      std::this_thread::sleep_for(1000ms);
 #endif
 }
 
@@ -196,9 +213,9 @@ NOINLINE void sigh02()
                 if (events & UV_READABLE) {
                       fmt::print(stderr, "It mostly worked maybe.\n");
                       char       buf[1024];
-                      auto const len = recv(hand->socket, buf, 1024, 0);
+                      auto const len = recv(hand->u.fd, buf, 1024, 0);
                       if (len <= 0)
-                            util::win32::error_exit_wsa(L"recv()");
+                            errx(1, "recv()");
                       fmt::print(stderr, FC("Got \"{}\"\n"), std::string_view{buf, static_cast<size_t>(len)});
                 } else {
                       fmt::print(stderr, "Bah?\n");
@@ -217,7 +234,7 @@ NOINLINE void sigh02()
       uv_stop(&data->loop);
       //con->impl().close();
       loop_thread.join();
-      //Sleep(2000);
+      //std::this_thread::sleep_for(2000ms);
 }
 
 
@@ -252,58 +269,14 @@ NOINLINE void sigh03()
 
 NOINLINE void sigh04()
 {
-      putenv((char *)"RUST_BACKTRACE=full");
-
-      //using conn_type = ipc::rpc::basic_io_connection<ipc::connections::unix_socket, ipc::rpc::ms_jsonrpc_io_wrapper>;
+      putenv("RUST_BACKTRACE=full");
       using conn_type = con_type;
 
-      //auto const path = util::get_temporary_filename(nullptr, ".sock").string();
-      auto con = std::make_unique<conn_type>();
-      //con->impl().should_close_listnener() = false;
-      //con->impl().should_open_listener() = false;
-      //con->impl().should_connect() = false;
-      //con->impl().addr().sin_port = htons(62010);
-      con->impl().open();
-
-      //std::string const listen_str = fmt::format("--listen=unix:{}", con->impl().path());
-      //std::string const listen_str = fmt::format("--listen=[::1]:{}", ntohs(con->impl().addr().sin6_port));
-      //std::string const listen_str = fmt::format("--listen=127.0.0.1:{}", ntohs(con->impl().addr().sin_port));
-      char const *const args[]     = {
-          //R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
-          //R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
-          //"--log=verbose",
-          //"--debug",
-          //"--pch-storage=memory",
-          //"--clang-tidy",
-          //listen_str.c_str()
-            "gopls"
-      };
-
-      con->spawn_connection(std::size(args), const_cast<char **>(args));
+      auto con = conn_type::new_unique();
+      con->impl().use_dual_sockets(true);
+      con->impl().resolve("127.0.0.1", "8080");
+      con->spawn_connection_l("clangd", "--log=verbose", "--pch-storage=memory", "--clang-tidy");
       std::this_thread::sleep_for(1s);
-
-#if 0
-      sockaddr_un addr{};
-      addr.sun_family = AF_UNIX;
-      memcpy(addr.sun_path, path.data(), path.size() + 1);
-      socket_t sock = socket(AF_UNIX, SOCK_STREAM, 0);
-      auto ret = connect(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_un));
-      if (ret == -1)
-            util::win32::error_exit_wsa(L"connect()");
-#endif
-
-      //con->impl().connect();
-
-      //con->impl().
-
-      //con->spawn_connection_l(//R"(D:\Program Files\Microsoft Visual Studio\2022\Preview\VC\Tools\Llvm\x64\bin\clangd.exe)",
-      //                        //R"(D:\ass\GIT\llvm-project\llvm\turd\bin\clangd.exe)",
-      //                        //"gopls", "-vv", "-logfile=foo.txt", "-rpc.trace"
-      //                        //"--sync",
-      //                        R"(D:\ass\GIT\llvm-project\llvm\gcc\bin\clangd.exe)",
-      //                        "--log=verbose", "--debug",
-      //                        "--pch-storage=memory", "--clang-tidy",
-      //);
 
       struct my_uv_data {
             uv_loop_t  loop{};
@@ -315,10 +288,7 @@ NOINLINE void sigh04()
 
       uv_loop_init(&data->loop);
       uv_poll_init_socket(&data->loop, &data->poll_hand, con->raw_descriptor());
-      //uv_poll_init_socket(&data->loop, &data->poll_hand, con->raw_descriptor());
-      //uv_poll_init_socket(&data->loop, &data->poll_hand, (SOCKET)con->raw_descriptor());
-      //int fd = _open_osfhandle((intptr_t)con->raw_descriptor(), _O_RDWR | _O_BINARY | _O_APPEND);
-      //uv_poll_init(&data->loop, &data->poll_hand, fd);
+      // uv_poll_init(&data->loop, &data->poll_hand, con->raw_descriptor());
       uv_timer_init(&data->loop, &data->timer_hand);
 
       uv_timer_start(
@@ -327,15 +297,14 @@ NOINLINE void sigh04()
           timeout_len, timeout_len
       );
 
-      data->poll_hand.data = con.get();
+      data->loop.data = data->poll_hand.data = con.get();
 
       uv_poll_start(
           &data->poll_hand, UV_READABLE | UV_DISCONNECT,
-          [](uv_poll_t *hand, int const status, int const events) -> void
+          [](uv_poll_t *hand, UNUSED int const status, int const events) -> void
           {
                 auto *conp = static_cast<conn_type *>(hand->data);
 
-                //fmt::print(FC("{} - {}\n"), status, events);
                 if (events & UV_DISCONNECT) {
                       fmt::print(stderr, "Disconnecting!\n");
                       conp->notify_all();
@@ -354,27 +323,10 @@ NOINLINE void sigh04()
                 } else {
                       fmt::print(stderr, "Bah?\n");
                 }
+                fflush(stderr);
           });
 
-      auto loop_thread = std::thread{[](uv_loop_t *arg) {
-                                           __try {
-                                                 uv_run(arg, UV_RUN_DEFAULT);
-                                           } __except (EXCEPTION_CONTINUE_EXECUTION) {
-                                                 fprintf(stdout, "\n\nI, uh, I caught a thing -> 0x%08X\n\n", GetExceptionCode());
-                                                 fflush(stderr);
-                                           }
-                                     },
-                                     &data->loop};
-
-      //pthread_t tid{};
-      //pthread_create(
-      //    &tid, nullptr,
-      //    [](void *arg) -> void * {
-      //          auto uvloop = static_cast<uv_loop_t *>(arg);
-      //          uv_run(uvloop, UV_RUN_DEFAULT);
-      //          pthread_exit(nullptr);
-      //    },
-      //    &data->loop);
+      auto loop_thread = std::thread{[](uv_loop_t *arg) { uv_run(arg, UV_RUN_DEFAULT); }, &data->loop};
 
       {
             AUTOC init = ipc::lsp::data::init_msg(fname_path.data());
@@ -383,17 +335,21 @@ NOINLINE void sigh04()
       }
       {
             AUTOC contentvec = ::util::slurp_file(fname_raw);
+#if 1
             auto wrap = con->get_packer();
             wrap().add_member("jsonrpc", "2.0");
             wrap().add_member("method", "textDocument/didOpen");
             wrap().set_member("params");
             wrap().set_member("textDocument");
-            wrap().add_member("uri",  rapidjson::Value ( fname_uri.data(),  static_cast<rapidjson::SizeType>(fname_uri.size()) ) );
-            wrap().add_member("text", rapidjson::Value { contentvec.data(), static_cast<rapidjson::SizeType>(contentvec.size()) } );
+            wrap().add_member("uri",  rapidjson::Value(fname_uri.data(),  fname_uri.size(), wrap().alloc()));
+            wrap().add_member("text", rapidjson::Value(contentvec.data(), contentvec.size(), wrap().alloc()));
             wrap().add_member("version", 1);
             wrap().add_member("languageId", "cpp");
             con->write_object(wrap);
+#endif
             con->wait();
+            if (con->wait(5s))
+                  fmt::print(stderr, "\n\033[1;32mWait timed out...\033[0m\n\n");
       }
       {
             auto wrap = con->get_packer();
@@ -402,16 +358,28 @@ NOINLINE void sigh04()
             wrap().add_member("method", "textDocument/semanticTokens/full");
             wrap().set_member("params");
             wrap().set_member("textDocument");
-            wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size()));
+            wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size(), wrap().alloc()));
+            con->write_object(wrap);
+            con->wait();
+      }
+      {
+            auto wrap = con->get_packer();
+            wrap().add_member("jsonrpc", "2.0");
+            wrap().add_member("id", 2);
+            wrap().add_member("method", "textDocument/semanticTokens/full/delta");
+            wrap().set_member("params");
+            wrap().add_member("previousResultId", "1");
+            wrap().set_member("textDocument");
+            wrap().add_member("uri", rapidjson::Value(fname_uri.data(), fname_uri.size(), wrap().alloc()));
             con->write_object(wrap);
             con->wait();
       }
 
-
       uv_poll_stop(&data->poll_hand);
+      uv_timer_stop(&data->timer_hand);
       uv_stop(&data->loop);
+      uv_loop_close(&data->loop);
 
-      //pthread_join(tid, nullptr);
       loop_thread.join();
 
       fmt::print(stderr, FC("\033[1mAll done, now exiting.\033[0m\n"));
@@ -427,7 +395,7 @@ NOINLINE void sigh05()
       static constexpr uint64_t timeout_len = 1000;
       std::mutex mtx1;
 
-      auto con = std::make_unique<con_type>();
+      auto con = con_type::new_unique();
       con->impl().open();
       //con->spawn_connection_l("clangd", "--log=verbose");
       //con->spawn_connection_l("rls");
@@ -533,7 +501,7 @@ NOINLINE void sigh05()
                              sb.GetSize(),
                              std::string_view{sb.GetString(), sb.GetSize()});
                   fflush(stderr);
-                  Sleep(250);
+                  std::this_thread::sleep_for(250ms);
                   con->notify_one();
             }
       }};
@@ -575,7 +543,7 @@ NOINLINE void sigh05()
             con->write_object(wrap);
             con->wait();
             con->wait();
-            Sleep(250);
+            std::this_thread::sleep_for(250ms);
       }
 
 
@@ -631,11 +599,12 @@ NOINLINE void sigh05()
       uv_stop(&data->loop);
       //con->impl().close();
       loop_thread.join();
-      //Sleep(2000);
+      //std::this_thread::sleep_for(2000ms);
 #endif
 }
 
 
+#ifdef _WIN32
 static void
 my_alloc_cb(uv_handle_t *handle, size_t suggested, uv_buf_t *buf)
 {
@@ -694,7 +663,7 @@ NOINLINE void sigh06()
       //uv_pipe_init(&data->loop, &data->rdpipe, 0);
       //uv_pipe_init(&data->loop, &data->wrpipe, 0);
 
-      auto con = std::make_unique<con_type>();
+      auto con = con_type::new_unique();
       con->impl().set_loop(&data->loop);
       con->spawn_connection_l("clangd.exe", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--background-index");
 
@@ -780,7 +749,6 @@ NOINLINE void sigh06()
             con->wait();
       }
 
-
 #if 0
       {
             OVERLAPPED ov;
@@ -800,14 +768,15 @@ NOINLINE void sigh06()
                   util::win32::error_exit(L"GetOverlappedResult()");
 
             dump_read(buf, trans);
-            Sleep(50000);
+            std::this_thread::sleep_for(50000ms);
       }
 #endif
-      Sleep(20000);
+      std::this_thread::sleep_for(20000ms);
       uv_read_stop(reinterpret_cast<uv_stream_t *>(con->impl().get_uv_handle()));
       uv_stop(&data->loop);
       loop_thread.join();
 }
+#endif
 
 NOINLINE void sigh07()
 {

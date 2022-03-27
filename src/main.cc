@@ -31,6 +31,15 @@ inline namespace emlsp {
   NOINLINE extern void sigh06();
  } // namespace sigh
 
+ namespace fool {
+  NOINLINE void fool01();
+ } // namespace fool
+
+ namespace finally {
+  NOINLINE void foo01();
+  NOINLINE void foo02();
+ } // namespace finally
+
 } // namespace emlsp
 
 /****************************************************************************************/
@@ -53,13 +62,13 @@ static void init_wsa()
 
       if (auto const err1 = WSAStartup(w_version_requested, &wsa_data) != 0) {
             std::cerr << "WSAStartup failed with error: " <<  err1 << '\n';
-            throw std::runtime_error("Bad winsock dll");
+            util::win32::error_exit(L"Bad winsock dll");
       }
 
       if (LOBYTE(wsa_data.wVersion) != 2 || HIBYTE(wsa_data.wVersion) != 2) {
             std::cerr << "Could not find a usable version of Winsock.dll\n";
             WSACleanup();
-            throw std::runtime_error("Bad winsock dll");
+            util::win32::error_exit(L"Bad winsock dll");
       }
 }
 #endif
@@ -96,6 +105,9 @@ do_main(UNUSED int argc, UNUSED char *argv[])
 #endif
       //init_libevent();
 
+      // if (argc != 2 || !argv[1] || !*argv[1])
+      //       exit(1);
+
 #if 0
       if (argc < 2)
             dump_and_exit(2, FC("ERROR: Missing paramater.\n"));
@@ -113,7 +125,11 @@ do_main(UNUSED int argc, UNUSED char *argv[])
             dump_and_exit(6, FC("ERROR: Invalid paramater \"{}\": Must be a regular file.\n"), src_file.string());
 #endif
 
-      sigh::sigh04();
+
+      // fool::fool01();
+      // sigh::sigh04();
+      finally::foo02();
+
 
 #ifdef _WIN32
       WSACleanup();

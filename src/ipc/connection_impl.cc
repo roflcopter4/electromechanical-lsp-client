@@ -30,6 +30,8 @@ inline namespace emlsp {
 namespace ipc::detail {
 /****************************************************************************************/
 
+namespace {
+
 struct socket_info {
       std::string path;
       socket_t    listener_sock;
@@ -38,7 +40,7 @@ struct socket_info {
       bool        connect;
 };
 
-static void
+void
 async_connect_to_unix_socket(socket_info *info) noexcept
 {
       try {
@@ -49,6 +51,10 @@ async_connect_to_unix_socket(socket_info *info) noexcept
 }
 
 #ifdef _WIN32
+/*
+ * This little piece of stupidity is actually pretty important. Sockets passed as
+ * stdio handles must not be considered OVERLAPPED. The parent socket, however, can.
+ */
 __forceinline socket_t
 call_socket_listen(int const family, int const type, int const protocol)
 {
@@ -72,6 +78,28 @@ call_socket_connect(int const family, int const type, int const protocol)
 }
 #endif
 
+void
+do_open_unix_socket_connection(socket_t const     listener_,
+                               socket_t          &acceptor,
+                               socket_t          &connector,
+                               std::string const &path)
+{
+      auto info = socket_info{path, listener_, {}, {}, true};
+      // auto start_thread = std::thread{async_connect_to_unix_socket, &info};
+      async_connect_to_unix_socket(&info);
+      sockaddr_un con_addr = {};
+      socklen_t   len      = sizeof(sockaddr_un);
+
+      acceptor = ::accept(listener_, (sockaddr *)&con_addr, &len);
+      if (!acceptor || acceptor == socket_t(-1))
+            ERR(1, "accept()");
+
+      // start_thread.join();
+      connector = info.connected_sock;
+}
+
+
+} // namespace
 
 /*======================================================================================*/
 /*======================================================================================*/
@@ -99,7 +127,8 @@ create_process(wchar_t const *args, STARTUPINFOW *start_info, PROCESS_INFORMATIO
 
 /*
  * XXX
- * This function "borrowed" from glib, with some modifications.
+ * This function "borrowed" from glib, with some modifications. This almost certainly
+ * violates the LGPL so I should really replace this code or something at some point.
  * XXX
  */
 /* gspawn-win32-helper.c - Helper program for process launching on Win32.
@@ -300,18 +329,27 @@ unix_socket_connection_impl::open()
             listener_ = open_new_socket();
 
       if (should_connect()) {
-            auto info         = socket_info{path_, listener_, {}, {}, should_connect()};
-            auto start_thread = std::thread{async_connect_to_unix_socket, &info};
-
-            sockaddr_un con_addr = {};
-            int         len      = sizeof(con_addr);
-            acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
-            if (!acceptor_ || uintptr_t(acceptor_) == uintptr_t(-1))
-                  util::win32::error_exit_wsa(L"accept()");
-
-            start_thread.join();
-            connector_ = info.connected_sock;
+            do_open_unix_socket_connection(listener_, acceptor_, connector_, path_);
+            if (use_dual_sockets()) {
+                  do_open_unix_socket_connection(listener_, acceptor2_, connector2_, path_);
+                  write_fd_ = &acceptor2_;
+            }
       }
+
+      // if (should_connect()) {
+      //       auto info         = socket_info{path_, listener_, {}, {}, true};
+      //       // auto start_thread = std::thread{async_connect_to_unix_socket, &info};
+      //       async_connect_to_unix_socket(&info);
+      // 
+      //       sockaddr_un con_addr = {};
+      //       int         len      = sizeof(con_addr);
+      //       acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
+      //       if (!acceptor_ || uintptr_t(acceptor_) == uintptr_t(-1))
+      //             util::win32::error_exit_wsa(L"accept()");
+      // 
+      //       // start_thread.join();
+      //       connector_ = info.connected_sock;
+      // }
 
       set_initialized(1);
 }
@@ -357,7 +395,7 @@ unix_socket_connection_impl::open_new_socket()
             if (ret < 0)
                   util::win32::error_exit_wsa(L"bind()");
 
-            if (::listen(listener, 8) == (-1))
+            if (::listen(listener, 255) == (-1))
                  util::win32::error_exit_wsa(L"listen");
       }
 
@@ -373,7 +411,7 @@ unix_socket_connection_impl::connect_to_socket()
             util::win32::error_exit_wsa(L"socket(): "s + std::to_wstring(e));
 
       AUTOC ret = ::connect(connector, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
-      if (ret == (-1))
+      if (ret == intptr_t(-1))
             util::win32::error_exit_wsa(L"connect");
 
       return connector;
@@ -382,7 +420,7 @@ unix_socket_connection_impl::connect_to_socket()
 void
 unix_socket_connection_impl::set_listener(socket_t const sock, sockaddr_un const &addr)
 {
-      should_close_listnener() = false;
+      should_close_listnener(false);
       listener_ = sock;
       memcpy(&addr_, &addr, sizeof(sockaddr_un));
 }
@@ -401,7 +439,8 @@ unix_socket_connection_impl::connect()
             throw std::logic_error("Cannot connect to uninitialized address!");
 
       connector_ = connect_to_socket();
-      main_fd_   = connector_;
+      read_fd_   = &connector_;
+      write_fd_  = &connector_;
       return connector_;
 }
 
@@ -417,7 +456,8 @@ unix_socket_connection_impl::accept()
       if (!acceptor_ || uintptr_t(acceptor_) == uintptr_t(-1))
             util::win32::error_exit_wsa(L"accept()");
 
-      main_fd_ = acceptor_;
+      read_fd_  = &acceptor_;
+      write_fd_ = &acceptor_;
       return acceptor_;
 }
 
@@ -922,7 +962,7 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED int c
 
 
 static void
-open_pipeish_socket(socket_t &us, socket_t &peer)
+open_pipeish_socket(socket_t us[2], socket_t peer[2])
 {
       socket_t    listener;
       sockaddr_un addr{};
@@ -946,21 +986,25 @@ open_pipeish_socket(socket_t &us, socket_t &peer)
       if (::bind(listener, (sockaddr *)&addr, sizeof addr) < 0)
             util::win32::error_exit_wsa(L"bind()");
 
-      if (::listen(listener, 1) < 0)
+      if (::listen(listener, 2) < 0)
             util::win32::error_exit_wsa(L"listen");
 
-      auto info         = socket_info{path, listener, {}, {}, true};
-      auto start_thread = std::thread{async_connect_to_unix_socket, &info};
+      for (int i = 0; i < 2; ++i) {
+            auto info         = socket_info{path, listener, {}, {}, true};
+            // auto start_thread = std::thread{async_connect_to_unix_socket, &info};
+            async_connect_to_unix_socket(&info);
 
-      sockaddr_un con_addr = {};
-      int         len      = sizeof(con_addr);
-      socket_t    acceptor = ::accept(listener, (sockaddr *)&con_addr, &len);
-      if (!acceptor || acceptor == uintptr_t(-1))
-            util::win32::error_exit_wsa(L"accept()");
+            sockaddr_un con_addr = {};
+            int         len      = sizeof(con_addr);
+            socket_t    acceptor = ::accept(listener, (sockaddr *)&con_addr, &len);
+            if (!acceptor || acceptor == uintptr_t(-1))
+                  util::win32::error_exit_wsa(L"accept()");
 
-      start_thread.join();
-      us   = acceptor;
-      peer = info.connected_sock;
+            // start_thread.join();
+            us[i]   = acceptor;
+            peer[i] = info.connected_sock;
+      }
+
       closesocket(listener);
 }
 
@@ -973,8 +1017,8 @@ dual_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
       socket_t our_socks[2];
       socket_t peer_socks[2];
 
-      for (int i = 0; i < 2; ++i)
-            open_pipeish_socket(our_socks[i], peer_socks[i]);
+      // for (int i = 0; i < 2; ++i)
+      open_pipeish_socket(our_socks[i], peer_socks[i]);
 
       write_           = our_socks[0];
       read_            = our_socks[1];
@@ -1067,35 +1111,52 @@ dual_socket_connection_impl::write(void const *buf, ssize_t nbytes, int flags)
 /*======================================================================================*/
 
 
+template <typename ...Types>
+NORETURN static void
+patricide(pid_t const parent, Types ...args)
+{
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat"
+      warnx(args...);
+#pragma GCC diagnostic pop
+
+      ::fflush(stderr);
+      ::kill(parent, SIGABRT);
+      err_nothrow(1, "aborting");
+}
+
+
 static procinfo_t
-spawn_connection_common(socket_t const       connected,
-                        int const            err_fd,
-                        UNUSED size_t const  argc,
-                        char               **argv)
+spawn_connection_common(socket_t const      stdout_sock,
+                        socket_t const      stdin_sock,
+                        int const           err_fd,
+                        UNUSED size_t const argc,
+                        char              **argv)
 {
       pid_t const this_id = ::getpid();
       procinfo_t  pid;
 
-      int const io = static_cast<intptr_t>(connected) >= 0
-                      ? connected
-                      : ::open("/dev/null", O_RDWR | O_BINARY | O_APPEND | O_CLOEXEC, 0600);
-
       if ((pid = ::fork()) == 0) {
-            ::dup2(io, STDOUT_FILENO);
-            ::dup2(io, STDIN_FILENO);
-            ::close(io);
+            int const io_in  = intptr_t(stdin_sock) >= 0
+                             ? stdin_sock
+                             : ::open("/dev/null", O_RDWR | O_BINARY | O_APPEND, 0600);
+            int const io_out = intptr_t(stdout_sock) >= 0
+                             ? stdout_sock
+                             : ::open("/dev/null", O_RDWR | O_BINARY | O_APPEND, 0600);
+
+            ::dup2(io_in, STDIN_FILENO);
+            ::dup2(io_out, STDOUT_FILENO);
+            ::close(io_in);
+            ::close(io_out);
             assert(argv[0] != nullptr);
 
             if (err_fd > 2) {
-                  ::dup2(err_fd, 2);
+                  ::dup2(err_fd, STDERR_FILENO);
                   ::close(err_fd);
             }
 
             ::execvp(argv[0], const_cast<char **>(argv));
-            warnx("execvp() failed");
-            ::fflush(stderr);
-            ::kill(this_id, SIGABRT);
-            err_nothrow(1, "aborting");
+            patricide(this_id, "execvp() failed");
       }
 
       return pid;
@@ -1112,18 +1173,17 @@ unix_socket_connection_impl::open()
       throw_if_initialized(typeid(*this), 1);
       if (path_.empty())
             path_ = util::get_temporary_filename(nullptr, ".sock").string();
-      if (listener_ == static_cast<socket_t>(-1))
+      if (listener_ == socket_t(-1))
             listener_ = open_new_socket();
 
       if (should_connect()) {
-            auto        info         = socket_info{path_, listener_, {}, {}, should_connect()};
-            auto        start_thread = std::thread{async_connect_to_unix_socket, &info};
-            sockaddr_un con_addr     = {};
-            socklen_t   len          = sizeof(con_addr);
-
-            acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
-            if (!acceptor_ || acceptor_ == (-1))
-                  ERR(1, "accept()");
+            do_open_unix_socket_connection(listener_, acc_read_, con_read_, path_);
+            if (use_dual_sockets()) {
+                  do_open_unix_socket_connection(listener_, acc_write_, con_write_, path_);
+            } else {
+                  con_write_ = con_read_;
+                  acc_write_ = acc_read_;
+            }
       }
 
       set_initialized(1);
@@ -1137,7 +1197,9 @@ unix_socket_connection_impl::do_spawn_connection(UNUSED size_t const argc, char 
             open();
 
       err_fd_   = get_err_handle();
-      AUTOC pid = spawn_connection_common(connector_, err_fd_, argc, argv);
+      AUTOC pid = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      util::close_descriptor(con_read_);
+      util::close_descriptor(con_write_);
 
       if (err_sink_type_ == sink_type::FILENAME)
             ::close(err_fd_);
@@ -1166,7 +1228,7 @@ unix_socket_connection_impl::open_new_socket()
             if (listener == (-1))
                   err(1, "socket");
 
-            AUTOC ret = ::bind(listener, reinterpret_cast<sockaddr *>(&addr_), sizeof addr_);
+            AUTOC ret = ::bind(listener, (sockaddr *)&addr_, sizeof addr_);
             if (ret == (-1))
                   err(1, "bind");
 
@@ -1180,26 +1242,15 @@ unix_socket_connection_impl::open_new_socket()
 socket_t
 unix_socket_connection_impl::connect_to_socket()
 {
-      socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-
-      if (connector == (-1))
-           err(1, "socket");
-      int const tmp = ::fcntl(connector, F_GETFL);
-      ::fcntl(connector, F_SETFL, tmp | O_CLOEXEC);
-
-      AUTOC ret = ::connect(connector, reinterpret_cast<sockaddr const *>(&addr_), sizeof addr_);
-      if (ret == (-1))
-            err(1, "connect");
-
-      return connector;
+      return acc_read_;
 }
 
 void
 unix_socket_connection_impl::set_listener(socket_t const sock, sockaddr_un const &addr)
 {
-      should_close_listnener() = false;
-      this->listener_          = sock;
-      this->addr_              = addr;
+      should_close_listnener(false);
+      listener_ = sock;
+      addr_     = addr;
 }
 
 void
@@ -1215,9 +1266,21 @@ unix_socket_connection_impl::connect()
       if (!check_initialized(1))
             throw std::logic_error("Cannot connect to uninitialized address!");
 
-      connector_ = connect_to_socket();
-      main_fd_   = connector_;
-      return connector_;
+      socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+      if (connector == (-1)) [[unlikely]]
+           err(1, "socket");
+      int const tmp = ::fcntl(connector, F_GETFL);
+      ::fcntl(connector, F_SETFL, tmp | O_CLOEXEC);
+
+      AUTOC ret = ::connect(connector, (sockaddr const *)&addr_, sizeof addr_);
+      if (ret == (-1))
+            err(1, "connect");
+
+
+      acc_read_  = connector;
+      acc_write_ = connector;
+      return con_read_;
 }
 
 socket_t
@@ -1228,43 +1291,68 @@ unix_socket_connection_impl::accept()
 
       sockaddr_un con_addr = {};
       socklen_t   len      = sizeof(con_addr);
-      acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
-      if (acceptor_ <= 0)
+      acc_read_ = ::accept(listener_, (sockaddr *)&con_addr, &len);
+      if (acc_read_ <= 0)
             ERR(1, "accept()");
+      acc_write_ = acc_read_;
 
-      main_fd_ = acceptor_;
-      return acceptor_;
+      return acc_read_;
 }
 
 /*--------------------------------------------------------------------------------------*/
 
 # ifdef HAVE_SOCKETPAIR
 
+void
+socketpair_connection_impl::open()
+{
+      throw_if_initialized(typeid(*this), 1);
+      open_new_socket();
+      set_initialized(1);
+}
+
 procinfo_t
 socketpair_connection_impl::do_spawn_connection(UNUSED size_t const argc, char **argv)
 {
-      throw_if_initialized(typeid(*this));
+      throw_if_initialized(typeid(*this), 2);
+      if (!check_initialized(1))
+            open();
 
-      acceptor_      = open_new_socket();
-      err_fd_        = get_err_handle();
-      procinfo_t pid = spawn_connection_common(connector_, err_fd_, argc, argv);
+      err_fd_   = get_err_handle();
+      AUTOC pid = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      util::close_descriptor(con_read_);
+      util::close_descriptor(con_write_);
 
-      set_initialized();
+      set_initialized(2);
       return pid;
 }
 
 socket_t
 socketpair_connection_impl::open_new_socket()
 {
-      if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds_) == (-1))
+      int fds[2];
+      if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == (-1))
             err(1, "socketpair()");
-      return fds_[0];
+      acc_read_  = fds[0];
+      con_read_ = fds[1];
+
+      if (use_dual_sockets()) {
+            if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == (-1))
+                  err(1, "socketpair()");
+            acc_write_ = fds[0];
+            con_write_ = fds[1];
+      } else {
+            acc_write_ = acc_read_;
+            con_write_ = con_read_;
+      }
+
+      return fds[0];
 }
 
 socket_t
 socketpair_connection_impl::connect_to_socket()
 {
-      return fds_[1]; /* ugh */
+      return con_read_; /* ugh */
 }
 
 # endif
@@ -1274,23 +1362,22 @@ socketpair_connection_impl::connect_to_socket()
 /* Pipe Connection */
 
 
+void
+pipe_connection_impl::close()
+{
+      if (read_ > 2)
+            ::close(read_);
+      if (write_ > 2)
+            ::close(write_);
+      read_  = (-1);
+      write_ = (-1);
+}
+
 static void
 open_pipe(int fds[2])
 {
-# ifdef HAVE_PIPE2
-      if (::pipe2(fds, O_CLOEXEC) == (-1))
-            err(1, "pipe2()");
-# else
-      int flg;
       if (::pipe(fds) == (-1))
-            err(1, "pipe()");
-      for (int i = 0; i < 2; ++i) {
-            if ((flg = ::fcntl(fds[i], F_GETFL)) == (-1))
-                  err(3 + i, "fcntl(F_GETFL)");
-            if (::fcntl(fds[i], F_SETFL, flg | O_CLOEXEC) == (-1))
-                  err(5 + i, "fcntl(F_SETFL)");
-      }
-# endif
+            err(1, "pipe2()");
 
 # ifdef __linux__ /* Can't do this on the BSDs. */
       if (::fcntl(fds[0], F_SETPIPE_SZ, 65536) == (-1))
@@ -1301,45 +1388,48 @@ open_pipe(int fds[2])
 procinfo_t
 pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 {
-      throw_if_initialized(typeid(*this));
+      throw_if_initialized(typeid(*this), 2);
 
-      int        fds[2][2];
-      procinfo_t pid;
-
-      err_fd_ = get_err_handle();
+      int         fds[2][2];
+      procinfo_t  pid;
+      pid_t const this_id = ::getpid();
+      err_fd_             = get_err_handle();
 
       open_pipe(fds[0]);
       open_pipe(fds[1]);
 
+      assert(fds[0][0] >= 0);
+      assert(fds[0][1] >= 0);
+      assert(fds[1][0] >= 0);
+      assert(fds[1][1] >= 0);
+
       if ((pid = fork()) == 0) {
-            if (::dup2(fds[OUTPUT_PIPE][READ_FD], STDIN_FILENO) == (-1))
-                  err(1, "dup2() failed\n");
-            if (::dup2(fds[INPUT_PIPE][WRITE_FD], STDOUT_FILENO) == (-1))
-                  err(1, "dup2() failed\n");
+            if (::dup2(fds[INPUT_PIPE][READ_FD], STDIN_FILENO) == (-1))
+                  patricide(this_id, "dup2() failed");
+            if (::dup2(fds[OUTPUT_PIPE][WRITE_FD], STDOUT_FILENO) == (-1))
+                  patricide(this_id, "dup2() failed");
             if (err_fd_ > 2) {
                   if (::dup2(err_fd_, STDERR_FILENO) == (-1))
-                        err(1, "dup2() failed\n");
+                        patricide(this_id, "dup2() failed");
                   ::close(err_fd_);
             }
 
-            ::close(fds[INPUT_PIPE][READ_FD]);
-            ::close(fds[INPUT_PIPE][WRITE_FD]);
-            ::close(fds[OUTPUT_PIPE][READ_FD]);
-            ::close(fds[OUTPUT_PIPE][WRITE_FD]);
+            ::close(fds[0][0]); ::close(fds[0][1]);
+            ::close(fds[1][0]); ::close(fds[1][1]);
 
             if (::execvp(argv[0], argv) == (-1))
-                  err(1, "exec() failed\n");
+                  patricide(this_id, "execvp() failed");
       }
 
-      ::close(fds[INPUT_PIPE][READ_FD]);
-      ::close(fds[OUTPUT_PIPE][WRITE_FD]);
+      util::close_descriptor(fds[INPUT_PIPE][READ_FD]);
+      util::close_descriptor(fds[OUTPUT_PIPE][WRITE_FD]);
       if (err_fd_ > 2)
-            ::close(err_fd_);
+            util::close_descriptor(err_fd_);
 
       write_ = fds[INPUT_PIPE][WRITE_FD];
       read_  = fds[OUTPUT_PIPE][READ_FD];
 
-      set_initialized();
+      set_initialized(2);
       return pid;
 }
 
@@ -1358,18 +1448,21 @@ pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
 
+      // unsigned file_flags = ::fcntl(read_, F_GETFL);
+      // ::fcntl(read_, F_SETFL, file_flags & static_cast<unsigned>(~O_NONBLOCK));
+
       if (flags & MSG_WAITALL) {
             ssize_t n;
             do {
                   if (read_ == (-1)) [[unlikely]]
                         throw except::connection_closed();
                   n = ::read(read_, static_cast<char *>(buf) + total,
-                             static_cast<size_t>(nbytes - total));
+                             size_t(nbytes - total));
             } while (n != SSIZE_C(-1) && (total += n) < nbytes);
       } else {
             if (read_ == (-1)) [[unlikely]]
                   throw except::connection_closed();
-            total = ::read(read_, buf, static_cast<size_t>(nbytes));
+            total = ::read(read_, buf, size_t(nbytes));
       }
 
       return total;
@@ -1386,7 +1479,7 @@ pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int co
             if (write_ == (-1)) [[unlikely]]
                   throw except::connection_closed();
             n = ::write(write_, static_cast<char const *>(buf) + total,
-                        static_cast<size_t>(nbytes - total));
+                        size_t(nbytes - total));
       } while (n != SSIZE_C(-1) && (total += n) < nbytes);
 
       return total;
@@ -1412,19 +1505,19 @@ static socket_t
 open_new_inet_socket(sockaddr const *addr,
                      socklen_t const size,
                      int const       type,
-                     int const       queue    = 1,
+                     int const       queue    = 255,
                      int const       protocol = 0)
 {
       socket_t const listener = call_socket_listen(type, SOCK_STREAM, protocol);
-      if (static_cast<intptr_t>(listener) < 0)
+      if (intptr_t(listener) < 0) [[unlikely]]
             ERR(1, "socket()");
 
       int ret = ::bind(listener, addr, size);
-      if (ret == -1)
+      if (ret == -1) [[unlikely]]
             ERR(1, "bind()");
 
       ret = ::listen(listener, queue);
-      if (ret == (-1))
+      if (ret == (-1)) [[unlikely]]
             ERR(1, "listen()");
 
       /* We want to find out the port number. */
@@ -1439,7 +1532,7 @@ connect_to_inet_socket(sockaddr const *addr,
                        int const       protocol)
 {
       socket_t const connector = call_socket_connect(type, SOCK_STREAM, protocol);
-      if (static_cast<intptr_t>(connector) < 0)
+      if (intptr_t(connector) < 0)
             ERR(1, "socket()");
 
       int const ret = ::connect(connector, addr, size);
@@ -1454,6 +1547,16 @@ connect_to_inet_socket(sockaddr const *addr,
 /* Either */
 
 
+inet_any_socket_connection_impl::inet_any_socket_connection_impl() 
+{
+      addr_ = nullptr;
+}
+
+inet_any_socket_connection_impl::~inet_any_socket_connection_impl()
+{
+      ::free(this->addr_);  //NOLINT
+}
+
 void
 inet_any_socket_connection_impl::open()
 {
@@ -1462,9 +1565,16 @@ inet_any_socket_connection_impl::open()
 
       if (should_connect()) {
             socklen_t size = addr_length_;
-            acceptor_      = ::accept(listener_, addr_, &size);
-            if (static_cast<intptr_t>(acceptor_) < 0 || size != addr_length_)
+            acc_read_      = ::accept(listener_, addr_, &size);
+            if (intptr_t(acc_read_) < 0 || size != addr_length_)
                   ERR(1, "accept");
+            if (use_dual_sockets()) {
+                  acc_write_ = ::accept(listener_, addr_, &size);
+                  if (intptr_t(acc_write_) < 0 || size != addr_length_)
+                        ERR(1, "accept");
+            } else {
+                  acc_write_ = acc_read_;
+            }
       }
 
       set_initialized(1);
@@ -1476,10 +1586,12 @@ inet_any_socket_connection_impl::do_spawn_connection(size_t const argc, char **a
       throw_if_initialized(typeid(*this), 2);
       if (!check_initialized(1))
             open();
-      err_fd_   = get_err_handle();
 
-      AUTOC sock = get_connected_socket();
-      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
+      err_fd_   = get_err_handle();
+      AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      util::close_descriptor(con_read_);
+      util::close_descriptor(con_write_);
+
       set_initialized(2);
       return ret;
 }
@@ -1493,17 +1605,14 @@ inet_any_socket_connection_impl::open_new_socket()
 
             auto *addr        = ::util::xcalloc<sockaddr_in6>();
             addr->sin6_addr   = IN6ADDR_LOOPBACK_INIT;
-            addr->sin6_family = type_; // Default to ipv6 I guess
+            addr->sin6_family = type_;  // Default to ipv6 I guess
             addr->sin6_port   = 0;
             addr_             = reinterpret_cast<sockaddr *>(addr);
             addr_init_        = true;
       }
 
-      if (should_connect()) {
+      if (should_open_listener())
             listener_ = open_new_inet_socket(addr_, addr_length_, type_);
-            memset(addr_, 0, addr_length_);
-            lazy_getsockname(listener_, addr_, addr_length_);
-      }
 
       addr_init_ = true;
       return listener_;
@@ -1512,22 +1621,49 @@ inet_any_socket_connection_impl::open_new_socket()
 socket_t
 inet_any_socket_connection_impl::connect_to_socket()
 {
-      if (static_cast<intptr_t>(listener_) > 0) {
-            if (!addr_init_) {
-                  lazy_getsockname(listener_, addr_, addr_length_);
-                  type_      = 0;
+      if (intptr_t(listener_) > 0) {
+            if (!addr_init_)
                   addr_init_ = true;
-            }
             /* else { nothing to do, listener is open and addr_ is set up. } */
       } else if (should_open_listener()) {
             listener_ = open_new_socket();
       }
 
-      if (should_connect())
-            connector_ = connect_to_inet_socket(addr_, addr_length_, type_);
+      memset(addr_, 0, addr_length_);
+      lazy_getsockname(listener_, addr_, addr_length_);
 
-      addr_init_ = true;
-      return connector_;
+      if (addr_string_.empty()) {
+            char buf[128];
+            if (type_ == AF_INET) {
+                  auto *a = reinterpret_cast<sockaddr_in *>(addr_);
+                  inet_ntop(AF_INET, &a->sin_addr, buf, sizeof buf);
+                  addr_string_ = buf;
+            } else if (type_ == AF_INET6) {
+                  auto *a = reinterpret_cast<sockaddr_in6 *>(addr_);
+                  inet_ntop(AF_INET6, &a->sin6_addr, buf, sizeof buf);
+                  addr_string_ = buf;
+            } else {
+                  errx(1, "Invalid family %s", type_);
+            }
+      }
+
+      if (type_ == AF_INET) {
+            hport_ = ntohs(reinterpret_cast<sockaddr_in *>(addr_)->sin_port);
+      } else if (type_ == AF_INET6) {
+            hport_ = ntohs(reinterpret_cast<sockaddr_in6 *>(addr_)->sin6_port);
+      } else {
+            errx(1, "Invalid family %s", type_);
+      }
+
+      if (should_connect()) {
+            con_read_ = connect_to_inet_socket(addr_, addr_length_, type_);
+            if (use_dual_sockets())
+                  con_write_ = connect_to_inet_socket(addr_, addr_length_, type_);
+            else
+                  con_write_ = con_read_;
+      }
+
+      return con_read_;
 }
 
 
@@ -1537,9 +1673,10 @@ void inet_any_socket_connection_impl::assign_from_addrinfo(addrinfo const *info)
             free(addr_); //NOLINT
       type_        = info->ai_family;
       addr_length_ = static_cast<socklen_t>(info->ai_addrlen);
-      addr_        = ::util::xcalloc<sockaddr>(1, addr_length_);
+      addr_        = util::xcalloc<sockaddr>(1, addr_length_);
       memcpy(addr_, info->ai_addr, info->ai_addrlen);
       addr_init_ = true;
+      // set_initialized(1);
 }
 
 
@@ -1548,6 +1685,7 @@ int inet_any_socket_connection_impl::resolve(char const *server_name, char const
       auto *info = ::util::ipc::resolve_addr(server_name, port);
       if (!info)
             return (-1);
+      // addr_string_ = server_name;
       assign_from_addrinfo(info);
       freeaddrinfo(info);
       return 0;
@@ -1614,9 +1752,16 @@ inet_ipv4_socket_connection_impl::open()
 
       if (should_connect()) {
             socklen_t size = sizeof(addr_);
-            acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
-            if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+            acc_read_ = ::accept(listener_, (sockaddr *)&addr_, &size);
+            if (intptr_t(acc_read_) < 0 || size != sizeof(addr_))
                   ERR(1, "accept");
+            if (use_dual_sockets()) {
+                  acc_write_ = ::accept(listener_, (sockaddr *)&addr_, &size);
+                  if (intptr_t(acc_write_) < 0 || size != sizeof(addr_))
+                        ERR(1, "accept");
+            } else {
+                  acc_write_ = acc_read_;
+            }
       }
 
       set_initialized(1);
@@ -1628,9 +1773,12 @@ inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       throw_if_initialized(typeid(*this), 2);
       if (!check_initialized(1))
             open();
-      err_fd_   = get_err_handle();
-      AUTOC sock = get_connected_socket();
-      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
+
+      err_fd_    = get_err_handle();
+      AUTOC ret  = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      util::close_descriptor(con_read_);
+      util::close_descriptor(con_write_);
+
       set_initialized(2);
       return ret;
 }
@@ -1640,16 +1788,23 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 {
       if (!addr_init_) {
             memset(&addr_, 0, sizeof(addr_));
-            addr_.sin_addr.s_addr = UINT32_C(0x0100'007F); // 127.0.0.1
+            //addr_.sin_addr.s_addr = (0x0100'007F); // 127.0.0.1
+            addr_.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
             addr_.sin_family      = AF_INET;
             addr_.sin_port        = 0;
+            addr_string_          = "127.0.0.1";
       }
 
-      listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                        sizeof(addr_), AF_INET);
+      listener_  = open_new_inet_socket((sockaddr *)&addr_, sizeof(addr_), AF_INET);
       memset(&addr_, 0, sizeof(addr_));
-      lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_), sizeof(addr_));
+      lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
       addr_init_ = true;
+
+      if (addr_string_.empty()) {
+            char buf[128];
+            addr_string_ = inet_ntop(AF_INET, &addr_.sin_addr, buf, sizeof buf);
+      }
+      hport_ = ntohs(addr_.sin_port);
 
       return listener_;
 }
@@ -1657,10 +1812,9 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 socket_t
 inet_ipv4_socket_connection_impl::connect_to_socket()
 {
-      if (static_cast<intptr_t>(listener_) > 0) {
+      if (intptr_t(listener_) > 0) {
             if (!addr_init_) {
-                  lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_),
-                                   sizeof(addr_));
+                  lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
@@ -1668,10 +1822,17 @@ inet_ipv4_socket_connection_impl::connect_to_socket()
             listener_ = open_new_socket();
       }
 
-      if (should_connect())
-            connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
+      if (should_connect()) {
+            con_read_ = connect_to_inet_socket((sockaddr *)&addr_,
                                                 sizeof(addr_), AF_INET);
-      return connector_;
+            if (use_dual_sockets())
+                  con_write_ = connect_to_inet_socket((sockaddr *)&addr_,
+                                                       sizeof(addr_), AF_INET);
+            else
+                  con_write_ = con_read_;
+      }
+
+      return con_read_;
 }
 
 
@@ -1687,9 +1848,16 @@ inet_ipv6_socket_connection_impl::open()
 
       if (should_connect()) {
             socklen_t size = sizeof(addr_);
-            acceptor_ = ::accept(listener_, reinterpret_cast<sockaddr *>(&addr_), &size);
-            if (static_cast<intptr_t>(acceptor_) < 0 || size != sizeof(addr_))
+            acc_read_ = ::accept(listener_, (sockaddr *)&addr_, &size);
+            if (intptr_t(acc_read_) < 0 || size != sizeof(addr_))
                   ERR(1, "accept");
+            if (use_dual_sockets()) {
+                  acc_write_ = ::accept(listener_, (sockaddr *)&addr_, &size);
+                  if (intptr_t(acc_write_) < 0 || size != sizeof(addr_))
+                        ERR(1, "accept");
+            } else {
+                  acc_write_ = acc_read_;
+            }
       }
 
       set_initialized(1);
@@ -1701,9 +1869,12 @@ inet_ipv6_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       throw_if_initialized(typeid(*this), 2);
       if (!check_initialized(1))
             open();
+
       err_fd_   = get_err_handle();
-      AUTOC sock = get_connected_socket();
-      AUTOC ret = spawn_connection_common(sock, sock, err_fd_, argc, argv);
+      AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      util::close_descriptor(con_read_);
+      util::close_descriptor(con_write_);
+
       set_initialized(2);
       return ret;
 }
@@ -1716,27 +1887,31 @@ inet_ipv6_socket_connection_impl::open_new_socket()
             addr_.sin6_addr   = IN6ADDR_LOOPBACK_INIT;
             addr_.sin6_family = AF_INET6;  // Default to ipv6 I guess
             addr_.sin6_port   = 0;
+            addr_string_      = "[::1]";
       }
 
       if (should_open_listener()) {
-            listener_  = open_new_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                              sizeof(addr_), AF_INET6);
-            memset(&addr_, 0, sizeof(addr_));
-            lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_),
-                             sizeof(addr_));
+            listener_ = open_new_inet_socket((sockaddr *)&addr_,
+                                             sizeof(addr_), AF_INET6);
+            __builtin_memset(&addr_, 0, sizeof(addr_));
+            lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
       }
 
       addr_init_ = true;
+      if (addr_string_.empty()) {
+            char buf[128];
+            addr_string_ = inet_ntop(AF_INET6, &addr_.sin6_addr, buf, sizeof buf);
+      }
+      hport_ = ntohs(addr_.sin6_port);
       return listener_;
 }
 
 socket_t
 inet_ipv6_socket_connection_impl::connect_to_socket()
 {
-      if (static_cast<intptr_t>(listener_) > 0) {
+      if (intptr_t(listener_) > 0) {
             if (!addr_init_) {
-                  lazy_getsockname(listener_, reinterpret_cast<sockaddr *>(&addr_),
-                                   sizeof(addr_));
+                  lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
@@ -1744,9 +1919,13 @@ inet_ipv6_socket_connection_impl::connect_to_socket()
             listener_ = open_new_socket();
       }
 
-      connector_ = connect_to_inet_socket(reinterpret_cast<sockaddr *>(&addr_),
-                                          sizeof(addr_), AF_INET6);
-      return connector_;
+      con_read_ = connect_to_inet_socket((sockaddr *)&addr_, sizeof(addr_), AF_INET6);
+      if (use_dual_sockets())
+            con_write_ = connect_to_inet_socket((sockaddr *)&addr_, sizeof(addr_), AF_INET6);
+      else
+            con_write_ = con_read_;
+
+      return con_read_;
 }
 
 

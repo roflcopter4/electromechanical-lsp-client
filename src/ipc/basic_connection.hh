@@ -3,8 +3,8 @@
 #define HGUARD__IPC__BASIC_CONNECTION_HH_ //NOLINT
 
 #include "Common.hh"
-#include "ipc/connection_impl.hh"
 #include "ipc/basic_dialer.hh"
+#include "ipc/connection_impl.hh"
 
 inline namespace emlsp {
 namespace ipc {
@@ -27,7 +27,6 @@ class basic_connection : public DialerVariant
     public:
       using dialer_type          = DialerVariant;
       using connection_impl_type = typename dialer_type::connection_impl_type;
-      // FIXME This should probably be private
       using base_type::impl;
 
       basic_connection()           = default;
@@ -101,4 +100,5 @@ concept IsBasicConnectionVariant =
 /****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp
-#endif // base_connection.hh
+#endif
+// vim: ft=cpp

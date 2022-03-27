@@ -1,5 +1,5 @@
 #include "Common.hh"
-#include "ipc/lsp/static-data.hh"
+#include "ipc/rpc/lsp/static-data.hh"
 
 inline namespace emlsp {
 namespace ipc::lsp::data {

@@ -63,14 +63,16 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             } catch (...) {}
       }
 
-      DELETE_COPY_CTORS(spawn_dialer);
+      spawn_dialer(spawn_dialer const &) = delete;
+      spawn_dialer &operator=(spawn_dialer const &) = delete;
+      spawn_dialer &operator=(spawn_dialer &&) noexcept = default;
+
       spawn_dialer(spawn_dialer &&other) noexcept
           : pid_(std::move(other.pid_)),
             base_type(std::move(other))
       {
             other.pid_ = {};
       }
-      spawn_dialer &operator=(spawn_dialer &&other) noexcept = default;
 
       //--------------------------------------------------------------------------------
 
@@ -82,8 +84,14 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
       template <typename T>
       void set_stderr_fd(T const fd) { this->impl().set_stderr_fd(fd); }
 
-      void set_stderr_default() { this->impl().set_stderr_default(); }
-      void set_stderr_devnull() { this->impl().set_stderr_devnull(); }
+      void set_stderr_default()
+      {
+            this->impl().set_stderr_default();
+      }
+      void set_stderr_devnull()
+      {
+            this->impl().set_stderr_devnull();
+      }
       void set_stderr_filename(std::string const &fname)
       {
             this->impl().set_stderr_filename(fname);
@@ -132,15 +140,15 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
       }
 
-      /*
-       * To be used much like execl. All arguments must be `char const *`. Unlike execl,
-       * no null pointer is required as a sentinel.
-       */
 #ifdef __TAG_HIGHLIGHT__
       template <typename ...Types>
 #else
       template <util::concepts::StringLiteral ...Types>
 #endif
+      /*
+       * To be used much like execl. All arguments must be `char const *`.
+       * Unlike execl, no null pointer is required as a sentinel.
+       */
       procinfo_t spawn_connection_l(Types &&...args)
       {
             char const *const pack[] = {args..., nullptr};
@@ -189,26 +197,27 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 
 namespace dialers {
 
-using pipe             = ipc::spawn_dialer<ipc::detail::pipe_connection_impl>;
-using std_streams      = ipc::std_streams_dialer;
-using inet_ipv4_socket = ipc::spawn_dialer<ipc::detail::inet_ipv4_socket_connection_impl>;
-using inet_ipv6_socket = ipc::spawn_dialer<ipc::detail::inet_ipv6_socket_connection_impl>;
-using inet_socket      = ipc::spawn_dialer<ipc::detail::inet_any_socket_connection_impl>;
-using unix_socket      = ipc::spawn_dialer<ipc::detail::unix_socket_connection_impl>;
+using pipe             = spawn_dialer<detail::pipe_connection_impl>;
+using std_streams      = std_streams_dialer;
+using inet_ipv4_socket = spawn_dialer<detail::inet_ipv4_socket_connection_impl>;
+using inet_ipv6_socket = spawn_dialer<detail::inet_ipv6_socket_connection_impl>;
+using inet_socket      = spawn_dialer<detail::inet_any_socket_connection_impl>;
+using unix_socket      = spawn_dialer<detail::unix_socket_connection_impl>;
 #ifdef HAVE_SOCKETPAIR
-using socketpair       = ipc::spawn_dialer<ipc::detail::socketpair_connection_impl>;
+using socketpair       = spawn_dialer<detail::socketpair_connection_impl>;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
-using win32_named_pipe   = ipc::spawn_dialer<ipc::detail::win32_named_pipe_impl>;
-using win32_handle_pipe  = ipc::spawn_dialer<ipc::detail::pipe_handle_connection_impl>;
-using dual_unix_socket   = ipc::spawn_dialer<ipc::detail::dual_socket_connection_impl>;
+using win32_named_pipe   = spawn_dialer<detail::win32_named_pipe_impl>;
+using win32_handle_pipe  = spawn_dialer<detail::pipe_handle_connection_impl>;
+using dual_unix_socket   = spawn_dialer<detail::dual_socket_connection_impl>;
 #endif
 
 } // namespace dialers
 
 
 template <typename T>
-concept IsDialerVariant = std::derived_from<T, basic_dialer<typename T::connection_impl_type>>;
+concept IsDialerVariant =
+    std::derived_from<T, basic_dialer<typename T::connection_impl_type>>;
 
 
 /****************************************************************************************/
