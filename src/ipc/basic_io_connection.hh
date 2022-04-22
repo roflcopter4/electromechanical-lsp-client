@@ -14,8 +14,8 @@ namespace ipc {
 
 
 template <typename Connection, template <typename> class IOWrapper>
-      REQUIRES(IsBasicConnectionVariant<Connection>;
-               io::IsWrapperVariant<IOWrapper<Connection>>;)
+      REQUIRES (IsBasicConnectionVariant<Connection> &&
+                io::IsWrapperVariant<IOWrapper<Connection>>)
 class basic_io_connection : public Connection,
                             public IOWrapper<Connection>
 {

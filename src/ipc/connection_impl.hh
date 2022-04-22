@@ -14,11 +14,7 @@ inline namespace emlsp {
 namespace ipc::detail {
 /****************************************************************************************/
 
-#ifdef _WIN32
-using procinfo_t = PROCESS_INFORMATION;
-#else
-using procinfo_t = pid_t;
-#endif
+using emlsp::util::detail::procinfo_t;
 
 /****************************************************************************************/
 /* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -32,11 +28,9 @@ class base_connection_interface
 {
 #ifdef _WIN32
       using err_descriptor_type = HANDLE;
-      static constexpr HANDLE invalid_err_handle() { return INVALID_HANDLE_VALUE; }
       static constexpr char dev_null[] = "NUL";
 #else
       using err_descriptor_type = int;
-      static constexpr int invalid_err_handle() { return (-1); }
       static constexpr char dev_null[] = "/dev/null";
 #endif
 
@@ -52,7 +46,7 @@ class base_connection_interface
       };
 
       sink_type           err_sink_type_ = sink_type::DEFAULT;
-      err_descriptor_type err_fd_        = invalid_err_handle();
+      err_descriptor_type err_fd_        = err_descriptor_type(-1);
       std::string         err_fname_     = {};
       std::mutex          read_mtx_      = {};
       std::mutex          write_mtx_     = {};
@@ -81,7 +75,7 @@ class base_connection_interface
           , err_fname_ (std::move(other.err_fname_))
       {
             other.err_sink_type_ = sink_type::DEFAULT;
-            other.err_fd_        = invalid_err_handle();
+            other.err_fd_        = err_descriptor_type(-1);
       }
 
       using descriptor_type = DescriptorType;
@@ -115,10 +109,10 @@ class base_connection_interface
             if (err_sink_type_ == sink_type::FILENAME)
                   util::close_descriptor(err_fd_);
             err_sink_type_ = sink_type::FILENAME;
-            err_fname_         = fname;
+            err_fname_     = fname;
       }
 
-      void should_open_listener(bool const val) { open_listener_ = val; }
+      virtual void should_open_listener(bool const val) { open_listener_ = val; }
 
       virtual ssize_t read(void *buf, ssize_t const nbytes)
       {
@@ -143,7 +137,7 @@ class base_connection_interface
 
     protected:
       ND err_descriptor_type get_err_handle();
-      ND bool should_open_listener() const { return open_listener_; }
+      ND virtual bool should_open_listener() const { return open_listener_; }
       ND bool check_initialized(uint8_t const val) const { return initialized_ >= val; }
       void    set_initialized(uint8_t const val = 1) { initialized_ = val; }
 
@@ -156,6 +150,16 @@ class base_connection_interface
                                      "instance of class \"{}\", to level {}."),
                                   util::demangle(id), val)};
       }
+
+#ifdef _WIN32
+    private:
+      std::thread child_watcher_thread_{};
+
+    protected:
+      std::thread *get_child_watcher_thread() { return &child_watcher_thread_; }
+#else
+      std::thread *get_child_watcher_thread() { return nullptr; }
+#endif
 };
 
 
@@ -174,9 +178,11 @@ concept IsConnectionImplVariant =
 
 #ifdef _WIN32
 # define ERRNO WSAGetLastError()
+# define SETERRNO(v) WSASetLastError(v)
 # define ERR(n, t) util::win32::error_exit_wsa(L ## t)
 #else
 # define ERRNO errno
+# define SETERRNO(v) (errno = (v))
 # define ERR(n, t) err(n, t)
 #endif
 
@@ -239,15 +245,15 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
 
       //--------------------------------------------------------------------------------
 
-      ND bool should_open_listener()   const { return should_open_listener_; }
+      ND bool should_open_listener() const override { return should_open_listener_; }
+      void should_open_listener(bool val)  override { should_open_listener_ = val; }
+
       ND bool should_close_listnener() const { return should_close_listener_; }
       ND bool should_connect()         const { return should_connect_; }
       ND bool use_dual_sockets()       const { return use_dual_sockets_; }
-
-      void should_open_listener(bool val)   { should_open_listener_  = val; }
-      void should_close_listnener(bool val) { should_close_listener_ = val; }
-      void should_connect(bool val)         { should_connect_        = val; }
-      void use_dual_sockets(bool val)       { use_dual_sockets_      = val; }
+      void should_close_listnener(bool val)  { should_close_listener_ = val; }
+      void should_connect(bool val)          { should_connect_ = val; }
+      void use_dual_sockets(bool val)        { use_dual_sockets_ = val; }
 
       using base_type::read;
       using base_type::write;
@@ -263,7 +269,7 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
 
       ND socket_t fd() const noexcept final { return acc_read_; }
       ND socket_t listener() const { return listener_; }
-      ND socket_t peer() const { return con_read_; }
+      ND socket_t peer()     const { return con_read_; }
       ND socket_t acceptor() const { return acc_read_; }
 
       ND virtual AddrType &addr() & { return addr_; }
@@ -288,6 +294,7 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       using base_type = socket_connection_base_impl<sockaddr_un>;
 
       std::string path_;
+      bool        use_shim_ = false;
 
     public:
       unix_socket_connection_impl()           = default;
@@ -312,6 +319,18 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       void       set_listener(socket_t sock, sockaddr_un const &addr) override;
 
       ND auto const &path() const & { return path_; }
+
+#ifdef _WIN32
+      bool spawn_with_shim() const { return use_shim_; }
+      void spawn_with_shim(bool const val)
+      {
+            use_shim_ = val;
+            if (val) {
+                  use_dual_sockets(true);
+                  should_connect(false);
+            }
+      }
+#endif
 
     protected:
       socket_t open_new_socket()   override;
@@ -375,8 +394,8 @@ connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int proto
 
 
 template <typename AddrType>
-      REQUIRES (IsInetSockaddr<AddrType>;
-                std::same_as<AddrType, sockaddr *>;)
+      REQUIRES (IsInetSockaddr<AddrType> ||
+                std::same_as<AddrType, sockaddr *>)
 class inet_socket_connection_base_impl : public socket_connection_base_impl<AddrType>
 {
       using this_type = inet_socket_connection_base_impl;
@@ -548,10 +567,6 @@ class inet_ipv6_socket_connection_impl final
 };
 
 
-#undef ERR
-#undef ERRNO
-
-
 /****************************************************************************************/
 /* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
    ┃  ┌────────────────────────────────────────────────────────┐                      ┃
@@ -678,8 +693,8 @@ class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
       using base_type = base_connection_interface<HANDLE>;
       friend class fd_connection_impl;
 
-      HANDLE volatile read_  = reinterpret_cast<HANDLE>(-1);
-      HANDLE volatile write_ = reinterpret_cast<HANDLE>(-1);
+      HANDLE volatile read_  = INVALID_HANDLE_VALUE;
+      HANDLE volatile write_ = INVALID_HANDLE_VALUE;
 
     public:
       pipe_handle_connection_impl() = default;
@@ -797,7 +812,7 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
 
 #endif
 
-#ifdef _WIN32
+#if defined _WIN32 && false
 
 class dual_socket_connection_impl final : public base_connection_interface<SOCKET>
 {
@@ -827,8 +842,8 @@ class dual_socket_connection_impl final : public base_connection_interface<SOCKE
       void       close() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
-      ND descriptor_type fd()        const noexcept override { return read_; }
-      ND size_t          available() const noexcept override { return util::available_in_fd(read_); }
+      ND socket_t fd()        const noexcept override { return read_; }
+      ND size_t   available() const noexcept override { return util::available_in_fd(read_); }
 
       ND SOCKET read_fd()  const noexcept { return read_; }
       ND SOCKET write_fd() const noexcept { return write_; }
@@ -908,6 +923,12 @@ base_connection_interface<DescriptorType>::get_err_handle()
 /*--------------------------------------------------------------------------------------*/
 /* Out of line implementations for socket connections. */
 
+#ifdef _WIN32
+# define XLATE_ERR(e) WSA##e
+#else
+# define XLATE_ERR(e) e
+#endif
+
 inline void close_socket(socket_t &sock)
 {
       if (sock != static_cast<socket_t>(-1)) {
@@ -938,23 +959,24 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
       ssize_t n     = 0;
+      SETERRNO(0);
 
       if (flags & MSG_WAITALL) {
             // Put it in a loop just in case...
             flags &= ~MSG_WAITALL;
             do {
+                  if (acc_read_ == socket_t(-1)) [[unlikely]]
+                        throw except::connection_closed();
                   n = ::recv(acc_read_, static_cast<char *>(buf) + total,
                              sock_int_type(nbytes - total), flags);
-            } while ((n != (-1)) && (total += n) < ssize_t(nbytes));
+            } while ((n != (-1)) && (total += n) < nbytes);
       } else {
             for (;;) {
-                  // n = ::recv(acc_read_, static_cast<char *>(buf),
-                             // sock_int_type(nbytes), flags);
-                  errno = 0;
-                  n = 0;
-                  n = ::read(acc_read_, static_cast<char *>(buf),
-                             sock_int_type(nbytes));
-                  // psnip_dbg_assert(n > 0);
+                  if (acc_read_ == socket_t(-1)) [[unlikely]]
+                        throw except::connection_closed();
+                   n = ::recv(acc_read_, static_cast<char *>(buf),
+                              sock_int_type(nbytes), flags);
+                  //psnip_dbg_assert(n > 0);
                   if (n != 0)
                         break;
                   std::this_thread::sleep_for(10ms);
@@ -963,9 +985,15 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
       }
 
       if (n == (-1)) [[unlikely]] {
-            if (errno == EBADF)
+            auto const e = ERRNO;
+            if (e == XLATE_ERR(EBADF) //|| e == XLATE_ERR(ECONNRESET)
+                )
                   throw except::connection_closed();
-            err(1, "recv() failed");
+#ifdef _WIN32
+            util::win32::error_exit_explicit(L"recv() failed", e);
+#else
+            err(1, "send()");
+#endif
       }
 
       return total;
@@ -980,20 +1008,31 @@ socket_connection_base_impl<AddrType>::write(void    const *buf,
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
       ssize_t n;
+      SETERRNO(0);
 
       do {
             n = ::send(acc_write_, static_cast<char const *>(buf) + total,
                        sock_int_type(nbytes - total), flags);
-      } while (n != (-1) && (total += n) < ssize_t(nbytes));
+      } while (n != (-1) && (total += n) < nbytes);
 
       if (n == (-1)) [[unlikely]] {
-            if (errno == EBADF)
+            auto const e = ERRNO;
+            if (e == XLATE_ERR(EBADF) || e == XLATE_ERR(ECONNRESET))
                   throw except::connection_closed();
-            err(1, "send() failed");
+#ifdef _WIN32
+            util::win32::error_exit_explicit(L"send() failed", e);
+#else
+            err(1, "send()");
+#endif
       }
 
       return total;
 }
+
+
+#undef ERR
+#undef ERRNO
+#undef XLATE_ERR
 
 
 /****************************************************************************************/

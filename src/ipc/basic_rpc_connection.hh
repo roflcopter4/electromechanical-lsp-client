@@ -129,8 +129,8 @@ class transport_interface
 
 
 template <typename Connection, template <typename> class IOWrapper>
-      REQUIRES(IsBasicConnectionVariant<Connection>;
-               io::IsWrapperVariant<IOWrapper<Connection>>;)
+      REQUIRES (IsBasicConnectionVariant<Connection> &&
+                io::IsWrapperVariant<IOWrapper<Connection>>)
 class basic_rpc_connection : public basic_io_connection<Connection, IOWrapper>
 {
       using this_type = basic_rpc_connection<Connection, IOWrapper>;
@@ -138,13 +138,16 @@ class basic_rpc_connection : public basic_io_connection<Connection, IOWrapper>
 
       std::atomic_uint64_t request_id_ = 0;
 
+    protected:
+      bool want_close_ = false;
+
     public:
       using connection_type = Connection;
       using io_wrapper_type = IOWrapper<Connection>;
       using value_type      = typename io_wrapper_type::value_type;
 
-      basic_rpc_connection()          = default;
-      virtual ~basic_rpc_connection() = default;
+      basic_rpc_connection()           = default;
+      ~basic_rpc_connection() override = default;
 
       basic_rpc_connection(basic_rpc_connection const &)                = delete;
       basic_rpc_connection(basic_rpc_connection &&) noexcept            = default;

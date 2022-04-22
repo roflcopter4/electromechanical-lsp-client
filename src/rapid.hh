@@ -85,25 +85,29 @@ class rapid_doc
             cur_->AddMember(key, val, al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void add_member(StringRef &&key, T &val)
       {
             cur_->AddMember(key, rapidjson::Value(std::move(val)), al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void add_member(StringRef &&key, T &&val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES(NonStringRef<T>)
       void add_member(T &key, StringRef &&val)
       {
             cur_->AddMember(std::move(key), val, al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void add_member(T &&key, StringRef &&val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
@@ -132,13 +136,15 @@ class rapid_doc
             cur_->PushBack(val, al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES(NonStringRef<T>)
       void add_value(T &val)
       {
             cur_->PushBack(std::move(val), al_);
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void add_value(T &&val)
       {
             cur_->PushBack(val, al_);
@@ -152,7 +158,8 @@ class rapid_doc
             cur_ = &cur_->FindMember(key)->value;
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void set_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
@@ -174,7 +181,8 @@ class rapid_doc
             cur_ = &cur_->FindMember(key)->value;
       }
 
-      template <NonStringRef T>
+      template <typename T>
+            REQUIRES (NonStringRef<T>)
       void push_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);

@@ -11,7 +11,7 @@ namespace ipc {
 
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
 class basic_dialer
 {
       ConnectionImpl impl_;
@@ -19,12 +19,12 @@ class basic_dialer
     public:
       using connection_impl_type = ConnectionImpl;
 
-      basic_dialer() = default;
-      virtual ~basic_dialer() noexcept = default;
+      basic_dialer()          = default;
+      virtual ~basic_dialer() = default;
 
-      DEFAULT_COPY_CTORS(basic_dialer);
       basic_dialer &operator=(basic_dialer &&) noexcept = delete;
-
+      basic_dialer &operator=(basic_dialer const &)     = default;
+      basic_dialer(basic_dialer const &)                = default;
       basic_dialer(basic_dialer &&other) noexcept
             : impl_(std::move(other.impl_))
       {}
@@ -40,7 +40,7 @@ class basic_dialer
 
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>;)
+      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
 class spawn_dialer : public basic_dialer<ConnectionImpl>
 {
       using procinfo_t = detail::procinfo_t;
@@ -52,11 +52,14 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 
     private:
       procinfo_t pid_ = {};
+#ifdef _WIN32
+      std::unique_ptr<std::thread> process_watcher_ = nullptr;
+#endif
 
     public:
       spawn_dialer() = default;
 
-      ~spawn_dialer() noexcept override
+      ~spawn_dialer() override
       {
             try {
                   this->kill(true);
@@ -100,6 +103,11 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
       procinfo_t spawn_connection(size_t argc, char **argv)
       {
             pid_ = this->impl().do_spawn_connection(argc, argv);
+            start_process_watcher();
+#ifdef _WIN32
+            if (this->impl().spawn_with_shim())
+                  this->impl().accept()
+#endif
             return pid_;
       }
 
@@ -113,7 +121,7 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             char **p = argv;
             while (*p++)
                   ;
-            return spawn_connection(p - argv, argv);
+            return spawn_connection(util::ptr_diff(p, argv), argv);
       }
 
       procinfo_t spawn_connection(char const **const argv)
@@ -143,6 +151,13 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 #ifdef __TAG_HIGHLIGHT__
       template <typename ...Types>
 #else
+      /**
+       * \brief Spawn a process. This method is To be used much like execl. Unlike execl,
+       * no null pointer is required as a sentinel.
+       * \tparam Types Must be char const (&)[].
+       * \param args  All arguments must be string literals.
+       * \return Process id (either pid_t or PROCESS_INFORMATION).
+       */
       template <util::concepts::StringLiteral ...Types>
 #endif
       /*
@@ -161,10 +176,28 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
     private:
       void kill(bool const in_destructor)
       {
+#ifdef _WIN32
+            if (process_watcher_) {
+                  TerminateThread(process_watcher_->native_handle(), 0);
+                  process_watcher_->join();
+            }
+#endif
             util::kill_process(pid_);
             this->impl().close();
             if (!in_destructor)
                   pid_ = {};
+      }
+
+      void start_process_watcher()
+      {
+#ifdef _WIN32
+            process_watcher_ = std::make_unique<std::thread>([this]() {
+                  WaitForSingleObject(pid_.hProcess, INFINITE);
+                  DWORD ret;
+                  GetExitCodeProcess(pid_.hProcess, &ret);
+                  util::eprint(FC("Process exited with status {}\n"), ret);
+            });
+#endif
       }
 };
 
@@ -209,7 +242,9 @@ using socketpair       = spawn_dialer<detail::socketpair_connection_impl>;
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using win32_named_pipe   = spawn_dialer<detail::win32_named_pipe_impl>;
 using win32_handle_pipe  = spawn_dialer<detail::pipe_handle_connection_impl>;
+#if 0
 using dual_unix_socket   = spawn_dialer<detail::dual_socket_connection_impl>;
+#endif
 #endif
 
 } // namespace dialers

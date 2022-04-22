@@ -5,8 +5,11 @@
 #include "util/myerr.h"
 #include "util/util.hh"
 
-#ifdef HAVE_EXECINFO_H
+
+#if defined HAVE_EXECINFO_H
 # include <execinfo.h>
+#elif defined _WIN32
+# include <dbghelp.h>
 #endif
 
 #if defined HAVE_MKDTEMP
@@ -34,7 +37,6 @@
             throw std::runtime_error(s_);                                              \
       } while (0)
 #endif
-#define IF if constexpr
 
 /****************************************************************************************/
 
@@ -122,12 +124,13 @@ class cleanup_c
             signal(SIGTERM,  cleanup_sighandler);
 #else
             struct sigaction act{};
-            act.sa_handler = cleanup_sighandler; //NOLINT
+            act.sa_handler = cleanup_sighandler;
             act.sa_flags   = static_cast<int>(SA_NOCLDWAIT | SA_RESETHAND | SA_RESTART);
             sigaction(SIGABRT, &act, nullptr);
             sigaction(SIGFPE,  &act, nullptr);
             sigaction(SIGILL,  &act, nullptr);
             sigaction(SIGINT,  &act, nullptr);
+            sigaction(SIGQUIT, &act, nullptr);
             sigaction(SIGSEGV, &act, nullptr);
             sigaction(SIGTERM, &act, nullptr);
 #endif
@@ -200,7 +203,7 @@ get_temporary_filename(char const *prefix, char const *suffix)
 {
       char        buf[PATH_MAX + 1];
       auto const &dir_str  = cleanup.get_path().string();
-      auto const  size     = braindead_tempname(buf, dir_str.c_str(), prefix, suffix);
+      auto const  size     = ::braindead_tempname(buf, dir_str.c_str(), prefix, suffix);
       auto        ret      = std::filesystem::path{std::string_view{buf, size}};
 
       cleanup.push(ret);
@@ -226,7 +229,8 @@ open_new_unix_socket(char const *const path)
 
 
 #ifdef _WIN32
-      auto const connection_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+      //auto const connection_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, WSA_FLAG_OVERLAPPED);
+      auto const connection_sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
       if (connection_sock == (SOCKET)SOCKET_ERROR)
             FATAL_ERROR("socket");
 #else
@@ -253,7 +257,8 @@ socket_t
 connect_to_unix_socket(sockaddr_un const *addr)
 {
 #ifdef _WIN32
-      auto const data_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, 0);
+      //auto const data_sock = ::WSASocketW(AF_UNIX, SOCK_STREAM, 0, nullptr, 0, 0);
+      auto const data_sock = ::socket(AF_UNIX, SOCK_STREAM, 0);
       if (data_sock == (SOCKET)SOCKET_ERROR)
             FATAL_ERROR("socket");
 #else
@@ -326,7 +331,11 @@ resolve_addr(char const *server, char const *port)
 
       rc = getaddrinfo(server, port, &hints, &res);
       if (rc != 0) {
+#ifdef _WIN32
+            warnx("Host not found for ('%s') and ('%s') --> %ls", server, port, gai_strerror(rc));
+#else
             warnx("Host not found for ('%s') and ('%s') --> %s", server, port, gai_strerror(rc));
+#endif
             if (rc == EAI_FAIL)
                   ERR(1, "getaddrinfo() failed");
       }
@@ -362,7 +371,7 @@ cxx_random_engine_get_random_val_32(void)
 extern "C" uint64_t
 cxx_random_engine_get_random_val_64(void)
 {
-      static std::ranlux48 rand_engine_64(
+      static std::mt19937_64 rand_engine_64(
           (static_cast<uint64_t>(cxx_random_device_get_random_val()) << 32) |
           static_cast<uint64_t>(cxx_random_device_get_random_val()));
 
@@ -371,42 +380,54 @@ cxx_random_engine_get_random_val_64(void)
 
 /****************************************************************************************/
 
-#ifdef _WIN32
-#  include <strsafe.h>
-namespace win32
+
+static void add_backtrace(std::string &buf);
+
+
+void  //NOLINTNEXTLINE(cert-dcl50-cpp)
+my_err_throw(UNUSED int const     status,
+             bool const           print_err,
+             char const *restrict file,
+             int  const           line,
+             char const *restrict func,
+             _Notnull_ _Printf_format_string_
+             char const *restrict format,
+             ...)
 {
+      int const e = errno;
+      std::string buf;
+      buf.reserve(2048);
 
-NORETURN void
-error_exit_explicit(wchar_t const *msg, DWORD const errval)
-{
-      void *msg_buf = nullptr;
+      buf += fmt::format(FC("\033[1;31m" "Exception at:"
+                            "\033[0m"    " `{}:{}' - func `{}':\n  "
+                            "\033[1;32m" "what():"
+                            "\033[0m"    " '"),
+                         file, line, func);
 
-      // Retrieve the system error message for the last-error code
-      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                         FORMAT_MESSAGE_IGNORE_INSERTS,
-                     nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                     reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
+      {
+            va_list ap;
+            char c_buf[2048];
+            va_start(ap, format);
+            vsnprintf(c_buf, sizeof c_buf, format, ap);
+            va_end(ap);
 
-      void *lp_display_buf = LocalAlloc(
-          LMEM_ZEROINIT,
-          (wcslen(msg) + wcslen(static_cast<LPWSTR>(msg_buf)) + 40) * sizeof(WCHAR));
-      assert(lp_display_buf != nullptr);
+            buf += c_buf;
+      }
 
-      StringCchPrintfW(static_cast<STRSAFE_LPWSTR>(lp_display_buf),
-                       LocalSize(lp_display_buf) / sizeof(WCHAR),
-                       L"%s failed with error %d: %s",
-                       msg, errval, static_cast<LPWSTR>(msg_buf));
+      char        errbuf[128];
+      char const *errstr = ::my_strerror(e, errbuf, 128);
 
-      MessageBoxW(nullptr, static_cast<LPCWSTR>(lp_display_buf), L"Error", MB_OK);
-      LocalFree(msg_buf);
-      LocalFree(lp_display_buf);
-      ExitProcess(errval);
+      if (print_err)
+            buf += fmt::format(FMT_COMPILE("`  (errno {}: `{}')"), e, errstr);
+
+      add_backtrace(buf);
+
+      throw std::runtime_error(buf);
 }
 
-} // namespace win32
-#endif
 
 #ifdef HAVE_EXECINFO_H
+
 static void
 add_backtrace(std::string &buf)
 {
@@ -465,80 +486,75 @@ add_backtrace(std::string &buf)
 #elif defined _WIN32
 
 static void
-add_backtrace(std::string const &buf)
+add_backtrace(std::string &buf)
 {
-      unsigned int   i;
-      void          *stack[256];
-      unsigned short frames;
-      SYMBOL_INFO   *symbol;
-      HANDLE         process = GetCurrentProcess();
-
+      void        *stack[256];
+      HANDLE const process = ::GetCurrentProcess();
       SymInitialize(process, NULL, TRUE);
 
-      frames = CaptureStackBackTrace(0, 256, stack, NULL);
-      symbol = calloc(sizeof(SYMBOL_INFO) + (SIZE_C(1024) * sizeof(char)), 1LLU);
+      unsigned short frames = ::CaptureStackBackTrace(0, 256, stack, NULL);
+      SYMBOL_INFO   *symbol = xmalloc<SYMBOL_INFO>(sizeof(SYMBOL_INFO) + (SIZE_C(1024) * sizeof(char)));
+      memset(symbol, 0, sizeof(SYMBOL_INFO));
+
       symbol->MaxNameLen   = 1023;
       symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
-
       buf.append("\n\n\033[1mBACKTRACE:\033[0m"sv);
 
-      for (i = 0; i < frames; i++) {
-            SymFromAddr(process, (DWORD64)(stack[i]), 0, symbol);
+      for (unsigned i = 0; i < frames; i++) {
+            ::SymFromAddr(process, reinterpret_cast<DWORD64>(stack[i]), nullptr, symbol);
             buf += fmt::format(FC("\n{:3}: {}  -  [0x{:08X}]"),
                                frames - i - 1,
                                symbol->Name,
                                symbol->Address);
       }
 
-      free(symbol);
+      ::free(symbol);
 }
 
 #else
+
 static void add_backtrace(std::string const &) {}
+
 #endif
 
-void  //NOLINTNEXTLINE(cert-dcl50-cpp)
-my_err_throw(UNUSED int const     status,
-             bool const           print_err,
-             char const *restrict file,
-             int  const           line,
-             char const *restrict func,
-             _Notnull_ _Printf_format_string_
-             char const *restrict format,
-             ...)
+
+#ifdef _WIN32
+# include <strsafe.h>
+namespace win32 {
+
+NORETURN void
+error_exit_explicit(wchar_t const *msg, DWORD const errval)
 {
-      int const e = errno;
-      std::string buf;
-      buf.reserve(2048);
+      void *msg_buf = nullptr;
 
-      buf += fmt::format(FC("\033[1;31m" "Exception at:"
-                            "\033[0m"    " `{}:{}' - func `{}':\n  "
-                            "\033[1;32m" "what():"
-                            "\033[0m"    " '"),
-                         file, line, func);
+      // Retrieve the system error message for the last-error code
+      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                         FORMAT_MESSAGE_IGNORE_INSERTS,
+                     nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                     reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
 
-      {
-            va_list ap;
-            char c_buf[2048];
-            va_start(ap, format);
-            vsnprintf(c_buf, sizeof c_buf, format, ap);
-            va_end(ap);
+      void *lp_display_buf = LocalAlloc(
+          LMEM_ZEROINIT,
+          (wcslen(msg) + wcslen(static_cast<LPWSTR>(msg_buf)) + 40) * sizeof(WCHAR));
+      assert(lp_display_buf != nullptr);
 
-            buf += c_buf;
-      }
+      StringCchPrintfW(static_cast<STRSAFE_LPWSTR>(lp_display_buf),
+                       LocalSize(lp_display_buf) / sizeof(WCHAR),
+                       L"%s failed with error %d: %s",
+                       msg, errval, static_cast<LPWSTR>(msg_buf));
 
-      char        errbuf[128];
-      char const *errstr = ::my_strerror(e, errbuf, 128);
-
-      if (print_err)
-            buf += fmt::format(FMT_COMPILE("`  (errno {}: `{}')"), e, errstr);
-
-      add_backtrace(buf);
-
-      throw std::runtime_error(buf);
+      MessageBoxW(nullptr, static_cast<LPCWSTR>(lp_display_buf), L"Error", MB_OK);
+      LocalFree(msg_buf);
+      LocalFree(lp_display_buf);
+      ExitProcess(errval);
 }
 
+} // namespace win32
+#endif
+
+
 /****************************************************************************************/
+
 
 std::string
 slurp_file(char const *fname, bool const binary)
@@ -551,12 +567,17 @@ slurp_file(char const *fname, bool const binary)
 
       ::fstat(::fileno(fp), &st);
       buf.reserve(static_cast<size_t>(st.st_size) + SIZE_C(1));
+
       auto const nread = ::fread(buf.data(), 1, static_cast<size_t>(st.st_size), fp);
       if ((binary && nread != static_cast<size_t>(st.st_size)) || static_cast<ssize_t>(nread) <= 0)
             err(1, "fread()");
-      ::fclose(fp);
 
+      ::fclose(fp);
       resize_string_hack(buf, nread);
+
+      /* This really does have to be buf.data()[...] because the NUL obviously has
+       * to go after the end of the string, which would throw an exception if done
+       * via operator[]. */
       buf.data()[nread] = '\0';  //NOLINT(*-simplify-subscript-expr)
       return buf;
 }
@@ -602,9 +623,9 @@ close_descriptor(SOCKET &fd)
 void
 close_descriptor(intptr_t &fd)
 {
-      if (static_cast<intptr_t>(fd) > 0)
+      if (fd > 0)
             closesocket(fd);
-      fd = static_cast<SOCKET>(-1);
+      fd = -1;
 }
 
 size_t
@@ -619,15 +640,9 @@ available_in_fd(SOCKET const s) noexcept(false)
 }
 
 size_t
-available_in_fd(HANDLE const s) noexcept(false)
+available_in_fd(UNUSED HANDLE const s) noexcept(false)
 {
-      throw util::except::not_implemented("Don't know how to do this.");
-      //unsigned long value  = 0;
-      //int const     result = ::ioctl(s, detail::ioctl_size_available, &value);
-      //if (result < 0)
-      //      err(1, "ioctlsocket(TIOCINQ aka FIONREAD)");
-
-      //return value;
+      throw except::not_implemented("Don't know how to do this.");
 }
 #else
 
@@ -654,7 +669,7 @@ close_descriptor(int &fd)
 
 #define WIN32_ERRMSG "The ioctl() function is not available for non-sockets on this platform."
 
-#if defined _WIN32 && !defined __clang__
+#if defined(_WIN32) && (!defined(__clang__) || (defined(__clang__) && __clang_major__ >= 14))
 __attribute__((__error__(WIN32_ERRMSG)))
 #endif
 size_t available_in_fd(UNUSED int const s) noexcept(false)
@@ -701,7 +716,7 @@ kill_process(detail::procinfo_t const &pid)
             ::CloseHandle(pid.hThread);
             ::CloseHandle(pid.hProcess);
       }
-#else // not _WIN32
+#else
       if (pid) {
             ::kill(pid, SIGTERM);
             ::waitpid(pid, &status, 0);

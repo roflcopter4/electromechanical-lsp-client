@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Common.hh"
 #include "util/util.hh"
 #include <unistr.h>
@@ -8,6 +8,8 @@
 #else
 #  include <uchar.h>
 #endif
+
+/* "unistr.h" defines these extremely irritating macros. */
 #undef true
 #undef false
 #undef uint8_t
@@ -18,27 +20,25 @@
 #undef int32_t
 #undef int64_t
 
-#if __has_builtin(__builtin_strlen)
+//#define FORCE_USE_OF_LIBUNISTRING 1
+//#define EMLSP_UNISTRING_NO_WCSLEN
+//#define EMLSP_UNISTRING_NO_STRLEN
+
+#if defined(_MSC_VER) || __has_builtin(__builtin_strlen)
 #  define _STRLEN(str) __builtin_strlen(str)
 #else
 #  define _STRLEN(str) ::strlen(str)
 #endif
-#if __has_builtin(__builtin_wcslen)
+#if defined(_MSC_VER) || __has_builtin(__builtin_wcslen)
 #  define _WCSLEN(str) __builtin_wcslen(str)
 #else
 #  define _WCSLEN(str) ::wcslen(str)
 #endif
 
-//#define FORCE_USE_OF_LIBUNISTRING 1
-//#define EMLSP_UNISTRING_NO_WCSLEN
-//#define EMLSP_UNISTRING_NO_STRLEN
-
 #if WCHAR_MAX == INT32_MAX || WCHAR_MAX == UINT32_MAX
 #  define WCHAR_IS_U32
-#  define SIZEOF_WCHAR (32)
 #elif WCHAR_MAX == INT16_MAX || WCHAR_MAX == UINT16_MAX
 #  define WCHAR_IS_U16
-#  define SIZEOF_WCHAR (16)
 #else
 # error "Impossible?!"
 #endif
@@ -70,8 +70,8 @@ ND inline size_t strlen(wchar_t const *str) { return _WCSLEN(str); }
 #endif
 
 #if defined WCHAR_IS_U16 && !defined EMLSP_UNISTRING_NO_WCSLEN
-ND inline size_t strlen(uint16_t const *str) { return wcslen(reinterpret_cast<wchar_t const *>(str)); }
-ND inline size_t strlen(char16_t const *str) { return wcslen(reinterpret_cast<wchar_t const *>(str)); }
+ND inline size_t strlen(uint16_t const *str) { return _WCSLEN(reinterpret_cast<wchar_t const *>(str)); }
+ND inline size_t strlen(char16_t const *str) { return _WCSLEN(reinterpret_cast<wchar_t const *>(str)); }
 ND inline size_t strlen(uint32_t const *str) { return ::u32_strlen(str); }
 ND inline size_t strlen(char32_t const *str) { return ::u32_strlen(reinterpret_cast<uint32_t const *>(str)); }
 #elif defined WCHAR_IS_U32 && !defined EMLSP_UNISTRING_NO_WCSLEN
@@ -105,63 +105,64 @@ ND inline size_t strlen(char32_t const *str) { return ::u32_strlen(reinterpret_c
  */
 template <typename To, typename From>
 ND std::basic_string<To>
-charconv(From const *orig, size_t length) noexcept(false);
+recode(From const *orig, size_t length)  noexcept(false);
 
 
 template <typename To, typename From, size_t N>
+      REQUIRES (concepts::IsIntegral<From>)
 ND std::basic_string<To>
-charconv(From const (&orig)[N]) noexcept(false)
+recode(From const (&orig)[N])  noexcept(false)
 {
-      return charconv<To, From>(orig, N - SIZE_C(1));
+      return recode<To, From>(orig, N - SIZE_C(1));
 }
 
 
 template <typename To, class Container>
-      REQUIRES(concepts::IsIntegral<typename Container::value_type>;)
+      REQUIRES (concepts::IsIntegral<typename Container::value_type>)
 ND std::basic_string<To>
-charconv(Container const &orig) noexcept(false)
+recode(Container const &orig)  noexcept(false)
 {
-      return charconv<To, typename Container::value_type>(orig.data(), orig.size());
+      return recode<To, typename Container::value_type>(orig.data(), orig.size());
 }
 
 
 template <typename To, typename From>
-      REQUIRES(concepts::IsPointer<From>;)
+      REQUIRES (concepts::IsTrivial<From> && concepts::IsPointer<From>)
 ND std::basic_string<To>
-charconv(From const orig) noexcept(false)
+recode(From const orig)  noexcept(false)
 {
-      return charconv<To, From>(orig, strlen(orig));
+      return recode<To, From>(orig, strlen(orig));
 }
 
 
 /*--------------------------------------------------------------------------------------*/
 
 
-template <> ND std::string    charconv<char,     wchar_t>  (wchar_t  const *, size_t) noexcept(false);
-template <> ND std::wstring   charconv<wchar_t,  char>     (char     const *, size_t) noexcept(false);
-template <> ND std::string    charconv<char,     char8_t>  (char8_t  const *, size_t) noexcept(false);
-template <> ND std::string    charconv<char,     char16_t> (char16_t const *, size_t) noexcept(false);
-template <> ND std::string    charconv<char,     char32_t> (char32_t const *, size_t) noexcept(false);
-template <> ND std::u8string  charconv<char8_t,  char>     (char     const *, size_t) noexcept(false);
-template <> ND std::u16string charconv<char16_t, char>     (char     const *, size_t) noexcept(false);
-template <> ND std::u32string charconv<char32_t, char>     (char     const *, size_t) noexcept(false);
-template <> ND std::wstring   charconv<wchar_t,  char8_t>  (char8_t  const *, size_t) noexcept(false);
-template <> ND std::wstring   charconv<wchar_t,  char16_t> (char16_t const *, size_t) noexcept(false);
-template <> ND std::wstring   charconv<wchar_t,  char32_t> (char32_t const *, size_t) noexcept(false);
-template <> ND std::u8string  charconv<char8_t,  wchar_t>  (wchar_t  const *, size_t) noexcept(false);
-template <> ND std::u16string charconv<char16_t, wchar_t>  (wchar_t  const *, size_t) noexcept(false);
-template <> ND std::u32string charconv<char32_t, wchar_t>  (wchar_t  const *, size_t) noexcept(false);
-template <> ND std::u16string charconv<char16_t, char8_t>  (char8_t  const *, size_t) noexcept(false);
-template <> ND std::u32string charconv<char32_t, char8_t>  (char8_t  const *, size_t) noexcept(false);
-template <> ND std::u8string  charconv<char8_t,  char16_t> (char16_t const *, size_t) noexcept(false);
-template <> ND std::u32string charconv<char32_t, char16_t> (char16_t const *, size_t) noexcept(false);
-template <> ND std::u16string charconv<char16_t, char32_t> (char32_t const *, size_t) noexcept(false);
-template <> ND std::u8string  charconv<char8_t,  char32_t> (char32_t const *, size_t) noexcept(false);
-template <> ND std::string    charconv<char,     char>     (char     const *, size_t) noexcept(false);
-template <> ND std::wstring   charconv<wchar_t,  wchar_t>  (wchar_t  const *, size_t) noexcept(false);
-template <> ND std::u8string  charconv<char8_t,  char8_t>  (char8_t  const *, size_t) noexcept(false);
-template <> ND std::u16string charconv<char16_t, char16_t> (char16_t const *, size_t) noexcept(false);
-template <> ND std::u32string charconv<char32_t, char32_t> (char32_t const *, size_t) noexcept(false);
+template <> ND std::string    recode<char,     wchar_t>  (wchar_t  const *, size_t) noexcept(false);
+template <> ND std::wstring   recode<wchar_t,  char>     (char     const *, size_t) noexcept(false);
+template <> ND std::string    recode<char,     char8_t>  (char8_t  const *, size_t) noexcept(false);
+template <> ND std::string    recode<char,     char16_t> (char16_t const *, size_t) noexcept(false);
+template <> ND std::string    recode<char,     char32_t> (char32_t const *, size_t) noexcept(false);
+template <> ND std::u8string  recode<char8_t,  char>     (char     const *, size_t) noexcept(false);
+template <> ND std::u16string recode<char16_t, char>     (char     const *, size_t) noexcept(false);
+template <> ND std::u32string recode<char32_t, char>     (char     const *, size_t) noexcept(false);
+template <> ND std::wstring   recode<wchar_t,  char8_t>  (char8_t  const *, size_t) noexcept(false);
+template <> ND std::wstring   recode<wchar_t,  char16_t> (char16_t const *, size_t) noexcept(false);
+template <> ND std::wstring   recode<wchar_t,  char32_t> (char32_t const *, size_t) noexcept(false);
+template <> ND std::u8string  recode<char8_t,  wchar_t>  (wchar_t  const *, size_t) noexcept(false);
+template <> ND std::u16string recode<char16_t, wchar_t>  (wchar_t  const *, size_t) noexcept(false);
+template <> ND std::u32string recode<char32_t, wchar_t>  (wchar_t  const *, size_t) noexcept(false);
+template <> ND std::u16string recode<char16_t, char8_t>  (char8_t  const *, size_t) noexcept(false);
+template <> ND std::u32string recode<char32_t, char8_t>  (char8_t  const *, size_t) noexcept(false);
+template <> ND std::u8string  recode<char8_t,  char16_t> (char16_t const *, size_t) noexcept(false);
+template <> ND std::u32string recode<char32_t, char16_t> (char16_t const *, size_t) noexcept(false);
+template <> ND std::u16string recode<char16_t, char32_t> (char32_t const *, size_t) noexcept(false);
+template <> ND std::u8string  recode<char8_t,  char32_t> (char32_t const *, size_t) noexcept(false);
+template <> ND std::string    recode<char,     char>     (char     const *, size_t) noexcept(false);
+template <> ND std::wstring   recode<wchar_t,  wchar_t>  (wchar_t  const *, size_t) noexcept(false);
+template <> ND std::u8string  recode<char8_t,  char8_t>  (char8_t  const *, size_t) noexcept(false);
+template <> ND std::u16string recode<char16_t, char16_t> (char16_t const *, size_t) noexcept(false);
+template <> ND std::u32string recode<char32_t, char32_t> (char32_t const *, size_t) noexcept(false);
 
 
 /*--------------------------------------------------------------------------------------*/
@@ -169,11 +170,11 @@ template <> ND std::u32string charconv<char32_t, char32_t> (char32_t const *, si
 
 namespace impl {
 
-ND inline size_t mbsnlen (char const *str, size_t size) { return ::u8_mbsnlen(reinterpret_cast<uint8_t const *>(str), size); }
+ND inline size_t mbsnlen (char     const *str, size_t size) { return ::u8_mbsnlen(reinterpret_cast<uint8_t const *>(str), size); }
 #if defined WCHAR_IS_U16
-ND inline size_t mbsnlen(wchar_t const *str, size_t size) { return ::u16_mbsnlen(reinterpret_cast<uint16_t const *>(str), size); }
+ND inline size_t mbsnlen (wchar_t  const *str, size_t size) { return ::u16_mbsnlen(reinterpret_cast<uint16_t const *>(str), size); }
 #elif defined WCHAR_IS_U32
-ND inline size_t mbsnlen(wchar_t const *str, size_t size) { return ::u32_mbsnlen(reinterpret_cast<uint32_t const *>(str), size); }
+ND inline size_t mbsnlen (wchar_t  const *str, size_t size) { return ::u32_mbsnlen(reinterpret_cast<uint32_t const *>(str), size); }
 #endif
 
 ND inline size_t mbsnlen (uint8_t  const *str, size_t size) { return ::u8_mbsnlen(str, size); }
@@ -187,7 +188,7 @@ ND inline size_t mbsnlen (char32_t const *str, size_t size) { return ::u32_mbsnl
 
 
 template <typename To, class Container>
-      REQUIRES(concepts::IsIntegral<typename Container::value_type>;)
+      REQUIRES (concepts::IsIntegral<typename Container::value_type>)
 ND size_t
 mbsnlen(Container const &orig) noexcept(false)
 {
@@ -201,7 +202,7 @@ ND size_t mbsnlen(T const (&str)[N])
 }
 
 template <typename T>
-      REQUIRES(util::concepts::IsPointer<T>;)
+      REQUIRES (util::concepts::IsPointer<T>)
 ND size_t mbsnlen(T const str)
 {
       return impl::mbsnlen(str, strlen(str));
@@ -218,12 +219,18 @@ ND size_t mbsnlen(T const *str, size_t const size)
 /*--------------------------------------------------------------------------------------*/
 
 
-using unistring::charconv;
+using unistring::recode;
 using unistring::strlen;
 using unistring::mbsnlen;
 
 #undef _STRLEN
 #undef _WCSLEN
+#if defined WCHAR_IS_U16
+#  undef WCHAR_IS_U16
+#elif defined WCHAR_IS_U32
+#  undef WCHAR_IS_U32
+#endif
+
 
 /****************************************************************************************/
 } // namespace util

@@ -15,7 +15,7 @@ namespace ipc {
  * TODO: Documentation of some kind...
  */
 template <typename DialerVariant>
-      REQUIRES (IsDialerVariant<DialerVariant>;)
+      REQUIRES (IsDialerVariant<DialerVariant>)
 class basic_connection : public DialerVariant
 {
       using cint    = int const;
@@ -35,8 +35,8 @@ class basic_connection : public DialerVariant
       DELETE_COPY_CTORS(basic_connection);
       DEFAULT_MOVE_CTORS(basic_connection);
 
-      static auto new_unique() { return std::unique_ptr<this_type>(new this_type); }
-      static auto new_shared() { return std::unique_ptr<this_type>(new this_type); }
+      //static auto new_unique() { return std::unique_ptr<this_type>(new this_type); }
+      //static auto new_shared() { return std::unique_ptr<this_type>(new this_type); }
 
       //--------------------------------------------------------------------------------
 
@@ -77,12 +77,14 @@ using inet_socket      = basic_connection<dialers::inet_socket>;
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using win32_named_pipe  = basic_connection<dialers::win32_named_pipe>;
 using win32_handle_pipe = basic_connection<dialers::win32_handle_pipe>;
+#if 0
 using dual_unix_socket  = basic_connection<dialers::dual_unix_socket>;
+#endif
 #endif
 #ifdef HAVE_SOCKETPAIR
 using socketpair       = basic_connection<dialers::socketpair>;
 using Default          = socketpair;
-#elif !defined _WIN32
+#elif !defined _WIN32 || true
 using Default          = unix_socket;
 #else
 using Default          = dual_unix_socket;

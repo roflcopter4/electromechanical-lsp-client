@@ -12,7 +12,7 @@ namespace util {
 
 
 template <typename V>
-      REQUIRES (concepts::IsNotAnyPointer<V>;)
+      REQUIRES (concepts::IsNotAnyPointer<V>)
 void resize_vector_hack(V &vec, size_t const new_size)
 {
       struct nothing {
@@ -54,7 +54,7 @@ class my_char_traits : public std::char_traits<Elem>
 } // namespace impl
 
 template <typename T>
-      REQUIRES (concepts::IsNotAnyPointer<T>;)
+      REQUIRES (concepts::IsNotAnyPointer<T>)
 void resize_string_hack(T &str, size_t const new_size)
 {
       using alloc_traits = std::allocator_traits<typename T::allocator_type>;

@@ -12,7 +12,7 @@ namespace ipc::rpc {
 
 
 template <typename Connection>
-      REQUIRES(ipc::IsBasicConnectionVariant<Connection>;)
+      REQUIRES (ipc::IsBasicConnectionVariant<Connection>)
 class neovim_conection final
     : public ipc::basic_rpc_connection<Connection,
                                        ipc::io::msgpack_wrapper>
@@ -41,14 +41,8 @@ class neovim_conection final
 
       //-------------------------------------------------------------------------------
 
-      static auto new_unique()
-      {
-            return std::unique_ptr<this_type>(new this_type());
-      }
-      static auto new_shared()
-      {
-            return std::shared_ptr<this_type>(new this_type());
-      }
+      static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
+      static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
 
       //-------------------------------------------------------------------------------
 
@@ -74,13 +68,11 @@ class neovim_conection final
 
       ND uv_poll_cb  poll_callback()  const override { return poll_callback_wrapper; }
       ND uv_timer_cb timer_callback() const override { return timer_callback_wrapper; }
-
-      ND void *data() override
-      {
-            return this;
-      }
+      ND void        *data()                override { return this; }
 
     private:
+      using base_type::want_close_;
+
       static void timer_callback_wrapper(uv_timer_t *timer)
       {
             this_type *self = static_cast<this_type *>(timer->data);
@@ -93,24 +85,39 @@ class neovim_conection final
             self->true_poll_callback(handle, status, events);
       }
 
-      bool want_close_ = false;
-
       void
       true_poll_callback(UNUSED uv_poll_t *handle, UNUSED int status, UNUSED int events)
       {
+            static std::mutex mtx_{};
+            auto lock = std::lock_guard(mtx_);
+
             if (events & UV_DISCONNECT) {
+            disconnect:
                   uv_loop_t *base = handle->loop;
 
-                  util::eprint(FC("Got disconnect signal, status {}\n"), status);
-                  fflush(stderr);
-                  // uv_poll_stop(handle);
-                  // want_close_ = true;
+                  //util::eprint(
+                  //    FC("({}): Got disconnect signal, status {}, for fd {}, within "
+                  //       "{}\n"),
+                  //    this->raw_descriptor(), status, handle->u.fd,
+                  //    util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
+
+                  uv_poll_stop(handle);
                   auto *stopper = static_cast<std::function<void()> *>(base->data);
                   (*stopper)();
             } else if (events & UV_READABLE) {
-                  msgpack::object_handle objhand = read_object();
-                  // auto implicit = objhand->convert();
-                  // util::eprint(FC("Got type {}\n"), typeid(implicit).name());
+                  //util::eprint(
+                  //    FC("({}): Descriptor {} is readable from within {}\n"),
+                  //    this->raw_descriptor(), handle->peer_socket,
+                  //    util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
+
+                  msgpack::object_handle objhand;
+
+                  try {
+                        objhand = read_object();
+                  } catch (ipc::except::connection_closed &) {
+                        //goto disconnect;
+                        return;
+                  }
 
                   util::mpack::dumper(objhand.get(), std::cerr);
             } else {
@@ -139,15 +146,11 @@ class neovim_conection final
       */
       }
 
-
       void
-      true_timer_callback(uv_timer_t *timer)
+      true_timer_callback(UNUSED uv_timer_t *timer)
       {
-            uv_timer_stop(timer);
-
-            // if (want_close_ && last_handle_) {
-            //       uv_poll_stop(last_handle_);
-            // }
+            // if (want_close_)
+            //       uv_timer_stop(timer);
       }
 };
 

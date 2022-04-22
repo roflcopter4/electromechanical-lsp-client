@@ -9,8 +9,8 @@
 #ifdef DEBUG
 # define _LIBCPP_DEBUG_LEVEL 2
 # define _GLIBCXX_ASSERTIONS 1
-# define _GLIBCXX_PARALLEL 1
-# define _GLIBCXX_PARALLEL_ASSERTIONS 1
+// # define _GLIBCXX_PARALLEL 1
+// # define _GLIBCXX_PARALLEL_ASSERTIONS 1
 # undef NDEBUG
 #else
 // # error "wtf?"
@@ -140,9 +140,10 @@
 #include <fmt/ranges.h>
 #include <fmt/xchar.h>
 
-
-#include "rapid.hh"
+#include "util/macros.h"
+#include "util/types.h"
 #include "util/util.hh"
+#include "rapid.hh"
 
 
 #include <msgpack.hpp>

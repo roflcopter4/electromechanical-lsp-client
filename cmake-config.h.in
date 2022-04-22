@@ -29,15 +29,16 @@
 
 #cmakedefine HAVE_AFUNIX_H
 #cmakedefine HAVE_EXECINFO_H
-#cmakedefine HAVE_STDATOMIC_H
 #cmakedefine HAVE_THREADS_H
-#cmakedefine HAVE_UNISTD_H
 
 #if defined DEBUG && defined NDEBUG
 #  undef NDEBUG
 #endif
 #if !defined NDEBUG && !defined DEBUG
 #  define DEBUG 1
+#endif
+#ifdef DEBUG
+#  define _DEBUG 1
 #endif
 
 #define MAIN_PROJECT_NAME           "@CMAKE_PROJECT_NAME@"
@@ -87,10 +88,16 @@
 #if defined _WIN32 || defined _WIN64
 #  define WIN32_LEAN_AND_MEAN 1
 #  define NOMINMAX 1
-#elif defined __linux__   || defined __bsd__  || defined bsd  || \
-      defined __FreeBSD__ || defined __unix__ || defined unix
+#elif defined __linux__   || defined __bsdi__   || defined __FreeBSD__   || \
+      defined __OpenBSD__ || defined __NetBSD__ || defined __DragonFly__ || \
+      defined __CYGWIN__  || defined __unix__   || defined unix
+   /* Nothing */
+#elif defined __APPLE__ && defined __MACH__
+#  error "OSX/MacOS is totally untested. Remove this error message from `cmake-config.h.in' and re-run cmake to compile. CAVEAT EMPTOR"
+#elif defined __MSDOS__ || defined __DOS__
+#  error "lol"
 #else
-# error "What the hell kind of OS are you even using?"
+#  error "What the hell kind of OS are you even using?"
 #endif
 
 #endif // config.h

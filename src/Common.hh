@@ -64,19 +64,18 @@ using namespace fmt::literals;
 #  include <unistd.h>
 # endif
 
+#include "util/types.h"
+#include "util/macros.h"
+
 #endif // defined __cplusplus
 
 /*--------------------------------------------------------------------------------------*/
 
-#include "util/macros.h"
-
-#include "util/types.h"
-
-#ifdef __cplusplus
-# include "util/util.hh"
-#else
-/* nothing */
-#endif
+//#ifdef __cplusplus
+//# include "util/util.hh"
+//#else
+///* nothing */
+//#endif
 
 #include "util/initializer_hack.h"
 #include "util/myerr.h"

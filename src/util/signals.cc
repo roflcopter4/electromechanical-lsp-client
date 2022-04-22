@@ -116,13 +116,13 @@ std::map<int, signal_to_string_t> signal_to_string = {
 
 
 std::string_view const &
-get_signal_name(int signum)
+get_signal_name(int const signum)
 {
       return signal_to_string[signum].name;
 }
 
 std::string_view const &
-get_signal_explanation(int signum)
+get_signal_explanation(int const signum)
 {
       return signal_to_string[signum].explanation;
 }

@@ -27,6 +27,7 @@ else()
         list(APPEND CMAKE_REQUIRED_DEFINITIONS -D__MINGW__ -D__USE_MINGW_ANSI_STDIO=1)
     endif()
 endif()
+
 add_definitions(${CMAKE_REQUIRED_DEFINITIONS})
 
 if (NOT CMAKE_BUILD_TYPE)
@@ -93,9 +94,9 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 
 find_package (Threads REQUIRED)
 find_package (Boost REQUIRED)
-find_package (Libevent CONFIG)
+find_package (Libevent CONFIG QUIET)
 if (NOT LIBEVENT_FOUND)
-    find_package(Libevent)
+    find_package(Libevent QUIET)
 endif()
 
 list (APPEND CMAKE_PREFIX_PATH
@@ -106,18 +107,22 @@ list (APPEND CMAKE_PREFIX_PATH
 find_package (Clang CONFIG REQUIRED)
 find_package (LLVM CONFIG REQUIRED)
 
-if (NOT MSVC AND NOT LIBEVENT_FOUND)
-    pkg_check_modules(LIBEVENT_BASE libevent REQUIRED)
-    pkg_check_modules(LIBEVENT_CORE libevent_core REQUIRED)
-    pkg_check_modules(LIBEVENT_EXTRA libevent_extra REQUIRED)
-    pkg_check_modules(LIBEVENT_PTHREADS libevent_pthreads)
+if (NOT LIBEVENT_FOUND)
+    if (MSVC)
+        message(FATAL_ERROR "libevent2 not found")
+    else()
+        pkg_check_modules(LIBEVENT_BASE libevent REQUIRED)
+        pkg_check_modules(LIBEVENT_CORE libevent_core REQUIRED)
+        pkg_check_modules(LIBEVENT_EXTRA libevent_extra REQUIRED)
+        pkg_check_modules(LIBEVENT_PTHREADS libevent_pthreads)
 
-    set (LIBEVENT_LIBRARIES
-        ${LIBEVENT_BASE_LDFLAGS} ${LIBEVENT_CORE_LDFLAGS}
-        ${LIBEVENT_EXTRA_LDFLAGS} ${LIBEVENT_PTHREADS_LDFLAGS})
-    set (LIBEVENT_INCLUDE_DIRS
-        ${LIBEVENT_BASE_CFLAGS_I} ${LIBEVENT_CORE_CFLAGS_I}
-        ${LIBEVENT_EXTRA_CFLAGS_I} ${LIBEVENT_PTHREADS_CFLAGS_I})
+        set (LIBEVENT_LIBRARIES
+            ${LIBEVENT_BASE_LDFLAGS} ${LIBEVENT_CORE_LDFLAGS}
+            ${LIBEVENT_EXTRA_LDFLAGS} ${LIBEVENT_PTHREADS_LDFLAGS})
+        set (LIBEVENT_INCLUDE_DIRS
+            ${LIBEVENT_BASE_CFLAGS_I} ${LIBEVENT_CORE_CFLAGS_I}
+            ${LIBEVENT_EXTRA_CFLAGS_I} ${LIBEVENT_PTHREADS_CFLAGS_I})
+    endif()
 endif()
 
 if (MSVC)
@@ -144,34 +149,43 @@ endif()
 ###############################################################################
 # Symbol and header checks
 
-CHECK_SYMBOL_EXISTS (err            "err.h"        HAVE_ERR)
-CHECK_SYMBOL_EXISTS (posix_spawnp   "spawn.h"      HAVE_POSIX_SPAWNP)
-CHECK_SYMBOL_EXISTS (asprintf       "stdio.h"      HAVE_ASPRINTF)
-CHECK_SYMBOL_EXISTS (dprintf        "stdio.h"      HAVE_DPRINTF)
-CHECK_SYMBOL_EXISTS (mkdtemp        "stdlib.h"     HAVE_MKDTEMP)
-CHECK_SYMBOL_EXISTS (mkostemps      "stdlib.h"     HAVE_MKOSTEMPS)
-CHECK_SYMBOL_EXISTS (mkstemp        "stdlib.h"     HAVE_MKSTEMP)
-CHECK_SYMBOL_EXISTS (strerror_r     "string.h"     HAVE_STRERROR_R)
-CHECK_SYMBOL_EXISTS (strerror_s     "string.h"     HAVE_STRERROR_S)
-CHECK_SYMBOL_EXISTS (stricmp        "string.h"     HAVE_STRICMP)
-CHECK_SYMBOL_EXISTS (strlcat        "string.h"     HAVE_STRLCAT)
-CHECK_SYMBOL_EXISTS (strlcpy        "string.h"     HAVE_STRLCPY)
-CHECK_SYMBOL_EXISTS (strcpy_s       "string.h"     HAVE_STRCPY_S)
-CHECK_SYMBOL_EXISTS (strsep         "string.h"     HAVE_STRSEP)
-CHECK_SYMBOL_EXISTS (strcasecmp     "strings.h"    HAVE_STRCASECMP)
-CHECK_SYMBOL_EXISTS (socketpair     "sys/socket.h" HAVE_SOCKETPAIR)
-CHECK_SYMBOL_EXISTS (clock_gettime  "time.h"       HAVE_CLOCK_GETTIME)
-CHECK_SYMBOL_EXISTS (nanosleep      "time.h"       HAVE_NANOSLEEP)
-CHECK_SYMBOL_EXISTS (timespec_get   "time.h"       HAVE_TIMESPEC_GET)
-CHECK_SYMBOL_EXISTS (fork           "unistd.h"     HAVE_FORK)
-CHECK_SYMBOL_EXISTS (pause          "unistd.h"     HAVE_PAUSE)
-CHECK_SYMBOL_EXISTS (pipe2          "unistd.h"     HAVE_PIPE2)
+set (CHK_SYM_INC
+     "stddef.h" "stdint.h" "stdio.h" "stdlib.h" "string.h" "time.h")
 
-CHECK_INCLUDE_FILE ("afunix.h"      HAVE_AFUNIX_H)
-CHECK_INCLUDE_FILE ("execinfo.h"    HAVE_EXECINFO_H)
-CHECK_INCLUDE_FILE ("stdatomic.h"   HAVE_STDATOMIC_H)
-CHECK_INCLUDE_FILE ("threads.h"     HAVE_THREADS_H)
-CHECK_INCLUDE_FILE ("unistd.h"      HAVE_UNISTD_H)
+if (WIN32)
+    set (CHK_SYM_INC ${CHK_SYM_INC}
+         "WinSock2.h" "Windows.h" "process.h" "io.h" "strsafe.h")
+elseif (UNIX)
+    set (CHK_SYM_INC ${CHK_SYM_INC}
+         "sys/socket.h" "unistd.h" "spawn.h" "strings.h")
+endif()
+
+check_symbol_exists (err            "${CHK_SYM_INC}"  HAVE_ERR)
+check_symbol_exists (posix_spawnp   "${CHK_SYM_INC}"  HAVE_POSIX_SPAWNP)
+check_symbol_exists (asprintf       "${CHK_SYM_INC}"  HAVE_ASPRINTF)
+check_symbol_exists (dprintf        "${CHK_SYM_INC}"  HAVE_DPRINTF)
+check_symbol_exists (mkdtemp        "${CHK_SYM_INC}"  HAVE_MKDTEMP)
+check_symbol_exists (mkostemps      "${CHK_SYM_INC}"  HAVE_MKOSTEMPS)
+check_symbol_exists (mkstemp        "${CHK_SYM_INC}"  HAVE_MKSTEMP)
+check_symbol_exists (strerror_r     "${CHK_SYM_INC}"  HAVE_STRERROR_R)
+check_symbol_exists (strerror_s     "${CHK_SYM_INC}"  HAVE_STRERROR_S)
+check_symbol_exists (stricmp        "${CHK_SYM_INC}"  HAVE_STRICMP)
+check_symbol_exists (strlcat        "${CHK_SYM_INC}"  HAVE_STRLCAT)
+check_symbol_exists (strlcpy        "${CHK_SYM_INC}"  HAVE_STRLCPY)
+check_symbol_exists (strcpy_s       "${CHK_SYM_INC}"  HAVE_STRCPY_S)
+check_symbol_exists (strsep         "${CHK_SYM_INC}"  HAVE_STRSEP)
+check_symbol_exists (strcasecmp     "${CHK_SYM_INC}"  HAVE_STRCASECMP)
+check_symbol_exists (socketpair     "${CHK_SYM_INC}"  HAVE_SOCKETPAIR)
+check_symbol_exists (clock_gettime  "${CHK_SYM_INC}"  HAVE_CLOCK_GETTIME)
+check_symbol_exists (nanosleep      "${CHK_SYM_INC}"  HAVE_NANOSLEEP)
+check_symbol_exists (timespec_get   "${CHK_SYM_INC}"  HAVE_TIMESPEC_GET)
+check_symbol_exists (fork           "${CHK_SYM_INC}"  HAVE_FORK)
+check_symbol_exists (pause          "${CHK_SYM_INC}"  HAVE_PAUSE)
+check_symbol_exists (pipe2          "${CHK_SYM_INC}"  HAVE_PIPE2)
+
+check_include_file ("afunix.h"      HAVE_AFUNIX_H)
+check_include_file ("execinfo.h"    HAVE_EXECINFO_H)
+check_include_file ("threads.h"     HAVE_THREADS_H)
 
 if (NOT HAVE_SOCKETPAIR)
     CHECK_SYMBOL_EXISTS (socketpair "socket.h" HAVE_SOCKETPAIR)
@@ -198,6 +212,7 @@ set (C_ONLY_WARNS
         -Werror=int-conversion
         -Werror=pointer-to-int-cast
 )
+
 
 if (NOT BUILD_DIST)
     set (MARCH_SETTING -march=native)
@@ -247,9 +262,6 @@ else()
 endif()
 
 
-##########################################################################################
-# Per compiler config. Probably mostly temporary?
-
 #-----------------------------------------------------------------------------------------
 #-- CLANG --
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -263,6 +275,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         -Wno-shorten-64-to-32
         -Wno-ctad-maybe-unsupported
         -Wno-missing-prototypes
+        -fsanitize=address,undefined
     )
     set (WARNS ${WARNS}
          -Wno-gnu -Wno-gnu-zero-variadic-macro-arguments
@@ -271,8 +284,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     )
 
     set (_debug_flags 
-        -g -gdwarf-3
-        # -fstandalone-debug
+        -g -gdwarf-2
     )
 
     if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
@@ -317,10 +329,11 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         if (MINGW OR WIN32)
             set (LTO_LINK_STR ${LTO_STR})
         else()
-            set (LTO_LINK_STR ${LTO_STR} -Wl,--lto-whole-program-visibility -Wl,--lto-O1)
+            set (LTO_LINK_STR ${LTO_STR} -Wl,--lto-O1 -Wl,--lto-whole-program-visibility)
         endif()
     endif()
 
+    #------------------------------------------------------------------------------------
     if (WIN32 OR MINGW OR MSYS)
         if (FALSE)
             set (BASE ${BASE} -fansi-escape-codes -target x86_64-w64-windows -fc++-abi=microsoft)
@@ -340,10 +353,11 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
             )
         endif()
 
+    #------------------------------------------------------------------------------------
     else() # NOT WIN32
 
-        set (CLANG_STDLIB -stdlib=libc++)
-        # set (CLANG_STDLIB -stdlib=libstdc++)
+        # set (CLANG_STDLIB -stdlib=libc++)
+        set (CLANG_STDLIB -stdlib=libstdc++)
         string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                 -fuse-ld=lld
                 # -rtlib=libgcc
@@ -356,6 +370,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
                 ${LTO_LINK_STR}
         )
     endif()
+    #------------------------------------------------------------------------------------
 
     set (__EXTRA_C_CXX_RELEASE_FLAGS -fslp-vectorize)
 
@@ -386,7 +401,7 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
          -Wsuggest-attribute=cold -Wsuggest-attribute=malloc
          -Wattributes -fdiagnostics-show-option
     )
-    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5 -fopenmp)
+    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5)
     set (LTO_STR "-flto -fuse-linker-plugin")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frtti -std=gnu++20")
 
@@ -463,72 +478,18 @@ endif()
 #####################################################################################################
 
 
-set(CMAKE_SKIP_BUILD_RPATH FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-
-### Sources
-### SEARCHFORME
-add_executable(lsp-thing
-    "src/main.cc"
-    "src/sigh.cc"
-    "src/clang.cc"
-    "src/tagged-union.cc"
-    "src/finally.cc"
-
-    "src/msgpack/dumper.cc"
-    "src/util/signals.cc"
-    
-    "src/ipc/connection_impl.cc"
-    "src/ipc/rpc/lsp/static-data.cc"
-
-    # "src/libevent.cc"
-    # "src/dothemsg.cc"
-
-    "src/util/charconv.cc"
-    "src/util/charconv.hh"
-
-    "src/util/c_util.c"
-    "src/util/err.c"
-    "src/util/tmpfile.c"
-    "src/util/demangle.cc"
-    "src/util/util.cc"
-
-    "src/util/formatters.hh"
-
-    # Include headers to make using MSVC less infuriatingly tedious.
-    "src/Common.hh"
-    "src/pch.hh"
-    "src/rapid.hh"
-    "src/ipc/basic_connection.hh"
-    "src/ipc/basic_dialer.hh"
-    "src/ipc/basic_io_wrapper.hh"
-    "src/ipc/basic_io_connection.hh"
-    "src/ipc/basic_rpc_connection.hh"
-    "src/ipc/connection_impl.hh"
-    "src/ipc/totality.hh"
-    "src/ipc/rpc/lsp/static-data.hh"
-    "src/util/concepts.hh"
-    "src/util/exceptions.hh"
-    "src/util/util.hh"
-    "src/util/c_util.h"
-    "src/util/initializer_hack.h"
-    "src/util/macros.h"
-    "src/util/myerr.h"
-    "src/util/hackish_templates.hh"
-
-    "${CMAKE_CURRENT_BINARY_DIR}/config.h"
-)
+add_subdirectory(src)
 
 #if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
-if (TRUE OR ((NOT MINGW) AND (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
-   target_precompile_headers(lsp-thing
-       PRIVATE
-       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
-   )
-endif()
+#if (TRUE OR ((NOT MINGW) AND (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
+#   target_precompile_headers(lsp-thing
+#       PRIVATE
+#       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
+#   )
+#endif()
 
-#####################################################################################################
+
+#----------------------------------------------------------------------------------------------------
 # Extra flags, includes
 
 list(JOIN GLib_PKG_CFLAGS " " _glib_cflags )
@@ -545,6 +506,7 @@ target_include_directories(lsp-thing AFTER PRIVATE
              ${LIBEVENT_INCLUDE_DIRS}
              ${LIBUV_INCLUDE_DIRS}
 )
+
 
 #####################################################################################################
 ## Linking ##
@@ -583,6 +545,9 @@ if (MSVC)
         "${_WIN32_VCPKG_LIB_PATH}/iconv.lib"
         "${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
         PThreads4W::PThreads4W
+        libevent::core
+        libevent::extra
+        libevent::openssl
         "D:/Program Files (x86)/Visual Leak Detector/lib/Win64/vld.lib"
     )
 else() # NOT MSVC
@@ -599,6 +564,7 @@ else() # NOT MSVC
         ${GLib_LIBRARIES}
         ${LIBUV_LIBRARIES}
         ${UNISTRING_LIBRARY}
+        ${LIBEVENT_LIBRARIES}
     )
 endif()
 
@@ -620,10 +586,10 @@ target_link_libraries(lsp-thing
 
 target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
-    ${LIBEVENT_LIBRARIES}
     Threads::Threads
     Boost::boost
     -ltbb
+    -lomp
 )
 
 #----------------------------------------------------------------------------------------------------
@@ -652,5 +618,5 @@ if (USE_JEMALLOC)
 endif()
 
 if (WIN32)
-    target_link_libraries(lsp-thing ws2_32.lib)
+    target_link_libraries(lsp-thing WS2_32.lib)
 endif()

@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 #ifndef HGUARD__UTIL__UTIL_HH_
-#define HGUARD__UTIL__UTIL_HH_ //NOLINT
+#define HGUARD__UTIL__UTIL_HH_  //NOLINT
 /*--------------------------------------------------------------------------------------*/
 
 #include "Common.hh"
@@ -12,19 +12,24 @@
 
 #include "hackish_templates.hh"
 
-#include "util/charconv.hh"
+#include "util/recode.hh"
 
 inline namespace emlsp {
 namespace util {
 /****************************************************************************************/
 
-extern std::filesystem::path get_temporary_directory(char const *prefix = nullptr);
-extern std::filesystem::path get_temporary_filename(char const *prefix = nullptr, char const *suffix = nullptr);
+namespace hacks {
+typedef std::filesystem::path path;
+typedef std::string_view      sview;
+} // namespace hacks
+
+extern hacks::path get_temporary_directory(char const *prefix = nullptr);
+extern hacks::path get_temporary_filename(char const *prefix = nullptr, char const *suffix = nullptr);
 
 extern std::string slurp_file(char const *fname, bool binary = false);
-inline std::string slurp_file(std::string const &fname, bool const binary = false)           { return slurp_file(fname.c_str(), binary); }
-inline std::string slurp_file(std::string_view const &fname, bool const binary = false)      { return slurp_file(fname.data(), binary); }
-inline std::string slurp_file(std::filesystem::path const &fname, bool const binary = false) { return slurp_file(fname.string().c_str(), binary); }
+inline std::string slurp_file(std::string const &fname, bool binary = false)  { return slurp_file(fname.c_str(), binary); }
+inline std::string slurp_file(hacks::path const &fname, bool binary = false)  { return slurp_file(fname.string().c_str(), binary); }
+inline std::string slurp_file(hacks::sview const &fname, bool binary = false) { return slurp_file(fname.data(), binary); }
 
 ND extern std::string char_repr(char ch);
 ND extern std::string my_strerror(errno_t errval);
@@ -36,6 +41,17 @@ ND extern std::string demangle(std::type_info const &id);
 
 /* I wouldn't normally check the return of malloc & friends, but MSVC loudly complains
  * about possible null pointers. So I'll make an exception. Damn it Microsoft. */
+template <typename T>
+ND __forceinline T *
+xmalloc(size_t const size = sizeof(T)) noexcept(false)
+{
+      //NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
+      void *ret = malloc(size);
+      if (ret == nullptr) [[unlikely]]
+            throw std::runtime_error("Out of memory.");
+      return static_cast<T *>(ret);
+}
+
 template <typename T>
 ND __forceinline T *
 xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(false)
@@ -69,17 +85,23 @@ void      close_descriptor(HANDLE &fd);
 void      close_descriptor(SOCKET &fd);
 ND size_t available_in_fd(SOCKET s) noexcept(false);
 ND size_t available_in_fd(HANDLE s) noexcept(false);
+# if !defined(__clang__) || (defined(__clang__) && __clang_major__ >= 14)
+__attribute__((__error__(WIN32_ERRMSG)))
+ND size_t available_in_fd(int s) noexcept(false);
+# endif
+#else
+ND size_t available_in_fd(int s) noexcept(false);
 #endif
 
-void      close_descriptor(int &fd);
-void      close_descriptor(intptr_t &fd);
-ND size_t available_in_fd(int s) noexcept(false);
-
-int kill_process(detail::procinfo_t const &pid);
+extern void close_descriptor(int &fd);
+extern void close_descriptor(intptr_t &fd);
+extern int  kill_process(detail::procinfo_t const &pid);
 
 /*--------------------------------------------------------------------------------------*/
 
+#ifndef _WIN32
 inline int putenv(char const *str) { return ::putenv(const_cast<char *>(str)); }
+#endif
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -104,13 +126,12 @@ strlcpy(_Notnull_ char                  (&dst)[N],
 {
 #if defined HAVE_STRLCPY
       return ::strlcpy(dst, src, N);
-#elif defined HAVE_STRCPY_S && 0
+#elif defined HAVE_STRCPY_S && 0  // Apparently strcpy_s doesn't work like strlcpy
       return strcpy_s(dst, src);
 #else
       return ::emlsp_strlcpy(dst, src, N);
 #endif
 }
-
 
 template <typename T>
 ND __attribute__((__const__, __artificial__, __nonnull__))
@@ -125,6 +146,9 @@ template <typename ...Types>
 void eprint(Types &&...args)
 {
       fmt::print(stderr, args...);
+      fflush(stderr);
+      std::cerr.flush();
+      std::wcerr.flush();
 }
 
 /*--------------------------------------------------------------------------------------*/
@@ -162,7 +186,9 @@ NORETURN inline void error_exit_errno(std::wstring const &msg) { error_exit_expl
 } // namespace emlsp
 
 
-using emlsp::util::putenv;
+#ifndef _WIN32
+using emlsp::util::putenv;  //NOLINT(google-global-names-in-headers)
+#endif
 
 
 /****************************************************************************************/

@@ -10,12 +10,12 @@ namespace ipc::io {
 /****************************************************************************************/
 
 
-template <typename ConnectionType, typename Packer, typename Unpacker>
-      REQUIRES(IsBasicConnectionVariant<ConnectionType>;)
+template <typename Connection, typename Packer, typename Unpacker>
+      REQUIRES (IsBasicConnectionVariant<Connection>)
 class basic_wrapper
 {
       using this_type       = basic_wrapper;
-      using connection_type = ConnectionType;
+      using connection_type = Connection;
       using packer_type     = Packer;
       using unpacker_type   = Unpacker;
       using value_type      = typename packer_type::value_type;
@@ -68,7 +68,8 @@ class basic_wrapper
                   return *this;
             }
 
-            DELETE_COPY_CTORS(packer_container);
+            packer_container(packer_container const &)            = delete;
+            packer_container &operator=(packer_container const &) = delete;
       };
 
     /*----------------------------------------------------------------------------------*/
@@ -80,7 +81,7 @@ class basic_wrapper
                         if (auto *ret = obj.get_packer())
                               return packer_container{ret};
                   }
-                  auto lock = std::unique_lock<std::mutex>{packing_mtx_};
+                  auto lock = std::unique_lock{packing_mtx_};
                   packing_cond_.wait_for(lock, 5ms);
             }
       }
@@ -168,8 +169,11 @@ class msgpack_packer
 
       explicit msgpack_packer(std::condition_variable &cond) : cond_(cond) {}
       ~msgpack_packer() = default;
-      DELETE_MOVE_CTORS(msgpack_packer);
-      DELETE_COPY_CTORS(msgpack_packer);
+
+      msgpack_packer(msgpack_packer const &)                = delete;
+      msgpack_packer(msgpack_packer &&) noexcept            = delete;
+      msgpack_packer &operator=(msgpack_packer const &)     = delete;
+      msgpack_packer &operator=(msgpack_packer &&) noexcept = delete;
 
       buffer_type     vbuf = {};
       marshaller_type pk   = {vbuf};
@@ -178,18 +182,18 @@ class msgpack_packer
 } // namespace detail
 
 
-template <typename ConnectionType>
+template <typename Connection>
 class msgpack_wrapper
-      : public basic_wrapper<ConnectionType, detail::msgpack_packer, msgpack::unpacker>
+      : public basic_wrapper<Connection, detail::msgpack_packer, msgpack::unpacker>
 {
       static constexpr size_t  read_buffer_size = SIZE_C(8'388'608);
 
-      using this_type = msgpack_wrapper<ConnectionType>;
-      using base_type = basic_wrapper<ConnectionType,
+      using this_type = msgpack_wrapper<Connection>;
+      using base_type = basic_wrapper<Connection,
                                          detail::msgpack_packer, msgpack::unpacker>;
 
     public:
-      using connection_type = ConnectionType;
+      using connection_type = Connection;
       using packer_type     = detail::msgpack_packer;
       using unpacker_type   = msgpack::unpacker;
 
@@ -206,8 +210,10 @@ class msgpack_wrapper
 
       ~msgpack_wrapper() override = default;
 
-      DELETE_COPY_CTORS(msgpack_wrapper);
-      DELETE_MOVE_CTORS(msgpack_wrapper);
+      msgpack_wrapper(msgpack_wrapper const &)                = delete;
+      msgpack_wrapper(msgpack_wrapper &&) noexcept            = default;
+      msgpack_wrapper &operator=(msgpack_wrapper const &)     = delete;
+      msgpack_wrapper &operator=(msgpack_wrapper &&) noexcept = default;
 
     /*----------------------------------------------------------------------------------*/
 
@@ -320,8 +326,11 @@ class ms_jsonrpc2_packer
 
       explicit ms_jsonrpc2_packer(std::condition_variable &cond) : cond_(cond) {}
       ~ms_jsonrpc2_packer() = default;
-      DELETE_MOVE_CTORS(ms_jsonrpc2_packer);
-      DELETE_COPY_CTORS(ms_jsonrpc2_packer);
+
+      ms_jsonrpc2_packer(ms_jsonrpc2_packer &&) noexcept            = delete;
+      ms_jsonrpc2_packer(ms_jsonrpc2_packer const &)                = delete;
+      ms_jsonrpc2_packer &operator=(ms_jsonrpc2_packer &&) noexcept = delete;
+      ms_jsonrpc2_packer &operator=(ms_jsonrpc2_packer const &)     = delete;
 
       marshaller_type pk = {};
 };
@@ -330,15 +339,15 @@ class ms_jsonrpc2_packer
 
 
 
-template <typename ConnectionType>
+template <typename Connection>
 class ms_jsonrpc2_wrapper
-      : public basic_wrapper<ConnectionType, detail::ms_jsonrpc2_packer, rapidjson::Document>
+      : public basic_wrapper<Connection, detail::ms_jsonrpc2_packer, rapidjson::Document>
 {
-      using base_type = basic_wrapper<ConnectionType, detail::ms_jsonrpc2_packer, rapidjson::Document>;
-      using this_type = ms_jsonrpc2_wrapper<ConnectionType>;
+      using base_type = basic_wrapper<Connection, detail::ms_jsonrpc2_packer, rapidjson::Document>;
+      using this_type = ms_jsonrpc2_wrapper<Connection>;
 
     public:
-      using connection_type = ConnectionType;
+      using connection_type = Connection;
       using packer_type     = detail::ms_jsonrpc2_packer;
       using unpacker_type   = rapidjson::Document;
 
@@ -347,6 +356,13 @@ class ms_jsonrpc2_wrapper
 
       explicit ms_jsonrpc2_wrapper(connection_type *con) : base_type(con)
       {}
+
+      ~ms_jsonrpc2_wrapper() override = default;
+
+      ms_jsonrpc2_wrapper(ms_jsonrpc2_wrapper const &)                = delete;
+      ms_jsonrpc2_wrapper(ms_jsonrpc2_wrapper &&) noexcept            = default;
+      ms_jsonrpc2_wrapper &operator=(ms_jsonrpc2_wrapper const &)     = delete;
+      ms_jsonrpc2_wrapper &operator=(ms_jsonrpc2_wrapper &&) noexcept = default;
 
     private:
       using base_type::unpacker_;
@@ -380,7 +396,7 @@ class ms_jsonrpc2_wrapper
                   }
                   (void)con_->raw_read(&ch, 1, MSG_WAITALL);
                   if (ch != '\n') [[unlikely]]
-                        goto fail; //NOLINT
+                        goto fail;  //NOLINT
                   (void)con_->raw_read(buf, 2, MSG_WAITALL);
                   if (::strncmp(buf, "\r\n", 2) == 0) [[likely]]
                         break;

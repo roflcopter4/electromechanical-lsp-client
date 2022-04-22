@@ -1,6 +1,6 @@
 #include "Common.hh"
 
-#include "util/charconv.hh"
+#include "util/recode.hh"
 
 //#include <vld.h>
 
@@ -35,10 +35,10 @@ inline namespace emlsp {
   NOINLINE void fool01();
  } // namespace fool
 
- namespace finally {
+ namespace testing01 {
   NOINLINE void foo01();
   NOINLINE void foo02();
- } // namespace finally
+ } // namespace testing01
 
 } // namespace emlsp
 
@@ -46,12 +46,13 @@ inline namespace emlsp {
 
 static void init_locale()
 {
-      ::setlocale(LC_ALL,      "en_US.UTF8");
-      ::setlocale(LC_COLLATE,  "en_US.UTF8");
-      ::setlocale(LC_CTYPE,    "en_US.UTF8");
+      ::setlocale(LC_ALL, "en_US.UTF8");
+      ::setlocale(LC_COLLATE, "en_US.UTF8");
+      ::setlocale(LC_CTYPE, "en_US.UTF8");
+      ::setlocale(LC_MESSAGES, "en_US.UTF8");
       ::setlocale(LC_MONETARY, "en_US.UTF8");
-      ::setlocale(LC_NUMERIC,  "en_US.UTF8");
-      ::setlocale(LC_TIME,     "en_US.UTF8");
+      ::setlocale(LC_NUMERIC, "en_US.UTF8");
+      ::setlocale(LC_TIME, "en_US.UTF8");
 }
 
 #ifdef _WIN32
@@ -76,14 +77,14 @@ static void init_wsa()
 UNUSED static void init_libevent()
 {
       //event_set_mem_functions(malloc, realloc, free);
-      event_enable_debug_mode();
-      event_enable_debug_logging(EVENT_DBG_ALL);
+      ::event_enable_debug_mode();
+      ::event_enable_debug_logging(EVENT_DBG_ALL);
 
 #ifdef _WIN32
-      if (evthread_use_windows_threads() != 0)
+      if (::evthread_use_windows_threads() != 0)
             util::win32::error_exit(L"evthread_use_windows_threads()");
 #else
-      if (evthread_use_pthreads() != 0)
+      if (::evthread_use_pthreads() != 0)
             err(1, "evthread_use_pthreads()");
 #endif
 }
@@ -128,8 +129,7 @@ do_main(UNUSED int argc, UNUSED char *argv[])
 
       // fool::fool01();
       // sigh::sigh04();
-      finally::foo02();
-
+      testing01::foo02();
 
 #ifdef _WIN32
       WSACleanup();

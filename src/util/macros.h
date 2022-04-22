@@ -31,24 +31,26 @@
 # endif
 #endif
 
+#define HELPER_EXPAND_MACRO(macro) macro
+
 #if (defined __cplusplus && (CXX_LANG_VER >= 201700L)) || (defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L)
 # define UNUSED      [[maybe_unused]]
-# define ND          [[nodiscard]]
+# define NODISCARD   [[nodiscard]]
 # define NORETURN    [[noreturn]]
 # define FALLTHROUGH [[fallthrough]]
 #elif defined __GNUC__
 # define UNUSED      __attribute__((__unused__))
-# define ND          __attribute__((__warn_unused_result__))
+# define NODISCARD   __attribute__((__warn_unused_result__))
 # define NORETURN    __attribute__((__noreturn__))
 # define FALLTHROUGH __attribute__((__fallthrough__))
 #elif defined _MSC_VER
 # define UNUSED      __pragma(warning(suppress : 4100 4101))
-# define ND          _Check_return_
+# define NODISCARD   _Check_return_
 # define NORETURN    __declspec(noreturn)
 # define FALLTHROUGH __fallthrough
 #else
 # define UNUSED
-# define ND
+# define NODISCARD
 # define NORETURN
 # define FALLTHROUGH
 #endif
@@ -91,7 +93,7 @@
 # ifdef __TAG_HIGHLIGHT__
 #  define REQUIRES(...)
 # else
-#  define REQUIRES(...) requires( requires { __VA_ARGS__ } )
+#  define REQUIRES(...) requires (__VA_ARGS__)
 # endif
 
 # ifndef NO_OBNOXIOUS_TWO_LETTER_CONVENIENCE_MACROS_PLEASE
@@ -112,17 +114,22 @@
 #  endif
 # endif
 
+# define STATIC_ASSERT_EXPR(cond) ((void)((char [(-1) + (2 * (cond))]){}))
+
 # ifndef static_assert
-#  if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || defined _MSC_VER
+#  if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || defined(_MSC_VER)
 #   define static_assert(...) _Static_assert(__VA_ARGS__)
 #  else
-#   define static_assert(COND ((char [(COND) ? 1 : -1]){})
+#   define static_assert(cond, ...) STATIC_ASSERT_EXPR(cond)
 #  endif
 # endif
 
 # if defined __GNUC__ || defined __clang__
 #  define NORETURN __attribute__((__noreturn__))
 # elif defined _MSC_VER
+#  ifdef noreturn
+#   undef noreturn
+#  endif
 #  define NORETURN __declspec(noreturn)
 # elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #  define NORETURN _Noreturn
@@ -132,10 +139,15 @@
 
 #endif // defined __cplusplus
 
+#ifndef NO_OBNOXIOUS_TWO_LETTER_CONVENIENCE_MACROS_PLEASE
+# define ND NODISCARD
+# define UU UNUSED
+#endif
+
 #if defined __GNUC__ || defined __clang__
 # define NOINLINE __attribute__((__noinline__))
 # ifndef __always_inline
-#  define __always_inline __attribute__((__always_inline__, __gnu_inline__)) extern __inline
+#  define __always_inline __attribute__((__always_inline__)) __inline
 # endif
 # ifndef __forceinline
 #  define __forceinline __always_inline
@@ -161,25 +173,24 @@
 # endif
 #endif
 
-#define P00_HELPER_PASTE_2(a1, a2) a1 ## a2
-#define P00_PASTE_2(a1, a2)        P00_HELPER_PASTE_2(a1, a2)
+#define P99_CAT2(_1, _2) _1 ## _2
 
-#define P99_PASTE_0(...)          __VA_ARGS__
-#define P99_PASTE_1(...)          __VA_ARGS__
-#define P99_PASTE_2(...)          P00_PASTE_2(__VA_ARGS__)
-#define P99_PASTE_3(a1, a2, ...)  P99_PASTE_2(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_4(a1, a2, ...)  P99_PASTE_3(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_5(a1, a2, ...)  P99_PASTE_4(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_6(a1, a2, ...)  P99_PASTE_5(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_7(a1, a2, ...)  P99_PASTE_6(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_8(a1, a2, ...)  P99_PASTE_7(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_9(a1, a2, ...)  P99_PASTE_8(P99_PASTE_2(a1, a2), __VA_ARGS__)
-#define P99_PASTE_10(a1, a2, ...) P99_PASTE_9(P99_PASTE_2(a1, a2), __VA_ARGS__)
+#define P99_PASTE_0()
+#define P99_PASTE_1(_1) _1
+#define P99_PASTE_2(_1, _2) P99_CAT2(_1, _2)
+#define P99_PASTE_3(_1, _2, _3) P99_PASTE_2(P99_PASTE_2(_1, _2), _3)
+#define P99_PASTE_4(_1, _2, _3, _4) P99_PASTE_2(P99_PASTE_3(_1, _2, _3), _4)
+#define P99_PASTE_5(_1, _2, _3, _4, _5) P99_PASTE_2(P99_PASTE_4(_1, _2, _3, _4), _5)
+#define P99_PASTE_6(_1, _2, _3, _4, _5, _6) P99_PASTE_2(P99_PASTE_5(_1, _2, _3, _4, _5), _6)
+#define P99_PASTE_7(_1, _2, _3, _4, _5, _6, _7) P99_PASTE_2(P99_PASTE_6(_1, _2, _3, _4, _5, _6), _7)
+#define P99_PASTE_8(_1, _2, _3, _4, _5, _6, _7, _8) P99_PASTE_2(P99_PASTE_7(_1, _2, _3, _4, _5, _6, _7), _8)
+#define P99_PASTE_9(_1, _2, _3, _4, _5, _6, _7, _8, _9) P99_PASTE_2(P99_PASTE_8(_1, _2, _3, _4, _5, _6, _7, _8), _9)
+#define P99_PASTE_10(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10) P99_PASTE_2(P99_PASTE_9(_1, _2, _3, _4, _5, _6, _7, _8, _9), _10)
 
 #define P00_NUM_ARGS_b(_0a, _0b, _2, _3, _4, _5, _6, _7, _8, _9, _10, ...) _10
 #define P00_NUM_ARGS_a(...) P00_NUM_ARGS_b(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0, 0)
 #define P00_NUM_ARGS(...)   P00_NUM_ARGS_a(__VA_ARGS__)
-#define P00_PASTE_a(n)      P00_PASTE_2(P99_PASTE_, n)
+#define P00_PASTE_a(n)      P99_CAT2(P99_PASTE_, n)
 #define P00_PASTE(...)      P00_PASTE_a(P00_NUM_ARGS(__VA_ARGS__))
 
 #define P99_PASTE(...) P00_PASTE(__VA_ARGS__)(__VA_ARGS__)
@@ -206,6 +217,9 @@
 #define LSTRCPY(d, s) memcpy((d), SLS(s))
 #define eprintf(...)  fprintf(stderr, __VA_ARGS__)
 
+#define STRINGIFY_HELPER(x) #x
+#define STRINGIFY(x) STRINGIFY_HELPER(x)
+
 #if defined _WIN64 && !defined PATH_MAX
 # if WDK_NTDDI_VERSION >= NTDDI_WIN10_RS1
 #  define PATH_MAX 4096
@@ -225,13 +239,8 @@
 
 /*--------------------------------------------------------------------------------------*/
 
-#ifdef __cplusplus
-# define USEC2SECOND UINTMAX_C(1'000'000)     /*     1,000,000 - one million */
-# define NSEC2SECOND UINTMAX_C(1'000'000'000) /* 1,000,000,000 - one billion */
-#else
-# define USEC2SECOND UINTMAX_C(1000000)    /*     1,000,000 - one million */
-# define NSEC2SECOND UINTMAX_C(1000000000) /* 1,000,000,000 - one billion */
-#endif
+#define USEC2SECOND UINTMAX_C(1000000)    /*     1,000,000 - one million */
+#define NSEC2SECOND UINTMAX_C(1000000000) /* 1,000,000,000 - one billion */
 
 #define BIGFLT double
 

@@ -7,8 +7,6 @@
 #include <boost/asio.hpp>
 #include <nlohmann/json.hpp>
 
-#include <nlohmann/adl_serializer.hpp>
-
 #define AUTOC auto const
 
 inline namespace emlsp {
@@ -157,7 +155,6 @@ NOINLINE void sigh01()
 
 NOINLINE void sigh02()
 {
-      static constexpr uint64_t timeout_len = 1000;
       std::mutex mtx1;
       std::condition_variable cond1;
 
@@ -616,7 +613,7 @@ my_alloc_cb(uv_handle_t *handle, size_t suggested, uv_buf_t *buf)
 static void
 my_read_cb(uv_stream_t *uvstream, ssize_t cnt, uv_buf_t const *buf)
 {
-      auto *con = static_cast<ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper> *>(uvstream->data);
+      auto *con = static_cast<ipc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::io::ms_jsonrpc2_wrapper> *>(uvstream->data);
 
       if (cnt <= 0) {
             // cnt == 0 means libuv asked for a buffer and decided it wasn't needed:
@@ -655,7 +652,7 @@ NOINLINE void sigh06()
             uv_process_t proc{};
       };
 
-      using con_type = ipc::rpc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::rpc::ms_jsonrpc_io_wrapper>;
+      using con_type = ipc::basic_io_connection<ipc::connections::win32_named_pipe, ipc::io::ms_jsonrpc2_wrapper>;
 
 
       auto data = std::make_unique<my_uv_data>();
@@ -663,7 +660,7 @@ NOINLINE void sigh06()
       //uv_pipe_init(&data->loop, &data->rdpipe, 0);
       //uv_pipe_init(&data->loop, &data->wrpipe, 0);
 
-      auto con = con_type::new_unique();
+      auto con = std::make_unique<con_type>();
       con->impl().set_loop(&data->loop);
       con->spawn_connection_l("clangd.exe", "--pch-storage=memory", "--log=verbose", "--clang-tidy", "--background-index");
 
