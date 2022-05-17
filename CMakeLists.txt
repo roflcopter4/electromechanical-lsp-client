@@ -21,10 +21,14 @@ set (VCPKG_ROOT "" CACHE STRING "Directory in which VCPKG resides (Windows only)
 if (MSVC)
     set (CMAKE_REQUIRED_DEFINITIONS -DHAVE_CONFIG_H)
 else()
-    set (CMAKE_REQUIRED_DEFINITIONS -D__USE_ISOC99 -D__USE_ISOC11
-         -D__USE_ISOCXX11 -D_GNU_SOURCE -DHAVE_CONFIG_H)
+    set (CMAKE_REQUIRED_DEFINITIONS
+         -DHAVE_CONFIG_H -D_GNU_SOURCE
+    )
     if (MINGW)
-        list(APPEND CMAKE_REQUIRED_DEFINITIONS -D__MINGW__ -D__USE_MINGW_ANSI_STDIO=1)
+        list(APPEND CMAKE_REQUIRED_DEFINITIONS 
+            -D__MINGW__
+            #-D__USE_MINGW_ANSI_STDIO=1
+        )
     endif()
 endif()
 
@@ -48,12 +52,12 @@ set (CMAKE_CXX_STANDARD_REQUIRED TRUE)
 # Win32 junk. Sigh.
 
 macro(FIX_WINDOWS_PATHS _pathvar)
-    string(REPLACE "\\" "/" ${_pathvar} "${${_pathvar}}")
+    string(REPLACE "/" "/" ${_pathvar} "${${_pathvar}}")
 endmacro()
 
 if (WIN32)
     foreach( v $ENV{PKG_CONFIG_PATH} )
-        string(REPLACE "/" "\\" _temp_pkgconfig_path "${_temp_pkgconfig_path}")
+        string(REPLACE "/" "/" _temp_pkgconfig_path "${_temp_pkgconfig_path}")
         list(APPEND _temp_pkgconfig_path "${v}")
     endforeach()
     string(REPLACE ";" ":" _temp_pkgconfig_path "${_temp_pkgconfig_path}")
@@ -89,48 +93,28 @@ if (NOT MINGW AND NOT MSYS)
     endif()
 endif()
 
-set(THREADS_PREFER_PTHREAD_FLAG TRUE)
-set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
-
 find_package (Threads REQUIRED)
 find_package (Boost REQUIRED)
-find_package (Libevent CONFIG QUIET)
-if (NOT LIBEVENT_FOUND)
-    find_package(Libevent QUIET)
-endif()
-
-list (APPEND CMAKE_PREFIX_PATH
-    "/usr/lib/llvm/14/lib64/cmake/llvm"
-    "/usr/lib/llvm/14/lib64/cmake/clang"
-)
-
-find_package (Clang CONFIG REQUIRED)
-find_package (LLVM CONFIG REQUIRED)
-
-if (NOT LIBEVENT_FOUND)
-    if (MSVC)
-        message(FATAL_ERROR "libevent2 not found")
-    else()
-        pkg_check_modules(LIBEVENT_BASE libevent REQUIRED)
-        pkg_check_modules(LIBEVENT_CORE libevent_core REQUIRED)
-        pkg_check_modules(LIBEVENT_EXTRA libevent_extra REQUIRED)
-        pkg_check_modules(LIBEVENT_PTHREADS libevent_pthreads)
-
-        set (LIBEVENT_LIBRARIES
-            ${LIBEVENT_BASE_LDFLAGS} ${LIBEVENT_CORE_LDFLAGS}
-            ${LIBEVENT_EXTRA_LDFLAGS} ${LIBEVENT_PTHREADS_LDFLAGS})
-        set (LIBEVENT_INCLUDE_DIRS
-            ${LIBEVENT_BASE_CFLAGS_I} ${LIBEVENT_CORE_CFLAGS_I}
-            ${LIBEVENT_EXTRA_CFLAGS_I} ${LIBEVENT_PTHREADS_CFLAGS_I})
-    endif()
-endif()
 
 if (MSVC)
     find_package (pthreads REQUIRED)
+    find_package (LibUV)
+    find_package (GLib)
+    find_package (Unistring)
+    find_package (msgpack COMPONENTS msgpack-cxx)
 else ()
-    find_package (GLib REQUIRED)
     find_package (LibUV REQUIRED)
+    find_package (GLib REQUIRED)
     find_package (Unistring REQUIRED)
+    find_package (msgpack REQUIRED)
+    if (MSGPACK_FOUND)
+        message("MSGPACK_FOUND")
+    elseif (msgpack_FOUND)
+        message("msgpack_FOUND")
+    else()
+        message(FATAL_ERROR "No idea what msgpack is")
+    endif()
+    
     #find_package (fmt 8.0.0)
     #find_package (nlohmann_json REQUIRED)
     #find_package (RapidJSON REQUIRED)
@@ -215,7 +199,7 @@ set (C_ONLY_WARNS
 
 
 if (NOT BUILD_DIST)
-    set (MARCH_SETTING -march=native)
+    set (MARCH_SETTING -mtune=native -march=native)
 endif()
 
 if (SANITIZE)
@@ -229,22 +213,22 @@ if (SANITIZE)
     endif()
 endif()
 
-set (BASE ${WARNS} ${MARCH_SETTING} ${SANIT}
+set (BASE ${MARCH_SETTING} ${SANIT}
     -pipe -fdiagnostics-color=always
-    -mprefer-vector-width=512
+    -mprefer-vector-width=512 -U_FORTIFY_SOURCE
 )
           
 set (CFLAGS_DEBUG_COMMON
-     -O0 -g -UNDEBUG -D_FORTIFY_SOURCE=2
-     -Wextra -Wpedantic -Wformat -U_FORTIFY_SOURCE
+     -Og -g -UNDEBUG -D_FORTIFY_SOURCE=3
+     -Wextra -Wpedantic -Wformat
 )
 set (CFLAGS_RELWITHDEBINFO_COMMON
      -O2 -g -D_FORTIFY_SOURCE=2
-     -Wextra -ftree-vectorize -Wextra -U_FORTIFY_SOURCE
+     -Wextra -ftree-vectorize -Wextra
 )
 set (CFLAGS_RELEASE_COMMON
      -Ofast -ftree-vectorize -g
-     -DNDEBUG -U_FORTIFY_SOURCE
+     -DNDEBUG
 )
 
 
@@ -275,7 +259,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         -Wno-shorten-64-to-32
         -Wno-ctad-maybe-unsupported
         -Wno-missing-prototypes
-        -fsanitize=address,undefined
+        # -fsanitize=address,undefined
     )
     set (WARNS ${WARNS}
          -Wno-gnu -Wno-gnu-zero-variadic-macro-arguments
@@ -284,14 +268,14 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     )
 
     set (_debug_flags 
-        -g -gdwarf-2
+        -g3 -gdwarf-5
     )
 
     if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
         set (LTO_STR -flto=full
-                     -fwhole-program-vtables
-                     -fvirtual-function-elimination
-            #         -fsplit-lto-unit
+                     #-fwhole-program-vtables
+                     #-fvirtual-function-elimination
+                     #-fsplit-lto-unit
             )
 
         if (MINGW OR WIN32)
@@ -301,55 +285,59 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         endif()
 
         #set (LTO_STR -flto=full)
-        # set (LTO_LINK_STR ${LTO_STR} -g3
-        #     -Wl,-Xlink=-mllvm:-march=native
-        #     -Wl,-Xlink=-mllvm:--aggressive-ext-opt
-        #     -Wl,-Xlink=-mllvm:--extra-vectorizer-passes
-        #     -Wl,-Xlink=-mllvm:--exhaustive-register-search
-        #     -Wl,-Xlink=-mllvm:--enable-unsafe-fp-math
-        #     -Wl,-Xlink=-mllvm:--optimize-regalloc
-        #     -Wl,-Xlink=-mllvm:--scalar-evolution-use-expensive-range-sharpening
-        #     -Wl,-Xlink=-mllvm:--slp-max-vf=0
-        #     -Wl,-Xlink=-mllvm:--slp-vectorize-hor
-        #     -Wl,-Xlink=-mllvm:--whole-program-visibility
-        #     -Wl,-Xlink=-mllvm:--x86-indirect-branch-tracking
-        #     -Wl,-Xlink=-mllvm:--interleave-loops
-        #     -Wl,-Xlink=-mllvm:--ir-outliner
-        #     -Wl,-Xlink=-mllvm:--enable-post-misched
-        #     -Wl,-Xlink=-mllvm:--enable-nontrivial-unswitch
-        #     -Wl,-Xlink=-mllvm:--enable-nonnull-arg-prop
-        # )
+        set (LTO_LINK_STR ${LTO_STR}
+            #-Wl,--Xlink=--lto-O3
+            #-Wl,--Xlink=--lto-whole-program-visibility
+            -Wl,--mllvm=-march=native
+            -Wl,--mllvm=--aggressive-ext-opt
+            -Wl,--mllvm=--extra-vectorizer-passes
+            -Wl,--mllvm=--exhaustive-register-search
+            -Wl,--mllvm=--enable-unsafe-fp-math
+            -Wl,--mllvm=--optimize-regalloc
+            -Wl,--mllvm=--scalar-evolution-use-expensive-range-sharpening
+            -Wl,--mllvm=--slp-max-vf=0
+            -Wl,--mllvm=--slp-vectorize-hor
+            -Wl,--mllvm=--whole-program-visibility
+            -Wl,--mllvm=--x86-indirect-branch-tracking
+            -Wl,--mllvm=--interleave-loops
+            -Wl,--mllvm=--ir-outliner
+            -Wl,--mllvm=--enable-post-misched
+            -Wl,--mllvm=--enable-nontrivial-unswitch
+            -Wl,--mllvm=--enable-nonnull-arg-prop
+        )
     else()
-        set (LTO_STR -flto=full
-                     -fwhole-program-vtables
-                     -fvirtual-function-elimination
-                     -fsplit-lto-unit
+        set (LTO_STR #-flto=full
+                     #-fwhole-program-vtables
+                     #-fvirtual-function-elimination
+                     #-fsplit-lto-unit
                      )
 
         if (MINGW OR WIN32)
             set (LTO_LINK_STR ${LTO_STR})
         else()
-            set (LTO_LINK_STR ${LTO_STR} -Wl,--lto-O1 -Wl,--lto-whole-program-visibility)
+            set (LTO_LINK_STR ${LTO_STR} #-Wl,--lto-O1 -Wl,--lto-whole-program-visibility
+            )
         endif()
     endif()
 
     #------------------------------------------------------------------------------------
     if (WIN32 OR MINGW OR MSYS)
         if (FALSE)
-            set (BASE ${BASE} -fansi-escape-codes -target x86_64-w64-windows -fc++-abi=microsoft)
+            set (_EXTRA ${_EXTRA} -fansi-escape-codes -target x86_64-w64-windows -fc++-abi=microsoft)
             string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                     ${CLANG_STDLIB} ${LTO_STR}
                     -target x86_64-w64-windows -fc++-abi=microsoft
             )
         else()
-            set (CLANG_STDLIB -stdlib=libc++)
-            set (BASE ${BASE} -fansi-escape-codes)
+            set (CLANG_STDLIB -stdlib=libstdc++)
+            set (_EXTRA ${_EXTRA} -fansi-escape-codes)
             string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                     ${CLANG_STDLIB}
                     ${LTO_LINK_STR}
                     -fuse-ld=lld
-                    -rtlib=compiler-rt
-                    --unwindlib=libunwind
+                    --rtlib=compiler-rt
+                    --unwindlib=libgcc
+                    #-Wl,--pdb=
             )
         endif()
 
@@ -360,10 +348,10 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         set (CLANG_STDLIB -stdlib=libstdc++)
         string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                 -fuse-ld=lld
-                # -rtlib=libgcc
+                #-rtlib=libgcc
                 -rtlib=compiler-rt
                 -unwindlib=libgcc
-                # -unwindlib=libunwind
+                #-unwindlib=libunwind
                 -rdynamic
                 -Wl,--as-needed
                 ${CLANG_STDLIB}
@@ -374,7 +362,7 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     set (__EXTRA_C_CXX_RELEASE_FLAGS -fslp-vectorize)
 
-    set (BASE ${BASE} ${WARNS}
+    set (_EXTRA ${_EXTRA} ${WARNS}
               -fintegrated-as -fintegrated-cc1 -fno-legacy-pass-manager
               ${_debug_flags}
     )
@@ -396,13 +384,35 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 
     set (WARNS ${WARNS}
-         -Wsuggest-attribute=noreturn -Wsuggest-attribute=format
-         -Wsuggest-attribute=const -Wsuggest-attribute=pure
-         -Wsuggest-attribute=cold -Wsuggest-attribute=malloc
+         -Wsuggest-attribute=noreturn
+         -Wno-suggest-attribute=format
+         # -Wsuggest-attribute=const -Wsuggest-attribute=pure
+         -Wsuggest-attribute=cold
+         -Wsuggest-attribute=malloc
          -Wattributes -fdiagnostics-show-option
     )
-    set (BASE ${BASE} ${WARNS} -g3 -gdwarf-5)
-    set (LTO_STR "-flto -fuse-linker-plugin")
+    
+    set (_EXTRA ${_EXTRA}
+        -g3
+        -gdwarf-5
+        -gstatement-frontiers
+        #-gstrict-dwarf
+        -gas-loc-support 
+        -gas-locview-support
+        #-fno-dwarf2-cfi-asm
+        -gcolumn-info
+        -ginline-points
+        -fvar-tracking
+        -fvar-tracking-assignments
+        -gvariable-location-views
+        #-fdebug-types-section
+        -gdescribe-dies
+        -fvect-cost-model=unlimited -mprefer-vector-width=512 -fno-strict-aliasing
+        -fconcepts-diagnostics-depth=100
+        # -fanalyzer
+    )
+    
+    set (LTO_STR "-fno-lto -fuse-linker-plugin")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -frtti -std=gnu++20")
 
     string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
@@ -442,14 +452,16 @@ if (MSVC)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP /utf-8")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /utf-8")
 else()
-    list(APPEND CMAKE_C_FLAGS_DEBUG ${CFLAGS_DEBUG_COMMON} ${BASE} ${CMAKE_C_FLAGS} ${LTO_STR})
-    list(APPEND CMAKE_C_FLAGS_MINSIZEREL ${CFLAGS_RELEASE_COMMON} ${BASE} -Os -s ${CMAKE_C_FLAGS})
+    list(APPEND CMAKE_C_FLAGS_DEBUG
+        ${BASE} ${CFLAGS_DEBUG_COMMON} ${WARNS} ${_EXTRA} ${CMAKE_C_FLAGS} ${LTO_STR})
+    list(APPEND CMAKE_C_FLAGS_MINSIZEREL
+        ${BASE} ${CFLAGS_RELEASE_COMMON} -Os -s ${WARNS} ${_EXTRA} ${CMAKE_C_FLAGS})
     list(APPEND CMAKE_C_FLAGS_RELEASE
-        ${CMAKE_C_FLAGS_RELEASE} ${CFLAGS_RELEASE_COMMON}
-        ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
+        ${CMAKE_C_FLAGS_RELEASE} ${BASE} ${CFLAGS_RELEASE_COMMON}
+        ${LTO_STR} ${WARNS} ${_EXTRA} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
     list(APPEND CMAKE_C_FLAGS_RELWITHDEBINFO
-        ${CMAKE_C_FLAGS_RELWITHDEBINFO} ${CFLAGS_RELWITHDEBINFO_COMMON}
-        ${BASE} ${LTO_STR} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
+        ${CMAKE_C_FLAGS_RELWITHDEBINFO} ${BASE} ${CFLAGS_RELWITHDEBINFO_COMMON}
+        ${LTO_STR} ${WARNS} ${_EXTRA} ${CMAKE_C_FLAGS} ${__EXTRA_C_CXX_RELEASE_FLAGS})
 
     string(JOIN " " CMAKE_CXX_FLAGS "-std=gnu++${CMAKE_CXX_STANDARD}" "${CMAKE_CXX_FLAGS}")
 
@@ -457,6 +469,9 @@ else()
     set(CMAKE_CXX_FLAGS_RELEASE        ${CMAKE_C_FLAGS_RELEASE}        ${CMAKE_CXX_FLAGS})
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO ${CMAKE_C_FLAGS_RELWITHDEBINFO} ${CMAKE_CXX_FLAGS})
     set(CMAKE_CXX_FLAGS_MINSIZEREL     ${CMAKE_C_FLAGS_MINSIZEREL}     ${CMAKE_CXX_FLAGS})
+
+    list(APPEND CMAKE_C_FLAGS ${CMAKE_C_FLAGS} ${C_ONLY_WARNS})
+    list(JOIN CMAKE_C_FLAGS " " CMAKE_C_FLAGS)
 
     string(TOUPPER ${CMAKE_BUILD_TYPE} _upper_CMAKE_BUILD_TYPE)
     set (ALL_THE_C_FLAGS   ${CMAKE_C_FLAGS_${_upper_CMAKE_BUILD_TYPE}})
@@ -472,6 +487,10 @@ else()
     list(JOIN CMAKE_CXX_FLAGS_MINSIZEREL     " " CMAKE_CXX_FLAGS_MINSIZEREL     )
 endif()
 
+unset (BASE)
+unset (WARNS)
+unset (_EXTRA)
+
 
 #####################################################################################################
 ## TARGETS ##
@@ -480,13 +499,14 @@ endif()
 
 add_subdirectory(src)
 
-#if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
-#if (TRUE OR ((NOT MINGW) AND (NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
-#   target_precompile_headers(lsp-thing
-#       PRIVATE
-#       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
-#   )
-#endif()
+# if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
+
+if (TRUE AND NOT (MINGW AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
+  target_precompile_headers(lsp-thing
+      PRIVATE
+      $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
+  )
+endif()
 
 
 #----------------------------------------------------------------------------------------------------
@@ -499,12 +519,17 @@ set_property(TARGET lsp-thing APPEND PROPERTY COMPILE_FLAGS "${_glib_cflags}")
 target_include_directories(lsp-thing AFTER PRIVATE
              "${CMAKE_CURRENT_BINARY_DIR}"
              "${CMAKE_SOURCE_DIR}/src"
+             #"${CMAKE_SOURCE_DIR}/contrib/detours"
              "${CMAKE_SOURCE_DIR}/contrib/rapidjson/include"
              #"${CMAKE_SOURCE_DIR}/contrib/uvw/src"
              #"${CMAKE_SOURCE_DIR}/contrib/uvw/jpcre2/src"
              ${fmt_INCLUDE_DIRECTORIES}
-             ${LIBEVENT_INCLUDE_DIRS}
-             ${LIBUV_INCLUDE_DIRS}
+             # ${LIBEVENT_INCLUDE_DIRS}
+             #${LIBUV_INCLUDE_DIRS}
+             #${msgpack_INCLUDE_DIRCTORIES}
+             #${msgpack_INCLUDE_DIRS}
+             #${msgpack_INCLUDE_DIR}
+             "/opt/prefix/include"
 )
 
 
@@ -543,20 +568,45 @@ if (MSVC)
         "${_WIN32_VCPKG_LIB_PATH}/glib-2.0.lib"
         "${_WIN32_VCPKG_LIB_PATH}/intl.lib"
         "${_WIN32_VCPKG_LIB_PATH}/iconv.lib"
-        "${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
-        PThreads4W::PThreads4W
-        libevent::core
-        libevent::extra
-        libevent::openssl
+        #"${_WIN32_VCPKG_LIB_PATH}/msgpackc.lib"
+        # PThreads4W::PThreads4W
+        # libevent::core
+        # libevent::extra
+        # libevent::openssl
         "D:/Program Files (x86)/Visual Leak Detector/lib/Win64/vld.lib"
     )
 else() # NOT MSVC
-    if (NOT MINGW)
+    if (WIN32)
+        target_include_directories(lsp-thing AFTER PRIVATE "D:/new_msys64/opt/prefix/include")
+        target_link_libraries(lsp-thing "-LD:/new_msys64/opt/prefix/lib" -ldetours)
+        #target_include_directories(lsp-thing AFTER PRIVATE "D:/VCPKG/packages/detours_x64-windows/include")
+        #if (FALSE)
+        #    target_link_libraries(lsp-thing "D:/VCPKG/packages/detours_x64-windows/debug/lib/detours.lib" "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64/BufferOverflow.lib")
+        #else()
+        #    target_link_libraries(lsp-thing "D:/VCPKG/packages/detours_x64-windows/lib/detours.lib")
+        #endif()
+        
+        #target_link_libraries(lsp-thing
+        #    "-L'C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22000.0/um/x64'"
+        #    "D:/VCPKG/packages/detours_x64-windows/lib/detours.lib"
+        #    strsafe.lib BufferOverflowU.lib
+        #    )
+        #
+        #target_link_libraries(lsp-thing shlwapi.lib)
+    endif()
+    
+    if (MINGW)
+        if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+            target_link_libraries(lsp-thing -lssp)
+        endif()
+    else()
         set_property(TARGET lsp-thing APPEND PROPERTY LINK_FLAGS "-Wl,--as-needed")
     endif()
+    
     set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
                  -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
     )
+    
     target_include_directories(lsp-thing AFTER PRIVATE ${UNISTRING_INCLUDE_DIR})
     target_link_libraries(lsp-thing
         ${GLib_LIBRARY}
@@ -564,7 +614,8 @@ else() # NOT MSVC
         ${GLib_LIBRARIES}
         ${LIBUV_LIBRARIES}
         ${UNISTRING_LIBRARY}
-        ${LIBEVENT_LIBRARIES}
+        # ${REAL_LIBEVENT_LIBRARIES}
+        # "/opt/prefix/lib/libuv.dll.a"
     )
 endif()
 
@@ -573,35 +624,37 @@ endif()
 
 #----------------------------------------------------------------------------------------------------
 
-add_definitions(${${LLVM_AVAILABLE_LIBS}})
-target_include_directories(lsp-thing AFTER PRIVATE
-    ${LLVM_INCLUDE_DIRS}
-)
-target_link_libraries(lsp-thing
-    -L${LLVM_LIBRARY_DIRS}
-    -lLLVM
-    -lclang
-    -lclang-cpp
-)
+# add_definitions(${${LLVM_AVAILABLE_LIBS}})
+# target_include_directories(lsp-thing AFTER PRIVATE
+#     ${LLVM_INCLUDE_DIRS}
+# )
+# target_link_libraries(lsp-thing
+#     -L${LLVM_LIBRARY_DIRS}
+#     -lLLVM
+#     -lclang
+#     -lclang-cpp
+# )
+
+#include(msgpackc msgpackc-cxx)
+include_directories(msgpackc-cxx)
 
 target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
     Threads::Threads
     Boost::boost
-    -ltbb
-    -lomp
+    #msgpackc
 )
 
 #----------------------------------------------------------------------------------------------------
 
-if (NOT Libevent_FOUND)
-    if (MSVC)
-        message(FATAL_ERROR "Libevent not found. This means something has gone _terribly_ wrong.")
-    else ()
-        message (WARNING "Libevent not found. Assuming it's there anyway.")
-        target_link_libraries(lsp-thing -levent_openssl -levent -levent_core -levent_extra)
-    endif()
-endif()
+# if (NOT Libevent_FOUND)
+#     if (MSVC)
+#         message(FATAL_ERROR "Libevent not found. This means something has gone _terribly_ wrong.")
+#     else ()
+#         message (WARNING "Libevent not found. Assuming it's there anyway.")
+#         target_link_libraries(lsp-thing -levent_openssl -levent -levent_core -levent_extra)
+#     endif()
+# endif()
 
 if (fmt_FOUND)
     target_link_libraries(lsp-thing fmt::fmt-header-only)
@@ -618,5 +671,5 @@ if (USE_JEMALLOC)
 endif()
 
 if (WIN32)
-    target_link_libraries(lsp-thing WS2_32.lib)
+    target_link_libraries(lsp-thing ws2_32.lib dbghelp.lib)
 endif()

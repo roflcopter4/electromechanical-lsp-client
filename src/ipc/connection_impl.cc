@@ -2,8 +2,6 @@
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
 
-#include "util/recode.hh"
-
 #ifndef O_BINARY
 # define O_BINARY 0
 #endif
@@ -13,10 +11,14 @@
 
 #ifdef _WIN32
 # define ERRNO WSAGetLastError()
-# define ERR(n, t) util::win32::error_exit_wsa(L ## t)
+# define ERR(t) util::win32::error_exit_wsa(L ## t)
+# define DWSOCKET_ERROR static_cast<DWORD>(SOCKET_ERROR)
 #else
 # define ERRNO errno
-# define ERR(n, t) err(n, t)
+# define ERR(t) err(t)
+#endif
+#ifndef SOCKET_ERROR
+# define SOCKET_ERROR (-1)
 #endif
 
 #define READ_FD     0
@@ -25,6 +27,7 @@
 #define OUTPUT_PIPE 1
 
 #define AUTOC auto const
+using intc = int const;
 
 inline namespace emlsp {
 namespace ipc::detail {
@@ -32,86 +35,62 @@ namespace ipc::detail {
 
 namespace {
 
-constexpr auto invalid_socket = static_cast<socket_t>(-1);
-
 #ifdef _WIN32
 
 using native_descriptor_t = HANDLE;
+using rw_param_t          = unsigned;
 
-/*
- * This little piece of stupidity is actually pretty important. Sockets passed as
- * stdio handles must not be considered OVERLAPPED. The parent socket, however, can.
- */
+
 __forceinline socket_t
-call_socket_listener(int const family, int const type, int const protocol)
+call_socket_listener(intc family, intc type, intc protocol) noexcept
 {
-      return ::WSASocketW(family, type, protocol, nullptr, 0, WSA_FLAG_OVERLAPPED);
-      //return ::socket(family, type, protocol);
+      return ::WSASocketW(family, type, protocol, nullptr, 0,
+                          WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
 }
 __forceinline socket_t
-call_socket_connect(int const family, int const type, int const protocol)
+call_socket_connect(intc family, intc type, intc protocol) noexcept
 {
-      //return ::WSASocketW(family, type, protocol, nullptr, 0, 0);
-      return ::socket(family, type, protocol);
+      return ::WSASocketW(family, type, protocol, nullptr, 0,
+                          WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
 }
 
 #else
 
 using native_descriptor_t = int;
+using rw_param_t          = size_t;
 
 __forceinline socket_t
-call_socket_listener(int const family, int const type, int const protocol)
+call_socket_listener(intc family, intc type, intc protocol)
 {
       return ::socket(family, type, protocol);
 }
 __forceinline socket_t
-call_socket_connect(int const family, int const type, int const protocol)
+call_socket_connect(intc family, intc type, intc protocol)
 {
       return ::socket(family, type, protocol);
 }
+
 #endif
+
+
+constexpr int unix_socket_connection_type_arg = SOCK_STREAM | SOCK_CLOEXEC;
 
 
 void
-do_open_unix_socket_connection(socket_t const     listener_,
-                               socket_t          &acceptor,
-                               socket_t          &connector,
-                               std::string const &path)
+unix_socket_connect_pair(socket_t const     listener_,
+                         socket_t          &acceptor,
+                         socket_t          &connector,
+                         std::string const &path)
 {
-      int         result[2];
-      int         mode     = 0;
       sockaddr_un con_addr = {};
       socklen_t   len      = sizeof(sockaddr_un);
 
-      connector = util::ipc::connect_to_unix_socket(path.c_str());
+      connector = util::ipc::connect_to_unix_socket(path.c_str(), AF_UNIX, unix_socket_connection_type_arg, 0);
       acceptor  = ::accept(listener_, reinterpret_cast<sockaddr *>(&con_addr), &len);
 
-#ifdef _WIN32
-      result[0] = ioctlsocket(connector, FIONBIO, (ULONG *)&mode);
-      result[1] = ioctlsocket(acceptor, FIONBIO, (ULONG *)&mode);
-#else
-      constexpr int NO_ERROR = 0;
-      result[0] = ioctl(connector, FIONBIO, &mode);
-      result[1] = ioctl(acceptor,  FIONBIO, &mode);
-#endif
-
-      assert(result[0] == NO_ERROR);
-      assert(result[1] == NO_ERROR);
-
       if (!acceptor || acceptor == invalid_socket)
-            ERR(1, "accept()");
+            ERR("accept()");
 }
-
-
-struct process_spawn_info {
-      size_t const        argc;
-      socket_t const      stdin_sock;
-      socket_t const      stdout_sock;
-      native_descriptor_t err_fd;
-      char              **argv;
-      std::thread        *thrd;
-};
-
 
 } // namespace
 
@@ -126,22 +105,54 @@ struct process_spawn_info {
 namespace win32 {
 
 static __forceinline bool
-create_process(wchar_t const *args, STARTUPINFOW *start_info, PROCESS_INFORMATION *pi)
+create_process_normal(wchar_t const       *args,
+                      STARTUPINFOW        *start_info,
+                      PROCESS_INFORMATION *pi)
 {
+      static constexpr DWORD flags = CREATE_DEFAULT_ERROR_MODE;
       return CreateProcessW(nullptr, const_cast<PWSTR>(args), nullptr, nullptr,
-                            true, 0, nullptr, nullptr, start_info, pi);
+                            true, flags, nullptr, nullptr, start_info, pi);
+}
+
+static __forceinline bool
+create_process_detours(wchar_t const       *args,
+                       STARTUPINFOW        *start_info,
+                       PROCESS_INFORMATION *pi)
+{
+      static constexpr DWORD flags = CREATE_SUSPENDED | CREATE_DEFAULT_ERROR_MODE;
+
+#if defined _DEBUG || !defined NDEBUG
+      static constexpr char const *const dlls[8] = {
+          R"(D:\ass\VisualStudio\Repos\dumb_injector.dll\x64\Debug\dumb_injector.dll.dll)", nullptr
+      };
+#else
+      static constexpr char const *const dlls[8] = {
+          R"(D:\ass\VisualStudio\Repos\dumb_injector.dll\x64\Release\dumb_injector.dll.dll)", nullptr
+      };
+#endif
+
+      return DetourCreateProcessWithDllsW(
+            nullptr,
+            const_cast<LPWSTR>(args),
+            nullptr, nullptr, true,
+            flags,
+            nullptr, nullptr,
+            start_info, pi,
+            1, const_cast<LPCSTR *>(dlls),
+            nullptr
+      );
 }
 
 
-template <typename T>
+template <typename Elem>
 static std::wstring
-protect_argv(int const argc, T **argv)
+protect_argv(intc argc, Elem **argv)
 {
       std::wstring str;
       str.reserve(8192);
 
       for (int i = 0; i < argc; ++i) {
-            T    *p           = argv[i];
+            Elem *p           = argv[i];
             int   pre_bslash  = 0;
             bool  need_quotes = false;
 
@@ -181,47 +192,91 @@ protect_argv(int const argc, T **argv)
 
 
 static procinfo_t
-spawn_connection_common(socket_t const      stdin_sock,
-                        socket_t const      stdout_sock,
-                        HANDLE const        err_fd,
-                        UNUSED size_t const argc,
-                        char              **argv)
+spawn_connection_common_detours(HANDLE const        err_fd,
+                                UNUSED size_t const argc,
+                                char              **argv,
+                                std::wstring const &stype,
+                                std::wstring const &sname,
+                                bool         const  dual,
+                                uint16_t     const  hport = 0U)
 {
-      PROCESS_INFORMATION pid;
-      SecureZeroMemory(&pid, sizeof pid);
+      static std::mutex mtx;
 
-      //HANDLE io_in = static_cast<intptr_t>(stdin_sock) >= 0
-      //                ? reinterpret_cast<HANDLE>(stdin_sock)
-      //                : CreateFileA("NUL", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-      //                              FILE_ATTRIBUTE_NORMAL, nullptr);
-      //HANDLE io_out = static_cast<intptr_t>(stdout_sock) >= 0
-      //                ? reinterpret_cast<HANDLE>(stdout_sock)
-      //                : CreateFileA("NUL", GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-      //                              FILE_ATTRIBUTE_NORMAL, nullptr);
+      PROCESS_INFORMATION pid{};
+      SECURITY_ATTRIBUTES sec_attr = {
+          .nLength              = sizeof(SECURITY_ATTRIBUTES),
+          .lpSecurityDescriptor = nullptr,
+          .bInheritHandle       = true,
+      };
+
+      AUTOC tmphand_in  = CreateFileW(L"NUL", GENERIC_READ, 0, &sec_attr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+      AUTOC tmphand_out = CreateFileW(L"NUL", GENERIC_WRITE, 0, &sec_attr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
 
       AUTOC        safe_argv = protect_argv(static_cast<int>(argc), argv);
       STARTUPINFOW startinfo = {};
       startinfo.cb           = sizeof(startinfo);
       startinfo.dwFlags      = STARTF_USESTDHANDLES;
-      startinfo.hStdInput    = (HANDLE)stdin_sock;
-      startinfo.hStdOutput   = (HANDLE)stdout_sock;
+      startinfo.hStdInput    = tmphand_in;
+      startinfo.hStdOutput   = tmphand_out;
       startinfo.hStdError    = err_fd;
 
-      //if (!::SetHandleInformation(io_in, HANDLE_FLAG_INHERIT, 1))
-      //      util::win32::error_exit(L"IO SetHandleInformation");
-      //if (io_in != io_out)
-      //      if (!::SetHandleInformation(io_out, HANDLE_FLAG_INHERIT, 1))
-      //            util::win32::error_exit(L"IO SetHandleInformation");
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      if (!create_process(safe_argv.c_str(), &startinfo, &pid))
+      std::lock_guard lock(mtx);
+
+      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_TYPE", stype.c_str()))
+            util::win32::error_exit(L"SetEnvironmentVariableW");
+      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_NAME", sname.c_str()))
+            util::win32::error_exit(L"SetEnvironmentVariableW");
+      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_PORT", std::to_wstring(hport).c_str()))
+            util::win32::error_exit(L"SetEnvironmentVariableW");
+      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_DUAL", dual ? L"1" : L"0"))
+            util::win32::error_exit(L"SetEnvironmentVariableW");
+
+      if (!create_process_detours(safe_argv.c_str(), &startinfo, &pid))
             util::win32::error_exit(L"CreateProcessW()");
 
-      //if (io_in != reinterpret_cast<HANDLE>(stdin_sock))
-      //      CloseHandle(io_in);
-      //if (io_out != reinterpret_cast<HANDLE>(stdout_sock))
-      //      CloseHandle(io_out);
+      CloseHandle(tmphand_in);
+      CloseHandle(tmphand_out);
+
+      return pid;
+}
+
+
+static __inline HANDLE socket_to_handle(SOCKET const sock)
+{
+      return sock == 0 || sock == invalid_socket ? INVALID_HANDLE_VALUE
+                                                 : reinterpret_cast<HANDLE>(sock);
+}
+
+
+static procinfo_t
+spawn_connection_common(socket_t const   stdin_sock,
+                        socket_t const   stdout_sock,
+                        HANDLE const     err_fd,
+                        UU size_t const  argc,
+                        char           **argv)
+{
+      AUTOC io_in     = socket_to_handle(stdin_sock);
+      AUTOC io_out    = socket_to_handle(stdout_sock);
+      AUTOC safe_argv = protect_argv(static_cast<int>(argc), argv);
+
+      PROCESS_INFORMATION pid{};
+      STARTUPINFOW        startinfo{};
+      startinfo.cb         = sizeof(startinfo);
+      startinfo.dwFlags    = 0;
+      startinfo.hStdInput  = io_in;
+      startinfo.hStdOutput = io_out;
+      startinfo.hStdError  = err_fd;
+
+      if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
+            util::win32::error_exit(L"Stderr SetHandleInformation");
+
+      if (!create_process_normal(safe_argv.c_str(), &startinfo, &pid))
+            util::win32::error_exit(L"CreateProcessW()");
 
       return pid;
 }
@@ -229,9 +284,9 @@ spawn_connection_common(socket_t const      stdin_sock,
 
 static procinfo_t
 spawn_connection_shim(std::wstring const &addr,
-                      HANDLE const err_fd,
-                      size_t const argc,
-                      char        **argv)
+                      HANDLE const        err_fd,
+                      size_t const        argc,
+                      char              **argv)
 {
       static constexpr wchar_t shim_proc[] = LR"(D:\ass\VisualStudio\Repos\CreateProcessShim\x64\Debug\CreateProcessShim.exe)";
       PROCESS_INFORMATION pid;
@@ -248,20 +303,16 @@ spawn_connection_shim(std::wstring const &addr,
       full_argv.push_back(addr.c_str());
       full_argv.push_back(safe_argv.c_str());
 
-      auto const true_argv = protect_argv(full_argv.size(), full_argv.data());
+      auto const true_argv = protect_argv(static_cast<int>(full_argv.size()), full_argv.data());
 
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      //util::eprint(FC("Process argv:\n{}\n\n"), util::recode<char>(true_argv));
-
-      if (!create_process(true_argv.c_str(), &startinfo, &pid))
+      if (!create_process_normal(true_argv.c_str(), &startinfo, &pid))
             util::win32::error_exit(L"CreateProcessW()");
 
       return pid;
 }
-
-
 
 
 static int
@@ -304,7 +355,7 @@ start_process_with_pipe(UNUSED char const   *exe,
       pipefds[WRITE_FD] = handles[INPUT_PIPE][WRITE_FD];
       pipefds[READ_FD]  = handles[OUTPUT_PIPE][READ_FD];
 
-      if (!create_process(argv, &start_info, pi))
+      if (!create_process_normal(argv, &start_info, pi))
             util::win32::error_exit(L"CreateProcess() failed");
 
       CloseHandle(handles[INPUT_PIPE][READ_FD]);
@@ -324,7 +375,7 @@ using win32::spawn_connection_common;
 /* Pipe Connection */
 
 
-void pipe_connection_impl::close()
+void pipe_connection_impl::close() noexcept
 {
       if (read_ > 2)
             ::close(read_);
@@ -354,8 +405,51 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
       read_  = _open_osfhandle(intptr_t(pipefds[0]), _O_RDONLY | _O_BINARY);
       write_ = _open_osfhandle(intptr_t(pipefds[1]), _O_WRONLY | _O_BINARY);
 
+      //if (_setmode(read_, _O_BINARY) == (-1))
+      //      util::win32::error_exit(fmt::format((L"_setmode({})"), read_));
+      //if (_setmode(write_, _O_BINARY) == (-1))
+      //      util::win32::error_exit(fmt::format((L"_setmode({})"), read_));
+
       set_initialized();
       return pid;
+}
+
+
+ssize_t
+pipe_connection_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+
+      for (size_t i = 0; i < nbufs; ++i)
+            total += write(vec[i].buf, vec[i].len, flags);
+
+      return total;
+}
+
+
+fd_connection_impl::fd_connection_impl(intc readfd, intc writefd)
+{
+      set_descriptors(readfd, writefd);
+      set_initialized();
+}
+
+
+fd_connection_impl::fd_connection_impl(HANDLE readfd, HANDLE writefd)
+{
+      set_descriptors(_open_osfhandle(reinterpret_cast<intptr_t>(readfd),
+                                      _O_RDONLY | _O_BINARY),
+                      _open_osfhandle(reinterpret_cast<intptr_t>(writefd),
+                                      _O_WRONLY | _O_BINARY));
+      set_initialized();
+}
+
+
+void
+fd_connection_impl::set_descriptors(intc readfd, intc writefd)
+{
+      read_  = readfd;
+      write_ = writefd;
 }
 
 
@@ -364,7 +458,7 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 
 
 void
-pipe_handle_connection_impl::close()
+pipe_handle_connection_impl::close() noexcept
 {
       if (read_ != INVALID_HANDLE_VALUE && read_ != GetStdHandle(STD_INPUT_HANDLE))
             ::CloseHandle(read_);
@@ -399,7 +493,7 @@ pipe_handle_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 }
 
 ssize_t
-pipe_handle_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
+pipe_handle_connection_impl::read(void *buf, ssize_t const nbytes, intc flags)
 {
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
@@ -414,7 +508,7 @@ pipe_handle_connection_impl::read(void *buf, ssize_t const nbytes, int const fla
                                       DWORD(nbytes - total), &n, nullptr);
                   if (!b)
                         util::win32::error_exit(L"ReadFile()");
-            } while (ssize_t(n) != SSIZE_C(-1) && (total += n) < nbytes);
+            } while (ssize_t(n) != ssize_t(-1LL) && (total += n) < nbytes);
       } else {
             if (read_ == INVALID_HANDLE_VALUE) [[unlikely]]
                   throw except::connection_closed();
@@ -428,7 +522,7 @@ pipe_handle_connection_impl::read(void *buf, ssize_t const nbytes, int const fla
 }
 
 ssize_t
-pipe_handle_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+pipe_handle_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
@@ -441,7 +535,20 @@ pipe_handle_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED
                                  DWORD(nbytes - total), &n, nullptr);
             if (!b)
                   util::win32::error_exit(L"ReadFile()");
-      } while (ssize_t(n) != SSIZE_C(-1) && (total += n) < nbytes);
+      } while (ssize_t(n) != ssize_t(-1LL) && (total += n) < nbytes);
+
+      return total;
+}
+
+
+ssize_t
+pipe_handle_connection_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+{
+      auto    lock  = std::lock_guard{write_mtx_};
+      ssize_t total = 0;
+
+      for (size_t i = 0; i < nbufs; ++i)
+            total += write(vec[i].buf, vec[i].len, flags);
 
       return total;
 }
@@ -487,7 +594,7 @@ named_pipe_spawn_connection_helper(HANDLE const         err_handle,
       if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
-      if (!win32::create_process(argv.c_str(), &start_info, pi))
+      if (!win32::create_process_normal(argv.c_str(), &start_info, pi))
             util::win32::error_exit(L"CreateProcess() failed");
 
       //CloseHandle(client_pipe);
@@ -504,12 +611,12 @@ win32_named_pipe_impl::open()
       {
             char buf[PATH_MAX + 1];
             size_t const len = braindead_tempname(buf, R"(\\.\pipe)", MAIN_PROJECT_NAME "-", "-io_pipe");
-            pipe_fname_ = util::unistring::recode<wchar_t>(buf, len);
+            wide_fname_ = util::unistring::recode<wchar_t>(buf, len);
             debug_fname = {buf, len};
       }
 
-      pipe_ = CreateNamedPipeW(
-           pipe_fname_.c_str(),
+      read_ = CreateNamedPipeW(
+           wide_fname_.c_str(),
            PIPE_ACCESS_DUPLEX | WRITE_DAC | FILE_FLAG_FIRST_PIPE_INSTANCE,
            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
            PIPE_UNLIMITED_INSTANCES,
@@ -518,16 +625,16 @@ win32_named_pipe_impl::open()
            0, nullptr // Default wait time and security attrs.
       );
 
-      fmt::print(stderr, FC("Using pipe at `{}' with raw value `{}'.\n"), debug_fname, pipe_);
+      fmt::print(stderr, FC("Using pipe at `{}' with raw value `{}'.\n"), debug_fname, read_);
       fflush(stderr);
-      std::wcerr << L"Wide name: "sv << pipe_fname_ << L'\n';
+      std::wcerr << L"Wide name: "sv << wide_fname_ << L'\n';
       std::wcerr.flush();
 
       SecureZeroMemory(&overlapped_, sizeof overlapped_);
-      overlapped_.hEvent = CreateEvent( 
-         nullptr,   // default security attribute 
-         true,      // manual-reset event 
-         true,      // initial state = signaled 
+      overlapped_.hEvent = CreateEvent(
+         nullptr,   // default security attribute
+         true,      // manual-reset event
+         true,      // initial state = signaled
          nullptr);  // unnamed event object
 
       set_initialized(1);
@@ -545,7 +652,7 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
       HANDLE     err_handle = get_err_handle();
       err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
 
-      named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, pipe_fname_, safe_argv);
+      named_pipe_spawn_connection_helper(read_, err_handle, &pi, wide_fname_, safe_argv);
 
       if (err_sink_type_ != sink_type::DEFAULT && err_handle)
             CloseHandle(err_handle);
@@ -554,6 +661,19 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
       return pi;
 }
 #endif
+
+
+void
+win32_named_pipe_impl::close() noexcept
+{
+      if (pipe_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(pipe_);
+            DeleteFileW(pipe_fname_.c_str());
+      }
+      pipe_       = nullptr;
+      pipe_fname_ = {};
+}
+
 
 void
 win32_named_pipe_impl::open()
@@ -566,11 +686,11 @@ win32_named_pipe_impl::open()
             pipe_fname_ = util::unistring::recode<wchar_t>(buf, len);
             pipe_narrow_name_ = {buf, len};
       }
-      //uv_pipe_bind(&uvhandle_, pipe_narrow_name_.c_str());
-      //pipe_   = uvhandle_.handle;
-      //crt_fd_ = _open_osfhandle(intptr_t(pipe_), _O_RDWR | _O_BINARY);
+      //uv_pipe_bind(&read_handle_, fname_.c_str());
+      //read_   = read_handle_.handle;
+      //crt_fd_ = _open_osfhandle(intptr_t(read_), _O_RDWR | _O_BINARY);
 
-      //uv_pipe_open(&pipe_, nullptr);
+      //uv_pipe_open(&read_, nullptr);
 
       pipe_ = CreateNamedPipeW(
            pipe_fname_.c_str(),
@@ -587,11 +707,15 @@ win32_named_pipe_impl::open()
       std::wcerr << L"Wide name: "sv << pipe_fname_ << L'\n';
       std::wcerr.flush();
 
+      //if (use_dual_sockets()) {
+      //} else {
+      //}
+
       //SecureZeroMemory(&overlapped_, sizeof overlapped_);
-      //overlapped_.hEvent = CreateEvent( 
-      //   nullptr,   // default security attribute 
-      //   true,      // manual-reset event 
-      //   true,      // initial state = signaled 
+      //overlapped_.hEvent = CreateEvent(
+      //   nullptr,   // default security attribute
+      //   true,      // manual-reset event
+      //   true,      // initial state = signaled
       //   nullptr);  // unnamed event object
 
       set_initialized(1);
@@ -611,14 +735,14 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
 
       //uv_connect_t con{};
       //uv_pipe_connect(&con, &uvchildhandle_,
-      //                pipe_narrow_name_.c_str(),
+      //                fname_.c_str(),
       //                [](uv_connect_t *conp, int status) {
       //                      if (status != 0)
       //                            util::win32::error_exit(L"uv_pipe_connect fucked something up?");
       //                });
       named_pipe_spawn_connection_helper(err_handle, &pi, pipe_fname_, safe_argv);
-      crt_fd_ = _open_osfhandle(intptr_t(pipe_), _O_RDWR | _O_BINARY);
-      uv_pipe_open(&uvhandle_, crt_fd_);
+      crt_fd_ = _open_osfhandle(intptr_t(pipe_), _O_RDWR | file_mode_);
+      //uv_pipe_open(&read_handle_, crt_fd_);
 
       if (err_sink_type_ != sink_type::DEFAULT && err_handle)
             CloseHandle(err_handle);
@@ -628,132 +752,8 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
 }
 
 
-#if 0
-void
-win32_named_pipe_impl::open()
-{
-      throw_if_initialized(typeid(*this), 1);
-
-      uv_pipe_open(&pipe_);
-
-      set_initialized(1);
-}
-
-procinfo_t
-win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
-{
-      throw_if_initialized(typeid(*this), 2);
-      if (!check_initialized(1))
-            open();
-
-      //PROCESS_INFORMATION pi;
-      //auto const safe_argv  = win32::protect_argv(static_cast<int>(argc), argv);
-      //HANDLE     err_handle = get_err_handle();
-      //err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
-
-#ifdef _WIN32
-      constexpr int uvflags[2] = {UV_CREATE_PIPE | UV_READABLE_PIPE | UV_OVERLAPPED_PIPE,
-                                  UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE};
-#endif
-
-      uv_stdio_container_t cont[] = {
-            {.flags = static_cast<uv_stdio_flags>(uvflags[0]),
-             .data = { .stream = reinterpret_cast<uv_stream_t *>(&pipe_), }},
-            {.flags = static_cast<uv_stdio_flags>(uvflags[1]),
-             .data = { .stream = reinterpret_cast<uv_stream_t *>(&pipe_), }},
-            {.flags = static_cast<uv_stdio_flags>(UV_INHERIT_FD), .data = { .fd = 2, }},
-      };
-      uv_process_options_t opts = {
-          .file = argv[0],
-          .args = argv,
-          .flags = UV_PROCESS_WINDOWS_HIDE,
-          .stdio_count = std::size(cont),
-          .stdio = cont,
-      };
-
-
-      //named_pipe_spawn_connection_helper(pipe_, err_handle, &pi, pipe_fname_, safe_argv);
-
-      //if (err_sink_type_ != sink_type::DEFAULT && err_handle)
-      //      CloseHandle(err_handle);
-
-      set_initialized(2);
-      return pi;
-}
-#endif
-
-#if 0
 ssize_t
-win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
-{
-      auto    lock  = std::lock_guard{read_mtx_};
-      ssize_t total = 0;
-      DWORD  n      = 0;
-      int    ret;
-      //memset(&overlapped_, 0, sizeof overlapped_);
-      //overlapped_.hEvent = CreateEvent(nullptr, true, true, nullptr);
-      //assert(overlapped_.hEvent != nullptr);
-
-      if (flags & MSG_WAITALL) {
-            do {
-                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &overlapped_);
-                  //assert(overlapped_.hEvent != nullptr);
-                  //if (ret < 0)
-                  //      ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
-
-                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &ov);
-                  //ResetEvent(ov.hEvent);
-                  ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, nullptr);
-                  if (ret == 0 && n == 0)
-                        break;
-            } while (ret >= 0 && n != static_cast<uint32_t>(-1) && (total += n) < nbytes);
-      } else {
-            do {
-                  //ret = ReadFile(pipe_, buf, nbytes, &n, &overlapped_);
-                  //assert(overlapped_.hEvent != nullptr);
-                  //ret = ReadFile(pipe_, static_cast<char *>(buf) + total, nbytes - total, &n, &ov);
-                  //if (!ret)
-                  //      ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
-                  //ResetEvent(ov.hEvent);
-                  ret = ReadFile(pipe_, buf, nbytes, &n, nullptr);
-            } while (ret >=0 && n == 0);
-            total = n;
-      }
-
-      //ResetEvent(overlapped_.hEvent);
-      //AUTOC e = GetLastError();
-      //if (!ret && e != ERROR_MORE_DATA)
-      //if (!ret || e)
-            //util::win32::error_exit_explicit(L"ReadFile", e);
-
-      return total;
-}
-
-ssize_t
-win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, int const flags)
-{
-      auto    lock  = std::lock_guard{write_mtx_};
-      ssize_t total = 0;
-      DWORD   n     = 0;
-      int     ret;
-
-      do {
-            //ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, &overlapped_);
-            //ret = WaitForSingleObject(overlapped_.hEvent, INFINITE);
-            //ResetEvent(overlapped_.hEvent);
-            ret = WriteFile(pipe_, static_cast<char const *>(buf) + total, nbytes - total, &n, nullptr);
-      } while (ret >= 0 && n != static_cast<uint32_t>(-1) && (total += n) < nbytes);
-
-
-
-      total = n;
-      return total;
-}
-#endif
-
-
-ssize_t
-win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
+win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, intc flags)
 {
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
@@ -768,7 +768,7 @@ win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
                                       DWORD(nbytes - total), &n, nullptr);
                   if (!b)
                         util::win32::error_exit(L"ReadFile()");
-            } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+            } while (n != DWORD(-1) && (total += n) < nbytes);
       } else {
             if (pipe_ == INVALID_HANDLE_VALUE) [[unlikely]]
                   throw except::connection_closed();
@@ -781,192 +781,90 @@ win32_named_pipe_impl::read(void *buf, ssize_t const nbytes, int const flags)
       return total;
 }
 
-#if 0
+struct win32_cb_data {
+      win32_named_pipe_impl *self;
+      ssize_t num_bytes;
+      ssize_t num_written;
+
+      win32_cb_data(win32_named_pipe_impl *self, ssize_t nb, ssize_t nw = 0) : self(self), num_bytes(nb), num_written(nw) {}
+};
+
+void __stdcall
+win32_named_pipe_impl::write_callback(
+    _In_    DWORD const  dwErrorCode,
+    _In_    DWORD const  dwNumberOfBytesTransfered,
+    _Inout_ OVERLAPPED  *lpOverlapped
+    )
+{
+      util::eprint(FC("status {} for write of {} bytes\n"),
+                   dwErrorCode, dwNumberOfBytesTransfered);
+
+      auto *data = static_cast<win32_cb_data *>(lpOverlapped->hEvent);
+      data->num_written = dwNumberOfBytesTransfered;
+
+      if (dwErrorCode != NO_ERROR || dwNumberOfBytesTransfered != data->num_bytes)
+            util::win32::error_exit_explicit(
+                fmt::format(FC(L"Asynchronous WriteFileEx() call failed. Transferred {} of {} bytes"),
+                            data->num_written, data->num_bytes)
+                    .c_str(),
+                dwErrorCode);
+
+      data->self->write_cond_.notify_all();
+}
+
 ssize_t
-win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED intc flags)
+{
+      std::unique_lock lock{write_mtx_};
+      OVERLAPPED ov      = {};
+      auto       cb_data = std::make_unique<win32_cb_data>(this, nbytes, SSIZE_C(0));
+      ov.hEvent          = cb_data.get();
+
+      if (pipe_ == INVALID_HANDLE_VALUE) [[unlikely]]
+            throw except::connection_closed();
+
+      bool b = ::WriteFileEx(pipe_, buf, static_cast<DWORD>(nbytes),
+                             &ov, write_callback);
+      if (!b)
+            util::win32::error_exit(L"ReadFileEx()");
+
+      lock.unlock();
+      std::mutex       mtx;
+      std::unique_lock wait_lock{mtx};
+      write_cond_.wait(wait_lock);
+      return nbytes;
+}
+
+ssize_t
+win32_named_pipe_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
-      DWORD n;
 
-      do {
-            if (pipe_ == reinterpret_cast<HANDLE>(-1)) [[unlikely]]
-                  throw except::connection_closed();
-            bool b = ::WriteFile(pipe_, static_cast<char const *>(buf) + total, static_cast<size_t>(nbytes - total), &n, nullptr);
-            if (!b)
-                  util::win32::error_exit(L"ReadFile()");
-      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+      for (size_t i = 0; i < nbufs; ++i)
+            total += write(vec[i].buf, vec[i].len, flags);
 
       return total;
 }
+
+size_t
+win32_named_pipe_impl::available() const noexcept(false)
+{
+      return util::available_in_fd(pipe_);
+}
+
 #endif
 
-ssize_t
-win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
-{
-      auto    lock  = std::lock_guard{write_mtx_};
-      ssize_t total = 0;
-      ssize_t n;
-
-      do {
-            if (pipe_ == INVALID_HANDLE_VALUE) [[unlikely]]
-                  throw except::connection_closed();
-            n = ::write(crt_fd_, static_cast<char const *>(buf) + total,
-                        static_cast<size_t>(nbytes - total));
-      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
-
-      return total;
-}
-
-# endif
-
-
-/*--------------------------------------------------------------------------------------*/
-
-
-#if 0
-static void
-open_pipeish_socket(socket_t us[2], socket_t peer[2])
-{
-      socket_t    listener;
-      sockaddr_un addr{};
-      std::string path = util::get_temporary_filename(nullptr, ".sock").string();
-
-            if (path.length() + 1 > sizeof(addr.sun_path))
-            throw std::logic_error(
-                fmt::format(FC("The file path \"{}\" (len: {}) is too large to "
-                               "fit into a UNIX socket address (size: {})"),
-                            path, path.size() + 1, sizeof(addr.sun_path)));
-
-      memcpy(addr.sun_path, path.c_str(), path.length() + 1);
-      addr.sun_family = AF_UNIX;
-
-      listener = ::WSASocketW(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC,
-                              0, nullptr, 0, WSA_FLAG_OVERLAPPED);
-
-      if (auto const e = ::WSAGetLastError(); e != 0)
-            util::win32::error_exit_explicit(L"socket()", e);
-
-      if (::bind(listener, (sockaddr *)&addr, sizeof addr) < 0)
-            util::win32::error_exit_wsa(L"bind()");
-
-      if (::listen(listener, 2) < 0)
-            util::win32::error_exit_wsa(L"listen");
-
-      for (int i = 0; i < 2; ++i) {
-            auto info         = socket_info{path, listener, {}, {}, true};
-            // auto start_thread = std::thread{async_connect_to_unix_socket, &info};
-            async_connect_to_unix_socket(&info);
-
-            sockaddr_un con_addr = {};
-            int         len      = sizeof(con_addr);
-            socket_t    acceptor = ::accept(listener, (sockaddr *)&con_addr, &len);
-            if (!acceptor || acceptor == uintptr_t(-1))
-                  util::win32::error_exit_wsa(L"accept()");
-
-            // start_thread.join();
-            us[i]   = acceptor;
-            peer[i] = info.connected_sock;
-      }
-
-      closesocket(listener);
-}
-
-
-procinfo_t
-dual_socket_connection_impl::do_spawn_connection(size_t argc, char **argv)
-{
-      throw_if_initialized(typeid(*this), 2);
-
-      socket_t our_socks[2];
-      socket_t peer_socks[2];
-
-      // for (int i = 0; i < 2; ++i)
-      open_pipeish_socket(our_socks, peer_socks);
-
-      write_           = our_socks[0];
-      read_            = our_socks[1];
-      AUTOC err_handle = get_err_handle();
-      AUTOC pid        = spawn_connection_common(peer_socks[0], peer_socks[1], err_handle,
-                                                 static_cast<int>(argc), argv);
-      closesocket(peer_socks[0]);
-      closesocket(peer_socks[1]);
-
-      if (err_sink_type_ == sink_type::FILENAME)
-            ::CloseHandle(err_handle);
-
-      set_initialized(2);
-      return pid;
-}
 
 void
-dual_socket_connection_impl::close()
+unix_socket_connection_impl::spawn_with_shim(bool const val) noexcept
 {
-      if (intptr_t(write_) != (-1)) {
-            ::shutdown(write_, 2);
-            closesocket(write_);
+      use_shim_ = val;
+      if (val) {
+            use_dual_sockets(true);
+            should_connect(false);
       }
-      if (intptr_t(read_) != (-1)) {
-            ::shutdown(read_, 2);
-            closesocket(read_);
-      }
-
-      read_ = write_ = static_cast<SOCKET>(-1);
 }
-
-ssize_t
-dual_socket_connection_impl::read(void *buf, ssize_t nbytes, int flags)
-{
-      auto    lock  = std::lock_guard{read_mtx_};
-      ssize_t total = 0;
-      ssize_t n     = 0;
-
-      if (flags & MSG_WAITALL) {
-            flags &= ~MSG_WAITALL;
-            do {
-                  n = ::recv(read_, static_cast<char *>(buf) + total,
-                             nbytes - total, flags);
-            } while ((n != (-1)) && (total += n) < nbytes);
-      } else {
-            for (;;) {
-                  n = ::recv(read_, static_cast<char *>(buf), nbytes, flags);
-                  if (n != 0)
-                        break;
-                  std::this_thread::sleep_for(10ms);
-            }
-            total = n;
-      }
-
-      if (n == (-1)) [[unlikely]] {
-            if (WSAGetLastError() == WSAEBADF)
-                  throw except::connection_closed();
-             util::win32::error_exit_wsa(L"recv()");
-      }
-
-      return total;
-}
-
-ssize_t
-dual_socket_connection_impl::write(void const *buf, ssize_t nbytes, int flags)
-{
-      auto    lock  = std::lock_guard{write_mtx_};
-      ssize_t total = 0;
-      ssize_t n;
-
-      do {
-            n = ::send(write_, static_cast<char const *>(buf) + total,
-                       nbytes - total, flags);
-      } while (n != (-1) && (total += n) < nbytes);
-
-      if (n == (-1)) [[unlikely]] {
-            if (WSAGetLastError() == WSAEBADF)
-                  throw except::connection_closed();
-            util::win32::error_exit_wsa(L"send()");
-      }
-
-      return total;
-}
-#endif
 
 
 /*======================================================================================*/
@@ -987,14 +885,14 @@ patricide(pid_t const parent, Types ...args)
 
       ::fflush(stderr);
       ::kill(parent, SIGABRT);
-      err_nothrow(1, "aborting");
+      err_nothrow("aborting");
 }
 
 
 static procinfo_t
 spawn_connection_common(socket_t const      stdout_sock,
                         socket_t const      stdin_sock,
-                        int const           err_fd,
+                        intc           err_fd,
                         UNUSED size_t const argc,
                         char              **argv)
 {
@@ -1002,10 +900,10 @@ spawn_connection_common(socket_t const      stdout_sock,
       procinfo_t  pid;
 
       if ((pid = ::fork()) == 0) {
-            int const io_in  = stdin_sock >= 0
+            intc io_in  = stdin_sock >= 0
                              ? stdin_sock
                              : ::open("/dev/null", O_RDWR | O_BINARY | O_APPEND, 0600);
-            int const io_out = stdout_sock >= 0
+            intc io_out = stdout_sock >= 0
                              ? stdout_sock
                              : ::open("/dev/null", O_RDWR | O_BINARY | O_APPEND, 0600);
 
@@ -1020,8 +918,9 @@ spawn_connection_common(socket_t const      stdout_sock,
                   ::close(err_fd);
             }
 
+            errno = 0;
             ::execvp(argv[0], const_cast<char **>(argv));
-            patricide(this_id, "execvp() failed");
+            patricide(this_id, "execvp() of '%s' failed: %d", argv[0], errno);
       }
 
       return pid;
@@ -1063,13 +962,13 @@ socketpair_connection_impl::open_new_socket()
 {
       int fds[2];
       if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == (-1))
-            err(1, "socketpair()");
+            err("socketpair()");
       acc_read_  = fds[0];
       con_read_ = fds[1];
 
       if (use_dual_sockets()) {
             if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds) == (-1))
-                  err(1, "socketpair()");
+                  err("socketpair()");
             acc_write_ = fds[0];
             con_write_ = fds[1];
       } else {
@@ -1094,7 +993,7 @@ socketpair_connection_impl::connect_to_socket()
 
 
 void
-pipe_connection_impl::close()
+pipe_connection_impl::close() noexcept
 {
       if (read_ > 2)
             ::close(read_);
@@ -1108,11 +1007,11 @@ static void
 open_pipe(int fds[2])
 {
       if (::pipe(fds) == (-1))
-            err(1, "pipe2()");
+            err("pipe2()");
 
 # ifdef F_SETPIPE_SZ
       if (::fcntl(fds[0], F_SETPIPE_SZ, 65536) == (-1))
-            err(2, "fcntl(F_SETPIPE_SZ)");
+            err("fcntl(F_SETPIPE_SZ)");
 # endif
 }
 
@@ -1149,7 +1048,7 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
             ::close(fds[1][0]); ::close(fds[1][1]);
 
             if (::execvp(argv[0], argv) == (-1))
-                  patricide(this_id, "execvp() failed");
+                  patricide(this_id, "execvp() of '%s' failed", argv[0]);
       }
 
       util::close_descriptor(fds[INPUT_PIPE][READ_FD]);
@@ -1164,6 +1063,28 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
       return pid;
 }
 
+
+ssize_t
+pipe_connection_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+{
+      auto    lock   = std::lock_guard{write_mtx_};
+      ssize_t nbytes = 0;
+      ssize_t total  = 0;
+      ssize_t n;
+
+      for (size_t i = 0; i < nbufs; ++i)
+            total += static_cast<ssize_t>(vec[i].iov_len);
+
+      do {
+            if (write_ == (-1)) [[unlikely]]
+                  throw except::connection_closed();
+            n = ::writev(write_, vec, static_cast<int>(nbufs));
+      } while (n != SSIZE_C(-1) && (total += n) < nbytes);
+
+      return total;
+}
+
+
 /*======================================================================================*/
 /*======================================================================================*/
 #endif // defined _WIN32
@@ -1173,8 +1094,9 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 
 /* Not system specific. */
 
+
 ssize_t
-pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
+pipe_connection_impl::read(void *buf, ssize_t const nbytes, intc flags)
 {
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
@@ -1188,19 +1110,19 @@ pipe_connection_impl::read(void *buf, ssize_t const nbytes, int const flags)
                   if (read_ == (-1)) [[unlikely]]
                         throw except::connection_closed();
                   n = ::read(read_, static_cast<char *>(buf) + total,
-                             static_cast<size_t>(nbytes - total));
+                             static_cast<rw_param_t>(nbytes - total));
             } while (n != SSIZE_C(-1) && (total += n) < nbytes);
       } else {
             if (read_ == (-1)) [[unlikely]]
                   throw except::connection_closed();
-            total = ::read(read_, buf, static_cast<size_t>(nbytes));
+            total = ::read(read_, buf, static_cast<rw_param_t>(nbytes));
       }
 
       return total;
 }
 
 ssize_t
-pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int const flags)
+pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
@@ -1210,10 +1132,22 @@ pipe_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED int co
             if (write_ == (-1)) [[unlikely]]
                   throw except::connection_closed();
             n = ::write(write_, static_cast<char const *>(buf) + total,
-                        static_cast<size_t>(nbytes - total));
+                        static_cast<rw_param_t>(nbytes - total));
       } while (n != SSIZE_C(-1) && (total += n) < nbytes);
 
       return total;
+}
+
+
+size_t
+pipe_connection_impl::available() const noexcept(false)
+{
+#ifdef _WIN32
+      auto *hand = reinterpret_cast<HANDLE>(_get_osfhandle(read_));
+      return util::available_in_fd(hand);
+#else
+      return util::available_in_fd(read_);
+#endif
 }
 
 
@@ -1230,15 +1164,8 @@ unix_socket_connection_impl::open()
       if (listener_ == invalid_socket)
             listener_ = open_new_socket();
 
-      if (should_connect()) {
-            do_open_unix_socket_connection(listener_, acc_read_, con_read_, path_);
-            if (use_dual_sockets()) {
-                  do_open_unix_socket_connection(listener_, acc_write_, con_write_, path_);
-            } else {
-                  con_write_ = con_read_;
-                  acc_write_ = acc_read_;
-            }
-      }
+      if (should_connect())
+            connect_to_socket();
 
       set_initialized(1);
 }
@@ -1252,15 +1179,18 @@ unix_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 
       err_fd_ = get_err_handle();
 
-      procinfo_t const pid =
 #ifdef _WIN32
-          use_shim_ ? win32::spawn_connection_shim(util::recode<wchar_t>(path_), err_fd_, argc, argv)
-                    :
+      procinfo_t pid;
+      if (listener_ == invalid_socket)
+            pid = win32::spawn_connection_common(invalid_socket, invalid_socket,
+                                                 err_fd_, argc, argv);
+      else
+            pid = win32::spawn_connection_common_detours(err_fd_, argc, argv, L"unix"s,
+                                                         util::recode<wchar_t>(path_),
+                                                         use_dual_sockets());
+#else
+      procinfo_t const pid = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
 #endif
-                    spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-
-      util::close_descriptor(con_read_);
-      util::close_descriptor(con_write_);
 
       if (err_sink_type_ == sink_type::FILENAME)
             util::close_descriptor(err_fd_);
@@ -1281,20 +1211,17 @@ unix_socket_connection_impl::open_new_socket()
       memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
       addr_.sun_family = AF_UNIX;
 
-      socket_t listener = (-1);
+      auto listener = invalid_socket;
 
       if (should_open_listener()) {
-            listener = call_socket_listener(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+            listener = call_socket_listener(AF_UNIX, unix_socket_connection_type_arg, 0);
 
-            if (listener == (-1))
-                  err(1, "socket");
-
-            AUTOC ret = ::bind(listener, (sockaddr *)&addr_, sizeof addr_);
-            if (ret == (-1))
-                  err(1, "bind");
-
-            if (::listen(listener, 255) == (-1))
-                  err(1, "listen");
+            if (listener == invalid_socket)
+                  err("socket");
+            if (::bind(listener, (sockaddr *)&addr_, sizeof addr_) == SOCKET_ERROR)
+                  err("bind");
+            if (::listen(listener, 2) == SOCKET_ERROR)
+                  err("listen");
       }
 
       return listener;
@@ -1303,11 +1230,19 @@ unix_socket_connection_impl::open_new_socket()
 socket_t
 unix_socket_connection_impl::connect_to_socket()
 {
+      unix_socket_connect_pair(listener_, acc_read_, con_read_, path_);
+      if (use_dual_sockets()) {
+            unix_socket_connect_pair(listener_, acc_write_, con_write_, path_);
+      } else {
+            con_write_ = con_read_;
+            acc_write_ = acc_read_;
+      }
+
       return acc_read_;
 }
 
 void
-unix_socket_connection_impl::set_listener(socket_t const sock, sockaddr_un const &addr)
+unix_socket_connection_impl::set_listener(socket_t const sock, sockaddr_un const &addr) noexcept
 {
       should_close_listnener(false);
       listener_ = sock;
@@ -1327,12 +1262,12 @@ unix_socket_connection_impl::connect()
       if (!check_initialized(1))
             throw std::logic_error("Cannot connect to uninitialized address!");
 
-      socket_t const connector = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+      socket_t const connector = call_socket_connect(AF_UNIX, unix_socket_connection_type_arg, 0);
 
-      if (connector == invalid_socket) [[unlikely]]
-            ERR(1, "socket");
-      if (::connect(connector, (sockaddr const *)&addr_, sizeof addr_) == invalid_socket)
-            ERR(1, "connect");
+      if (connector == invalid_socket)
+            ERR("socket");
+      if (::connect(connector, (sockaddr const *)&addr_, sizeof addr_) == SOCKET_ERROR)
+            ERR("connect");
 
       acc_read_  = connector;
       acc_write_ = connector;
@@ -1349,12 +1284,27 @@ unix_socket_connection_impl::accept()
       socklen_t   len      = sizeof(con_addr);
       acc_read_ = ::accept(listener_, (sockaddr *)&con_addr, &len);
       if (acc_read_ == invalid_socket)
-            ERR(1, "accept()");
+            ERR("accept()");
+
+#ifdef _WIN32
+      u_long blocking_io = 1;
+      //constexpr DWORD buffer_size = 32;
+      // if (setsockopt(acc_read_, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char const *>(&buffer_size), sizeof(buffer_size)))
+      //       util::win32::error_exit_wsa(L"setsockopt for receive buffer");
+      // if (setsockopt(acc_read_, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char const *>(&buffer_size), sizeof(buffer_size)))
+      //       util::win32::error_exit_wsa(L"setsockopt for send buffer");
+      if (ioctlsocket(acc_read_, FIONBIO, &blocking_io))
+            util::win32::error_exit_wsa(L"ioctl for blocking io");
+#endif
 
       if (use_dual_sockets()) {
             acc_write_ = ::accept(listener_, (sockaddr *)&con_addr, &len);
-            if (acc_read_ == invalid_socket)
-                  ERR(1, "accept()");
+            if (acc_write_ == invalid_socket)
+                  ERR("accept()");
+#ifdef _WIN32
+            if (ioctlsocket(acc_write_, FIONBIO, &blocking_io))
+                  util::win32::error_exit_wsa(L"ioctl for blocking io");
+#endif
       } else {
             acc_write_ = acc_read_;
       }
@@ -1371,50 +1321,43 @@ static int
 lazy_getsockname(socket_t const listener, sockaddr *addr, socklen_t const size)
 {
       socklen_t size_local = size;
-      int ret  = ::getsockname(listener, addr, &size_local);
+      intc ret        = ::getsockname(listener, addr, &size_local);
       if (ret != 0 || size != size_local)
-            ERR(1, "getsockname()");
-
+            ERR("getsockname()");
       return 0;
 }
 
 static socket_t
 open_new_inet_socket(sockaddr const *addr,
                      socklen_t const size,
-                     int const       type,
-                     int const       queue    = 255,
-                     int const       protocol = 0)
+                     intc       type,
+                     intc       queue    = 255,
+                     intc       protocol = 0)
 {
       socket_t const listener = call_socket_listener(type, SOCK_STREAM, protocol);
+
       if (listener == invalid_socket) [[unlikely]]
-            ERR(1, "socket()");
+            ERR("socket()");
+      if (::bind(listener, addr, size) == -1) [[unlikely]]
+            ERR("bind()");
+      if (::listen(listener, queue) == -1) [[unlikely]]
+            ERR("listen()");
 
-      int ret = ::bind(listener, addr, size);
-      if (ret == -1) [[unlikely]]
-            ERR(1, "bind()");
-
-      ret = ::listen(listener, queue);
-      if (ret == (-1)) [[unlikely]]
-            ERR(1, "listen()");
-
-      /* We want to find out the port number. */
-      // lazy_getsockname(listener, addr, size);
       return listener;
 }
 
 socket_t
 connect_to_inet_socket(sockaddr const *addr,
                        socklen_t const size,
-                       int const       type,
-                       int const       protocol)
+                       intc       type,
+                       intc       protocol)
 {
       socket_t const connector = call_socket_connect(type, SOCK_STREAM, protocol);
-      if (connector == invalid_socket)
-            ERR(1, "socket()");
 
-      int const ret = ::connect(connector, addr, size);
-      if (ret == -1)
-            ERR(1, "connect()");
+      if (connector == invalid_socket) [[unlikely]]
+            ERR("socket()");
+      if (::connect(connector, addr, size) == -1) [[unlikely]]
+            ERR("connect()");
 
       return connector;
 }
@@ -1424,31 +1367,32 @@ connect_to_inet_socket(sockaddr const *addr,
 /* Either */
 
 
-inet_any_socket_connection_impl::inet_any_socket_connection_impl() 
+inet_any_socket_connection_impl::inet_any_socket_connection_impl() noexcept
 {
       addr_ = nullptr;
 }
 
 inet_any_socket_connection_impl::~inet_any_socket_connection_impl()
 {
-      ::free(this->addr_);  //NOLINT
+      ::free(this->addr_);
 }
 
 void
 inet_any_socket_connection_impl::open()
 {
       throw_if_initialized(typeid(*this), 1);
-      connect_to_socket();
+      open_new_socket();
 
       if (should_connect()) {
+            connect_to_socket();
             socklen_t size = addr_length_;
             acc_read_      = ::accept(listener_, addr_, &size);
             if (acc_read_ == invalid_socket || size != addr_length_)
-                  ERR(1, "accept");
+                  ERR("accept");
             if (use_dual_sockets()) {
                   acc_write_ = ::accept(listener_, addr_, &size);
                   if (acc_write_ == invalid_socket || size != addr_length_)
-                        ERR(1, "accept");
+                        ERR("accept");
             } else {
                   acc_write_ = acc_read_;
             }
@@ -1464,41 +1408,100 @@ inet_any_socket_connection_impl::do_spawn_connection(size_t const argc, char **a
       if (!check_initialized(1))
             open();
 
-      err_fd_   = get_err_handle();
-      AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-      util::close_descriptor(con_read_);
-      util::close_descriptor(con_write_);
+      procinfo_t ret;
+      err_fd_ = get_err_handle();
+
+#ifdef _WIN32
+      if (listener_ == invalid_socket)
+            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
+      else
+            ret = win32::spawn_connection_common_detours(
+                err_fd_, argc, argv,
+                  type_ == AF_INET  ? L"ipv4"s
+                : type_ == AF_INET6 ? L"ipv6"s
+                                    : L""s,
+                util::recode<wchar_t>(addr_string_),
+                use_dual_sockets(),
+                hport_);
+#else
+      ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+#endif
+
+      //util::close_descriptor(con_read_);
+      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
+}
+
+void
+inet_any_socket_connection_impl::init_strings()
+{
+      if (addr_string_.empty()) {
+            char buf[128];
+            if (type_ == AF_INET) {
+                  auto const *a = reinterpret_cast<sockaddr_in *>(addr_);
+                  inet_ntop(AF_INET, &a->sin_addr, buf, sizeof buf);
+                  addr_string_ = buf;
+            } else if (type_ == AF_INET6) {
+                  auto const *a = reinterpret_cast<sockaddr_in6 *>(addr_);
+                  inet_ntop(AF_INET6, &a->sin6_addr, buf, sizeof buf);
+                  addr_string_ = buf;
+            } else {
+                  errx("Invalid family %d", type_);
+            }
+      }
+
+      if (type_ == AF_INET) {
+            hport_ = ntohs(reinterpret_cast<sockaddr_in *>(addr_)->sin_port);
+            addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
+      } else if (type_ == AF_INET6) {
+            hport_ = ntohs(reinterpret_cast<sockaddr_in6 *>(addr_)->sin6_port);
+            addr_string_with_port_ = fmt::format(FC("[{}]:{}"), addr_string_, hport_);
+      } else {
+            errx("Invalid family %d", type_);
+      }
 }
 
 socket_t
 inet_any_socket_connection_impl::open_new_socket()
 {
       if (!addr_init_) {
-            addr_length_ = sizeof(sockaddr_in6);
-            type_        = AF_INET6;
+            addr_length_ = sizeof(sockaddr_in);
+            type_        = AF_INET;
 
-            auto *addr        = ::util::xcalloc<sockaddr_in6>();
-            addr->sin6_addr   = IN6ADDR_LOOPBACK_INIT;
-            addr->sin6_family = type_;  // Default to ipv6 I guess
-            addr->sin6_port   = 0;
-            addr_             = reinterpret_cast<sockaddr *>(addr);
-            addr_init_        = true;
+            auto *addr            = ::util::xcalloc<sockaddr_in>();
+            addr->sin_addr.s_addr = htonl(INADDR_LOOPBACK);  // 127.0.0.1
+            addr->sin_family = static_cast<uint16_t>(type_);
+            addr->sin_port   = 0;
+            addr_            = reinterpret_cast<sockaddr *>(addr);
+            addr_init_       = true;
+
+            char buf[32];
+            inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof buf);
+            addr_string_ = buf;
       }
 
-      if (should_open_listener())
+      if (should_open_listener()) {
             listener_ = open_new_inet_socket(addr_, addr_length_, type_);
+            if (!addr_init_) {
+                  memset(addr_, 0, sizeof(sockaddr_in));
+                  lazy_getsockname(listener_, addr_, sizeof(sockaddr_in));
+                  hport_     = ntohs(((sockaddr_in *)addr_)->sin_port);
+                  addr_init_ = true;
+                  addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
+            } else {
+                  init_strings();
+            }
+      }
 
-      addr_init_ = true;
       return listener_;
 }
 
 socket_t
 inet_any_socket_connection_impl::connect_to_socket()
 {
-      if (intptr_t(listener_) > 0) {
+      if (listener_ != invalid_socket) {
             if (!addr_init_)
                   addr_init_ = true;
             /* else { nothing to do, listener is open and addr_ is set up. } */
@@ -1509,28 +1512,7 @@ inet_any_socket_connection_impl::connect_to_socket()
       memset(addr_, 0, addr_length_);
       lazy_getsockname(listener_, addr_, addr_length_);
 
-      if (addr_string_.empty()) {
-            char buf[128];
-            if (type_ == AF_INET) {
-                  auto *a = reinterpret_cast<sockaddr_in *>(addr_);
-                  inet_ntop(AF_INET, &a->sin_addr, buf, sizeof buf);
-                  addr_string_ = buf;
-            } else if (type_ == AF_INET6) {
-                  auto *a = reinterpret_cast<sockaddr_in6 *>(addr_);
-                  inet_ntop(AF_INET6, &a->sin6_addr, buf, sizeof buf);
-                  addr_string_ = buf;
-            } else {
-                  errx(1, "Invalid family %s", type_);
-            }
-      }
-
-      if (type_ == AF_INET) {
-            hport_ = ntohs(reinterpret_cast<sockaddr_in *>(addr_)->sin_port);
-      } else if (type_ == AF_INET6) {
-            hport_ = ntohs(reinterpret_cast<sockaddr_in6 *>(addr_)->sin6_port);
-      } else {
-            errx(1, "Invalid family %s", type_);
-      }
+      init_strings();
 
       if (should_connect()) {
             con_read_ = connect_to_inet_socket(addr_, addr_length_, type_);
@@ -1559,7 +1541,7 @@ void inet_any_socket_connection_impl::assign_from_addrinfo(addrinfo const *info)
 
 int inet_any_socket_connection_impl::resolve(char const *server_name, char const *port)
 {
-      auto *info = ::util::ipc::resolve_addr(server_name, port);
+      auto *info = ::util::ipc::resolve_addr(server_name, port, SOCK_STREAM);
       if (!info)
             return (-1);
       // addr_string_ = server_name;
@@ -1585,7 +1567,8 @@ int inet_any_socket_connection_impl::resolve(char const *const server_and_port)
              * e.g. [::1]:12345 */
             if (!*(server = server_and_port + 1))
                   BAD_ADDRESS("6");
-            if (!(port = strchr(server, ']')))
+            port = strchr(server, ']');
+            if (!port)
                   BAD_ADDRESS("6");
             size_t const size = port - server;
             if (size > SIZE_C(39) || port[1] != ':' || !isdigit(port[2]))
@@ -1631,11 +1614,11 @@ inet_ipv4_socket_connection_impl::open()
             socklen_t size = sizeof(addr_);
             acc_read_ = ::accept(listener_, (sockaddr *)&addr_, &size);
             if (acc_read_ == invalid_socket || size != sizeof(addr_))
-                  ERR(1, "accept");
+                  ERR("accept");
             if (use_dual_sockets()) {
                   acc_write_ = ::accept(listener_, (sockaddr *)&addr_, &size);
                   if (acc_write_ == invalid_socket || size != sizeof(addr_))
-                        ERR(1, "accept");
+                        ERR("accept");
             } else {
                   acc_write_ = acc_read_;
             }
@@ -1652,9 +1635,20 @@ inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **
             open();
 
       err_fd_    = get_err_handle();
-      AUTOC ret  = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-      util::close_descriptor(con_read_);
-      util::close_descriptor(con_write_);
+      //AUTOC ret  = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+
+      procinfo_t ret;
+#ifdef _WIN32
+      if (listener_ == invalid_socket)
+            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
+      else
+            ret = win32::spawn_connection_common_detours(err_fd_, argc, argv, L"ipv4"s, util::recode<wchar_t>(addr_string_), use_dual_sockets(), hport_);
+#else
+      ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+#endif
+
+      //util::close_descriptor(con_read_);
+      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
@@ -1665,7 +1659,6 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 {
       if (!addr_init_) {
             memset(&addr_, 0, sizeof(addr_));
-            //addr_.sin_addr.s_addr = (0x0100'007F); // 127.0.0.1
             addr_.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
             addr_.sin_family      = AF_INET;
             addr_.sin_port        = 0;
@@ -1682,6 +1675,7 @@ inet_ipv4_socket_connection_impl::open_new_socket()
             addr_string_ = inet_ntop(AF_INET, &addr_.sin_addr, buf, sizeof buf);
       }
       hport_ = ntohs(addr_.sin_port);
+      addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
 
       return listener_;
 }
@@ -1689,7 +1683,7 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 socket_t
 inet_ipv4_socket_connection_impl::connect_to_socket()
 {
-      if (intptr_t(listener_) > 0) {
+      if (listener_ != invalid_socket) {
             if (!addr_init_) {
                   lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
                   addr_init_ = true;
@@ -1727,11 +1721,11 @@ inet_ipv6_socket_connection_impl::open()
             socklen_t size = sizeof(addr_);
             acc_read_ = ::accept(listener_, (sockaddr *)&addr_, &size);
             if (acc_read_ == invalid_socket || size != sizeof(addr_))
-                  ERR(1, "accept");
+                  ERR("accept");
             if (use_dual_sockets()) {
                   acc_write_ = ::accept(listener_, (sockaddr *)&addr_, &size);
                   if (acc_write_ == invalid_socket || size != sizeof(addr_))
-                        ERR(1, "accept");
+                        ERR("accept");
             } else {
                   acc_write_ = acc_read_;
             }
@@ -1747,10 +1741,21 @@ inet_ipv6_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       if (!check_initialized(1))
             open();
 
-      err_fd_   = get_err_handle();
-      AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-      util::close_descriptor(con_read_);
-      util::close_descriptor(con_write_);
+      err_fd_ = get_err_handle();
+
+      procinfo_t ret;
+#ifdef _WIN32
+      if (listener_ == invalid_socket)
+            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
+      else
+            ret = win32::spawn_connection_common_detours(err_fd_, argc, argv, L"ipv6"s, util::recode<wchar_t>(addr_string_), use_dual_sockets(), hport_);
+#else
+      ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+#endif
+
+      //AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
+      //util::close_descriptor(con_read_);
+      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
@@ -1767,28 +1772,27 @@ inet_ipv6_socket_connection_impl::open_new_socket()
             addr_string_      = "[::1]"s;
       }
 
-      if (should_open_listener()) {
-            listener_ = open_new_inet_socket((sockaddr *)&addr_,
-                                             sizeof(addr_), AF_INET6);
-            memset(&addr_, 0, sizeof(addr_));
-            lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
-      }
+      listener_ = open_new_inet_socket((sockaddr *)&addr_,
+                                       sizeof addr_, AF_INET6);
+      memset(&addr_, 0, sizeof addr_);
+      lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof addr_);
 
       addr_init_ = true;
-      if (addr_string_.empty()) {
+      if (addr_string_.empty() || addr_string_.back() == ']') {
             char buf[128];
             addr_string_ = inet_ntop(AF_INET6, &addr_.sin6_addr, buf, sizeof buf);
       }
       hport_ = ntohs(addr_.sin6_port);
+      addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
       return listener_;
 }
 
 socket_t
 inet_ipv6_socket_connection_impl::connect_to_socket()
 {
-      if (intptr_t(listener_) > 0) {
+      if (listener_ != invalid_socket) {
             if (!addr_init_) {
-                  lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof(addr_));
+                  lazy_getsockname(listener_, (sockaddr *)&addr_, sizeof addr_);
                   addr_init_ = true;
             }
             /* else { nothing to do, listener is open and addr_ is set up. } */
@@ -1796,14 +1800,420 @@ inet_ipv6_socket_connection_impl::connect_to_socket()
             listener_ = open_new_socket();
       }
 
-      con_read_ = connect_to_inet_socket((sockaddr *)&addr_, sizeof(addr_), AF_INET6);
-      if (use_dual_sockets())
-            con_write_ = connect_to_inet_socket((sockaddr *)&addr_, sizeof(addr_), AF_INET6);
-      else
-            con_write_ = con_read_;
+      if (should_connect()) {
+            con_read_  = connect_to_inet_socket((sockaddr *)&addr_, sizeof addr_, AF_INET6);
+            con_write_ = use_dual_sockets()
+                           ? connect_to_inet_socket((sockaddr *)&addr_, sizeof addr_, AF_INET6)
+                           : con_read_;
+      }
 
       return con_read_;
 }
+
+
+/****************************************************************************************/
+/* Libuv Pipe connection */
+
+
+void
+libuv_pipe_handle_impl::close() noexcept
+{
+      uv_process_kill(&proc_handle_, SIGTERM);
+}
+
+void
+libuv_pipe_handle_impl::open()
+{
+      throw_if_initialized(typeid(*this), 2);
+
+      assert(loop_ != nullptr);
+      uv_pipe_init(loop_, &read_handle_, 0);
+      uv_pipe_init(loop_, &write_handle_, 0);
+
+      set_initialized(2);
+}
+
+size_t
+libuv_pipe_handle_impl::available() const noexcept(false)
+{
+      return util::available_in_fd(fd());
+}
+
+void
+libuv_pipe_handle_impl::set_loop(uv_loop_t *loop)
+{
+      throw_if_initialized(typeid(*this), 1);
+      loop_ = loop;
+      set_initialized(1);
+}
+
+procinfo_t
+libuv_pipe_handle_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
+{
+      throw_if_initialized(typeid(*this), 3);
+      if (!check_initialized(2))
+            open();
+
+#ifdef _WIN32
+      int    err_fd;
+      HANDLE err_handle = get_err_handle();
+      if (err_handle != GetStdHandle(STD_ERROR_HANDLE)) {
+            err_fd = 2;
+      } else {
+            err_fd = _open_osfhandle(intptr_t(err_handle), O_WRONLY | _O_BINARY);
+            if (err_fd == -1)
+                  err("_open_osfhandle()");
+      }
+#else
+      int err_fd = get_err_handle();
+#endif
+
+      constexpr int uvflags[2] = {
+            UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE,
+            UV_CREATE_PIPE | UV_READABLE_PIPE | UV_WRITABLE_PIPE | UV_OVERLAPPED_PIPE,
+      };
+
+      uv_stdio_container_t cont[] = {
+            { .flags = static_cast<uv_stdio_flags>(uvflags[0]),
+              .data  = {.stream = reinterpret_cast<uv_stream_t *>(&write_handle_)} },
+            { .flags = static_cast<uv_stdio_flags>(uvflags[1]),
+              .data  = {.stream = reinterpret_cast<uv_stream_t *>(&read_handle_)} },
+            { .flags = static_cast<uv_stdio_flags>(UV_INHERIT_FD),
+              .data  = {.fd = err_fd} },
+      };
+      uv_process_options_t const opts = {
+          .file  = argv[0],
+          .args  = argv,
+          .flags = 0,
+          .stdio_count = static_cast<int>(std::size(cont)),
+          .stdio = cont,
+      };
+
+      intc e = uv_spawn(loop_, &proc_handle_, &opts);
+      if (e < 0) {
+#ifdef _WIN32
+            auto const s = util::recode<wchar_t>(uv_strerror(e));
+            util::win32::error_exit_message(L"Fatal libuv error:"s + s);
+#else
+            errx_nothrow("libuv error (%d): \"%s\"", e, uv_strerror(e));
+#endif
+      }
+
+      set_initialized(3);
+
+#ifdef _WIN32
+      return {};
+#else
+      return proc_handle_.pid;
+#endif
+}
+
+void
+libuv_pipe_handle_impl::uvwrite_callback(uv_write_t *req, intc status)
+{
+      auto *self = static_cast<this_type *>(req->data);
+      req->data  = reinterpret_cast<void *>(static_cast<intptr_t>(status));
+      self->write_cond_.notify_one();
+}
+
+ssize_t
+libuv_pipe_handle_impl::write(void const *buf, ssize_t const nbytes, UNUSED int flags)
+{
+      std::unique_lock write_lock{write_mtx_};
+      uv_write_t req;
+      uv_buf_t   ubuf; //= {static_cast<decltype(ubuf.len)>(nbytes), const_cast<char *>(static_cast<char const *>(buf))};
+      req.data = this;
+      init_iovec(reinterpret_cast<iovec &>(ubuf),
+                 const_cast<char *>(static_cast<char const *>(buf)),
+                 static_cast<decltype(ubuf.len)>(nbytes));
+
+      intc ret = uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
+                               &ubuf, 1, uvwrite_callback);
+
+      write_lock.unlock();
+      // std::mutex       mtx;
+      std::unique_lock cb_lock{write_mtx_};
+      write_cond_.wait(cb_lock);
+
+      intc status = static_cast<int>(reinterpret_cast<intptr_t>(req.data));
+      if (status != 0)
+            throw std::runtime_error(uv_strerror(status));
+      return ret;
+}
+
+ssize_t
+libuv_pipe_handle_impl::writev(iovec const *vec, size_t const nbufs, UNUSED int flags)
+{
+      std::unique_lock write_lock{write_mtx_};
+      uv_write_t  req;
+      auto const *ubufs = reinterpret_cast<uv_buf_t const *>(vec);
+      req.data          = this;
+      req.type          = UV_WRITE;
+
+      intc ret = uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
+                               ubufs, static_cast<unsigned>(nbufs), uvwrite_callback);
+
+      write_lock.unlock();
+      std::mutex       mtx;
+      std::unique_lock cb_lock{mtx};
+      write_cond_.wait(cb_lock);
+
+      intc status = static_cast<int>(reinterpret_cast<intptr_t>(req.data));
+      if (status != 0)
+            throw std::runtime_error(uv_strerror(status));
+
+      return ret;
+}
+
+ssize_t
+libuv_pipe_handle_impl::read(void *, ssize_t, int)
+{
+      throw std::logic_error("Cannot read, moron.");
+}
+
+file_handle_t
+libuv_pipe_handle_impl::fd() const noexcept
+{
+#ifdef _WIN32
+      return read_handle_.handle;
+#else
+      return read_handle_.accepted_fd;
+#endif
+}
+
+
+/****************************************************************************************/
+
+
+#ifdef _WIN32
+namespace win32 {
+
+using util::win32::error_exit;
+using util::win32::error_exit_wsa;
+using util::win32::error_exit_explicit;
+
+static __inline WSAOVERLAPPED
+create_wsa_overlapped()
+{
+      WSAOVERLAPPED ov = {};
+      ov.hEvent        = WSACreateEvent();
+      if (ov.hEvent == nullptr)
+            error_exit_wsa(L"WSACreateEvent()");
+      return ov;
+}
+
+size_t
+block_nonblocking_recv(SOCKET const sock, void *buf, size_t const nbytes, intc flags)
+{
+      WSAOVERLAPPED ov = create_wsa_overlapped();
+      size_t total = 0;
+      DWORD  nread = 0;
+      WSABUF wbuf;
+
+      goto first_iter;
+
+      do {
+            ::WSAResetEvent(ov.hEvent);
+      first_iter:
+            wbuf = {static_cast<ULONG>(nbytes - total),
+                    const_cast<char *>(static_cast<char const *>(buf) + total)};
+
+            DWORD flg = 0;
+            DWORD rc  = ::WSARecv(sock, &wbuf, 1, &nread, &flg, &ov, nullptr);
+
+            if (rc != 0) {
+                  if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
+                        error_exit_wsa(L"WSARecv()");
+
+                  rc = ::WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
+                  if (rc == WSA_WAIT_FAILED)
+                        error_exit_wsa(L"WSAWaitForMultipleEvents()");
+
+                  flg = 0;
+                  rc  = ::WSAGetOverlappedResult(sock, &ov, &nread, false, &flg);
+                  if (rc == 0) {
+                        rc = ::WSAGetLastError();
+                        if (rc == WSAECONNRESET)
+                              break;
+                        error_exit_explicit(L"WSASend via WSAGetOverlappedResult", rc);
+                  }
+            }
+            total += nread;
+      } while (((flags & MSG_WAITALL) && total < nbytes) || total == 0);
+
+      ::WSACloseEvent(ov.hEvent);
+      return total;
+
+}
+
+size_t
+block_nonblocking_send(SOCKET const sock, void const *buf, size_t const nbytes, int flags)
+{
+      WSAOVERLAPPED ov = create_wsa_overlapped();
+      size_t total = 0;
+      DWORD  nsent = 0;
+      DWORD  flg   = 0;
+      WSABUF wbuf;
+
+      goto first_iter;
+
+      do {
+            ::WSAResetEvent(ov.hEvent);
+      first_iter:
+            wbuf = {static_cast<ULONG>(nbytes - total),
+                    const_cast<char *>(static_cast<char const *>(buf) + total)};
+
+            DWORD rc = ::WSASend(sock, &wbuf, 1, &nsent, 0, &ov, nullptr);
+
+            if (rc != 0) {
+                  if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
+                        error_exit_wsa(L"WSASend()");
+
+                  rc = ::WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
+                  if (rc == WSA_WAIT_FAILED)
+                        error_exit_wsa(L"WSAWaitForMultipleEvents()");
+
+                  flg = 0;
+                  rc  = ::WSAGetOverlappedResult(sock, &ov, &nsent, false, &flg);
+                  if (rc == 0) {
+                        rc = ::WSAGetLastError();
+                        if (rc == WSAECONNRESET)
+                              break;
+                        error_exit_explicit(L"WSASend via WSAGetOverlappedResult", rc);
+                  }
+            }
+      } while ((total += nsent) < nbytes);
+
+      ::WSACloseEvent(ov.hEvent);
+      return total;
+}
+
+} // namespace win32
+#endif
+
+
+/****************************************************************************************/
+
+
+#ifdef _WIN32
+
+__forceinline size_t
+socket_recv_impl(socket_t sock, void *buf, size_t nbytes, int flags)
+{
+      return win32::block_nonblocking_recv(sock, buf, nbytes, flags);
+}
+
+__forceinline size_t
+socket_send_impl(socket_t sock, void *buf, size_t nbytes, int flags)
+{
+      return win32::block_nonblocking_send(sock, buf, nbytes, flags);
+}
+
+size_t
+socket_writev_impl(socket_t const sock, iovec const *bufs, size_t const nbufs, int flags)
+{
+      WSAOVERLAPPED ov = win32::create_wsa_overlapped();
+      DWORD nsent = 0;
+      DWORD flg   = 0;
+      DWORD rc    = ::WSASend(sock, const_cast<LPWSABUF>(bufs),
+                              static_cast<DWORD>(nbufs), &nsent, 0, &ov, nullptr);
+
+      if (rc != 0) {
+            if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
+                  win32::error_exit_wsa(L"WSASend()");
+
+            rc = WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
+            if (rc == WSA_WAIT_FAILED)
+                  win32::error_exit_wsa(L"WSAWaitForMultipleEvents()");
+
+            rc = WSAGetOverlappedResult(sock, &ov, &nsent, false, &flg);
+            if (rc == 0)
+                  win32::error_exit_wsa(L"WSASend failed via WSAGetOverlappedResult");
+      }
+
+      WSACloseEvent(ov.hEvent);
+      return nsent;
+}
+
+#else
+
+size_t
+socket_recv_impl(socket_t sock, void *buf, size_t nbytes, int flags)
+{
+      ssize_t n;
+      ssize_t total = 0;
+
+      if (flags & MSG_WAITALL) {
+            // Put it in a loop just in case...
+            do {
+                  n = ::recv(sock, (char *)buf + total, (size_t)(nbytes - total), flags); //NOLINT(*-casting,*-cast)
+            } while ((n != (-1)) && (total += n) < (ssize_t)nbytes);                      //NOLINT(*-casting)
+      } else {
+            for (;;) {
+                  n = ::recv(sock, buf, (size_t)nbytes, flags); //NOLINT(*-casting,*-cast)
+                  if (n != 0)
+                        break;
+                  std::this_thread::sleep_for(10ms);
+            }
+            total = n;
+      }
+
+      if (n == (-1)) [[unlikely]] {
+            auto const e = errno;
+            if (e == EBADF || e == ECONNRESET)
+                  throw except::connection_closed();
+            err("recv()");
+      }
+
+      return total;
+}
+
+size_t
+socket_send_impl(socket_t sock, void const *buf, size_t nbytes, int flags)
+{
+      ssize_t n;
+      ssize_t total = 0;
+
+      do {
+            n = ::send(sock, (char const *)buf + total, (size_t)(nbytes - total), flags); //NOLINT(*-casting,*-cast)
+      } while (n != (-1) && (total += n) < (ssize_t)nbytes);                              //NOLINT(*-casting)
+
+      if (n == (-1)) [[unlikely]] {
+            auto const e = errno;
+            if (e == EBADF || e == ECONNRESET)
+                  throw except::connection_closed();
+            err("send()");
+      }
+
+      return total;
+}
+
+size_t
+socket_writev_impl(socket_t const sock, iovec const *bufs, size_t const nbufs, int flags)
+{
+      ssize_t       bytes_sent;
+      struct msghdr hdr = {
+            .msg_iov    = const_cast<struct ::iovec *>(bufs),
+            .msg_iovlen = nbufs,
+      };
+
+      do {
+            // PSNIP_TRAP();
+            bytes_sent = sendmsg(sock, &hdr, flags);
+            // bytes_sent = ::writev(sock, bufs, static_cast<int>(nbufs));
+
+            if (bytes_sent == (-1)) [[unlikely]] {
+                  auto const e = errno;
+                  if (e == EBADF || e == ECONNRESET)
+                        throw except::connection_closed();
+                  err("sendmsg()");
+            }
+      } while (bytes_sent == 0);
+
+      return static_cast<ssize_t>(bytes_sent);
+}
+
+#endif
 
 
 /****************************************************************************************/

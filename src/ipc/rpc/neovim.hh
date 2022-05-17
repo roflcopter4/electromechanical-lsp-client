@@ -3,9 +3,7 @@
 #define HGUARD__IPC__RPC__NEOVIM_HH_ //NOLINT
 /****************************************************************************************/
 #include "Common.hh"
-#include "ipc/basic_rpc_connection.hh"
-
-#include "ipc/rpc/neovim/neovim_connection.hh"
+#include "ipc/protocols/msgpack_connection.hh"
 
 inline namespace emlsp {
 namespace ipc::rpc {

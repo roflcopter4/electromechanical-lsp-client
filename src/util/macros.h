@@ -15,11 +15,16 @@
 #ifndef __attr_access
 # define __attr_access(x)
 #endif
-#if !defined __declspec && !defined _MSC_VER
-# define __declspec(...)
-#endif
+//#if !defined __declspec && !defined _MSC_VER
+//# define __declspec(...)
+//#endif
 #ifndef __has_include
 # define __has_include(x)
+#endif
+#if defined __GNUC__ && (!defined __clang__ || (__clang_major__ >= 14 && __has_attribute(__error__)))
+# define __attribute_error__(x) __attribute__((__error__(x)))
+#else
+# define __attribute_error__(x) DEPRECATED_MSG(x)
 #endif
 
 #ifdef __cplusplus
@@ -34,25 +39,33 @@
 #define HELPER_EXPAND_MACRO(macro) macro
 
 #if (defined __cplusplus && (CXX_LANG_VER >= 201700L)) || (defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L)
-# define UNUSED      [[maybe_unused]]
-# define NODISCARD   [[nodiscard]]
-# define NORETURN    [[noreturn]]
-# define FALLTHROUGH [[fallthrough]]
+# define UNUSED            [[maybe_unused]]
+# define NODISCARD         [[nodiscard]]
+# define FALLTHROUGH       [[fallthrough]]
+# define NORETURN          [[noreturn]]
+# define DEPRECATED        [[deprecated]]
+# define DEPRECATED_MSG(x) [[deprecated(x)]]
 #elif defined __GNUC__
-# define UNUSED      __attribute__((__unused__))
-# define NODISCARD   __attribute__((__warn_unused_result__))
-# define NORETURN    __attribute__((__noreturn__))
-# define FALLTHROUGH __attribute__((__fallthrough__))
+# define UNUSED            __attribute__((__unused__))
+# define NODISCARD         __attribute__((__warn_unused_result__))
+# define FALLTHROUGH       __attribute__((__fallthrough__))
+# define NORETURN          __attribute__((__noreturn__))
+# define DEPRECATED        __attribute__((__deprecated__))
+# define DEPRECATED_MSG(x) __attribute__((__deprecated__(x)))
 #elif defined _MSC_VER
-# define UNUSED      __pragma(warning(suppress : 4100 4101))
-# define NODISCARD   _Check_return_
-# define NORETURN    __declspec(noreturn)
-# define FALLTHROUGH __fallthrough
+# define UNUSED            __pragma(warning(suppress : 4100 4101 4102))
+# define NODISCARD         _Check_return_
+# define FALLTHROUGH       __fallthrough
+# define NORETURN          __declspec(noreturn)
+# define DEPRECATED        __declspec(deprecated)
+# define DEPRECATED_MSG(x) __declspec(deprecated(x))
 #else
 # define UNUSED
 # define NODISCARD
 # define NORETURN
 # define FALLTHROUGH
+# define DEPRECATED
+# define DEPRECATED_MSG(x)
 #endif
 
 #ifdef __cplusplus
@@ -159,6 +172,10 @@
 # define __forceinline __inline
 #endif
 
+#ifndef __has_builtin
+#  define __has_builtin(x) 0
+#endif
+
 /*--------------------------------------------------------------------------------------*/
 
 #ifndef __WORDSIZE
@@ -236,29 +253,17 @@
 # define FUNCTION_NAME __func__
 #endif
 
+#ifdef _WIN32
+# define SETERRNO(x) SetLastError(x)
+#else
+# define SETERRNO(x) (errno = (x))
+#endif
 
 /*--------------------------------------------------------------------------------------*/
 
 #define USEC2SECOND UINTMAX_C(1000000)    /*     1,000,000 - one million */
 #define NSEC2SECOND UINTMAX_C(1000000000) /* 1,000,000,000 - one billion */
 
-#define BIGFLT double
-
-#define TIMESPEC_FROM_DOUBLE(FLT)                                          \
-      { (uintmax_t)((BIGFLT)(FLT)),                                        \
-            (uintmax_t)(((BIGFLT)((BIGFLT)(FLT) -                          \
-                                  (BIGFLT)((uintmax_t)((BIGFLT)(FLT))))) * \
-                        (BIGFLT)NSEC2SECOND) }
-
-#undef BIGFLT
-
-#define TIMESPEC_FROM_SECOND_FRACTION(seconds, numerator, denominator)               \
-      {                                                                              \
-            (uintmax_t)(seconds),                                                    \
-            (uintmax_t)((denominator) == 0 ? UINTMAX_C(0)                            \
-                                           : (((uintmax_t)(numerator)*NSEC2SECOND) / \
-                                              (uintmax_t)(denominator)))             \
-      }
 
 /****************************************************************************************/
 #endif // macros.h

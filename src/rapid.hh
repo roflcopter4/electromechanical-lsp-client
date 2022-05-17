@@ -33,12 +33,14 @@
 
 inline namespace emlsp {
 namespace ipc::json {
-
 /****************************************************************************************/
 
+
 using StringRef = rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>;
+
 template<typename T>
-concept NonStringRef = !std::convertible_to<T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
+concept NonStringRef =
+    !std::convertible_to<T, rapidjson::GenericStringRef<rapidjson::UTF8<char>::Ch>>;
 
 /*
  * Dumbass wrapper.
@@ -64,58 +66,90 @@ class rapid_doc
       rapid_doc(rapid_doc &&) noexcept        = delete;
       rapid_doc &operator=(rapid_doc &&) noexcept = delete;
 
-      rapidjson::Document &doc()   { return doc_; }
-      rapidjson::Value    *cur()   { return cur_; }
-      Allocator           &alloc() { return al_; }
+      ND rapidjson::Document &doc()   { return doc_; }
+      ND rapidjson::Value    *cur()   { return cur_; }
+      ND Allocator           &alloc() { return al_; }
 
       /*--------------------------------------------------------------------------------*/
 
-      void add_member(StringRef &&key, StringRef &&val)
+      template <size_t N1, size_t N2>
+      __forceinline void add_member(char const (&key)[N1], char const (&val)[N2])
       {
-            cur_->AddMember(key, val, al_);
+            cur_->AddMember(key, val, al_);  // Two stringrefs
       }
 
-      void add_member(StringRef &&key, rapidjson::Value &val)
+      __forceinline void add_member(StringRef &&key, rapidjson::Value &val)
       {
-            cur_->AddMember(key, std::move(val), al_);
+            cur_->AddMember((key), val, al_);
       }
 
-      void add_member(StringRef &&key, rapidjson::Value &&val)
+      __forceinline void add_member(StringRef &&key, rapidjson::Value &&val)
       {
-            cur_->AddMember(key, val, al_);
+            cur_->AddMember((key), std::move(val), al_);
       }
 
       template <typename T>
-            REQUIRES (NonStringRef<T>)
-      void add_member(StringRef &&key, T &val)
+            REQUIRES (util::concepts::Integral<T>)
+      __forceinline void add_member(StringRef &&key, char const *str, T const len)
+      {
+            cur_->AddMember((key), rapidjson::Value(str, static_cast<rapidjson::SizeType>(len)), al_);
+      }
+
+      template <typename T>
+            REQUIRES (NonStringRef<T> && !util::concepts::StringVariant<T>)
+      __forceinline void add_member(StringRef &&key, T &&val)
       {
             cur_->AddMember(key, rapidjson::Value(std::move(val)), al_);
       }
 
       template <typename T>
+            REQUIRES (NonStringRef<T> && !util::concepts::StringVariant<T>)
+      __forceinline void add_member(StringRef &&key, T &val)
+      {
+            cur_->AddMember(key, rapidjson::Value(val), al_);
+      }
+
+      template <typename T = std::string_view>
+            REQUIRES (
+                  util::concepts::StringVariant<T> &&
+                  !util::concepts::Pointer<T> &&
+                  !util::concepts::Trivial<T>
+            )
+      __forceinline void add_member(StringRef &&key, T const &val)
+      {
+            cur_->AddMember(key, rapidjson::Value(
+                  val.data(), static_cast<rapidjson::SizeType>(val.size())), al_);
+      }
+
+      template <typename T>
+            REQUIRES(
+                  NonStringRef<T> &&
+                  std::same_as<T, char *> &&
+                  !util::concepts::Const<T> &&
+                  !util::concepts::Reference<T>
+            )
+      __forceinline void add_member(StringRef &&key, T &&val)
+      {
+            cur_->AddMember(key, rapidjson::Value(val, ::strlen(val)), al_);
+      }
+
+      template <typename T>
             REQUIRES (NonStringRef<T>)
-      void add_member(StringRef &&key, T &&val)
+      __forceinline void add_member(T &key, StringRef &&val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
       template <typename T>
-            REQUIRES(NonStringRef<T>)
-      void add_member(T &key, StringRef &&val)
-      {
-            cur_->AddMember(std::move(key), val, al_);
-      }
-
-      template <typename T>
             REQUIRES (NonStringRef<T>)
-      void add_member(T &&key, StringRef &&val)
+      __forceinline void add_member(T &&key, StringRef &&val)
       {
-            cur_->AddMember(key, rapidjson::Value(val), al_);
+            cur_->AddMember(key, (val), al_);
       }
 
 #if 1
       template <NonStringRef ...Types>
-      void add_member(Types &&...args)
+      __forceinline void add_member(Types &&...args)
       {
             cur_->AddMember(std::forward<Types &&>(args)..., al_);
       }
@@ -131,42 +165,42 @@ class rapid_doc
 
       /*--------------------------------------------------------------------------------*/
 
-      void add_value(StringRef &&val)
+      __forceinline void add_value(StringRef &&val)
+      {
+            cur_->PushBack((val), al_);
+      }
+
+      template <typename T>
+            REQUIRES(NonStringRef<T>)
+      __forceinline void add_value(T &val)
       {
             cur_->PushBack(val, al_);
       }
 
       template <typename T>
-            REQUIRES(NonStringRef<T>)
-      void add_value(T &val)
-      {
-            cur_->PushBack(std::move(val), al_);
-      }
-
-      template <typename T>
             REQUIRES (NonStringRef<T>)
-      void add_value(T &&val)
+      __forceinline void add_value(T &&val)
       {
             cur_->PushBack(val, al_);
       }
 
       /*--------------------------------------------------------------------------------*/
 
-      void set_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      __forceinline void set_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
-            cur_->AddMember(key, rapidjson::Value(ty), al_);
+            cur_->AddMember((key), rapidjson::Value(ty), al_);
             cur_ = &cur_->FindMember(key)->value;
       }
 
       template <typename T>
             REQUIRES (NonStringRef<T>)
-      void set_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
+      __forceinline void set_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
             cur_ = &cur_->FindMember(key)->value;
       }
 
-      void set_value(rapidjson::Type const ty)
+      __forceinline void set_value(rapidjson::Type const ty)
       {
             cur_->PushBack(rapidjson::Value(ty), al_);
             cur_ = &(*cur_)[cur_->Size() - 1ULL];
@@ -176,7 +210,7 @@ class rapid_doc
 
       void push_member(StringRef &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
-            cur_->AddMember(key, rapidjson::Value(ty), al_);
+            cur_->AddMember(key , rapidjson::Value(ty), al_);
             stack_.push(cur_);
             cur_ = &cur_->FindMember(key)->value;
       }

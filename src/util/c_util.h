@@ -35,7 +35,7 @@ __BEGIN_DECLS
 
 
 _Check_return_ char const *
-my_strerror(errno_t errval, _Notnull_ char *buf, size_t buflen)
+my_strerror(_In_ errno_t errval, _Out_writes_(buflen) char *buf, _In_ size_t buflen)
     __attribute__((__nonnull__(2)));
 
 
@@ -59,17 +59,17 @@ my_strerror(errno_t errval, _Notnull_ char *buf, size_t buflen)
  * \param suffix Optional suffix for the filename. May be NULL.
  * \return Length of the generated filename.
  */
-extern size_t braindead_tempname(_Notnull_   char       *restrict buf,
-                                 _Notnull_   char const *restrict dir,
-                                 _Maybenull_ char const *restrict prefix,
-                                 _Maybenull_ char const *restrict suffix)
+extern size_t braindead_tempname(_Out_      char       *restrict buf,
+                                 _In_z_     char const *restrict dir,
+                                 _In_opt_z_ char const *restrict prefix,
+                                 _In_opt_z_ char const *restrict suffix)
     __attribute__((__nonnull__(1, 2)))
     __attr_access((__write_only__, 1)) __attr_access((__read_only__, 2))
     __attr_access((__read_only__,  3)) __attr_access((__read_only__, 4));
 
 #ifndef HAVE_ASPRINTF
-extern int asprintf(_Notnull_       char       **restrict destp,
-                    _Notnull_ PFSAL char const  *restrict fmt,
+extern int asprintf(_Notnull_ _Outptr_result_z_ char       **restrict destp,
+                    _Notnull_ _In_ PFSAL        char const  *restrict fmt,
                     ...)
     __attribute__((__nonnull__)) ATTRIBUTE_PRINTF(2, 3);
 #endif
@@ -85,9 +85,9 @@ size_t emlsp_strlcpy(_Notnull_ char *restrict dst,
       return strlcpy(dst, src, size);
 }
 #else
-extern size_t emlsp_strlcpy(_Notnull_ char       *restrict dst,
-                            _Notnull_ char const *restrict src,
-                            size_t size)
+extern size_t emlsp_strlcpy(_Out_z_cap_(size) char *restrict dst,
+                            _In_z_            char const *restrict src,
+                            _In_              size_t size)
     __attribute__((__nonnull__, __warn_unused_result__))
     __attr_access((__write_only__, 1))
     __attr_access((__read_only__,  2));

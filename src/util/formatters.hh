@@ -15,9 +15,10 @@ struct formatter<::timespec>
       static constexpr double nsec_to_second = 1'000'000'000.0;
 
     public:
+      //NOLINTNEXTLINE(*convert-member-functions-to-static)
       constexpr auto parse(format_parse_context const &ctx) -> decltype(ctx.begin())
       {
-            auto const it = ctx.begin();
+            auto const *const it = ctx.begin();
             if (it + 1 != ctx.end() && *it != '}')
                   throw format_error("invalid format");
 
@@ -27,8 +28,8 @@ struct formatter<::timespec>
       template <typename FormatContext>
       constexpr auto format(::timespec const &p, FormatContext &ctx) -> decltype(ctx.out())
       {
-            auto const   sec  = static_cast<double>(p.tv_sec);
-            auto const   nsec = static_cast<double>(p.tv_nsec);
+            double const sec  = static_cast<double>(p.tv_sec);   //NOLINT(*use-auto)
+            double const nsec = static_cast<double>(p.tv_nsec);  //NOLINT(*use-auto)
             double const val  = sec + (nsec / nsec_to_second);
 
             return format_to(ctx.out(), FMT_COMPILE("{}s"), val);
@@ -37,15 +38,12 @@ struct formatter<::timespec>
 
 
 template <>
-struct formatter<std::filesystem::path>
+struct formatter<util::hacks::path>
 {
-    private:
-      static constexpr double nsec_to_second = 1'000'000'000.0;
-
-    public:
+      //NOLINTNEXTLINE(*convert-member-functions-to-static)
       constexpr auto parse(format_parse_context const &ctx) -> decltype(ctx.begin())
       {
-            auto const it = ctx.begin();
+            auto const *const it = ctx.begin();
             if (it + 1 != ctx.end() && *it != '}')
                   throw format_error("invalid format");
 
@@ -53,7 +51,7 @@ struct formatter<std::filesystem::path>
       }
 
       template <typename FormatContext>
-      constexpr auto format(std::filesystem::path const &p, FormatContext &ctx) -> decltype(ctx.out())
+      constexpr auto format(util::hacks::path const &p, FormatContext &ctx) -> decltype(ctx.out())
       {
             return format_to(ctx.out(), FMT_COMPILE("{}"), p.string());
       }
@@ -63,13 +61,10 @@ struct formatter<std::filesystem::path>
 template <>
 struct formatter<std::error_code>
 {
-    private:
-      static constexpr double nsec_to_second = 1'000'000'000.0;
-
-    public:
+      //NOLINTNEXTLINE(*convert-member-functions-to-static)
       constexpr auto parse(format_parse_context const &ctx) -> decltype(ctx.begin())
       {
-            auto const it = ctx.begin();
+            auto const *const it = ctx.begin();
             if (it + 1 != ctx.end() && *it != '}')
                   throw format_error("invalid format");
 

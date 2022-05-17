@@ -11,7 +11,7 @@ namespace ipc {
 
 
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::ConnectionImplVariant<ConnectionImpl>)
 class basic_dialer
 {
       ConnectionImpl impl_;
@@ -22,12 +22,7 @@ class basic_dialer
       basic_dialer()          = default;
       virtual ~basic_dialer() = default;
 
-      basic_dialer &operator=(basic_dialer &&) noexcept = delete;
-      basic_dialer &operator=(basic_dialer const &)     = default;
-      basic_dialer(basic_dialer const &)                = default;
-      basic_dialer(basic_dialer &&other) noexcept
-            : impl_(std::move(other.impl_))
-      {}
+      DELETE_ALL_CTORS(basic_dialer);
 
       //--------------------------------------------------------------------------------
 
@@ -39,8 +34,11 @@ class basic_dialer
 };
 
 
+/*--------------------------------------------------------------------------------------*/
+
+
 template <typename ConnectionImpl>
-      REQUIRES (detail::IsConnectionImplVariant<ConnectionImpl>)
+      REQUIRES (detail::ConnectionImplVariant<ConnectionImpl>)
 class spawn_dialer : public basic_dialer<ConnectionImpl>
 {
       using procinfo_t = detail::procinfo_t;
@@ -51,31 +49,34 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
       using connection_impl_type = typename base_type::connection_impl_type;
 
     private:
-      procinfo_t pid_ = {};
+      union {
+            procinfo_t    pid_{};
+            uv_process_t *libuv_process_handle_;
+      };
+      bool owns_process = true;
 #ifdef _WIN32
       std::unique_ptr<std::thread> process_watcher_ = nullptr;
 #endif
 
-    public:
-      spawn_dialer() = default;
+      static constexpr bool is_uv_pipe_ = std::is_same_v<connection_impl_type,
+                                                         detail::libuv_pipe_handle_impl>;
 
-      ~spawn_dialer() override
+    public:
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
+      spawn_dialer() : base_type()
+      {
+            if constexpr (is_uv_pipe_)
+                  owns_process = false;
+      }
+
+      virtual ~spawn_dialer() override
       {
             try {
                   this->kill(true);
             } catch (...) {}
       }
 
-      spawn_dialer(spawn_dialer const &) = delete;
-      spawn_dialer &operator=(spawn_dialer const &) = delete;
-      spawn_dialer &operator=(spawn_dialer &&) noexcept = default;
-
-      spawn_dialer(spawn_dialer &&other) noexcept
-          : pid_(std::move(other.pid_)),
-            base_type(std::move(other))
-      {
-            other.pid_ = {};
-      }
+      DELETE_ALL_CTORS(spawn_dialer);
 
       //--------------------------------------------------------------------------------
 
@@ -85,29 +86,42 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
       }
 
       template <typename T>
-      void set_stderr_fd(T const fd) { this->impl().set_stderr_fd(fd); }
+      void set_stderr_fd(T const fd)
+      {
+            this->impl().set_stderr_fd(fd);
+      }
 
       void set_stderr_default()
       {
             this->impl().set_stderr_default();
       }
+
       void set_stderr_devnull()
       {
             this->impl().set_stderr_devnull();
       }
+
       void set_stderr_filename(std::string const &fname)
       {
             this->impl().set_stderr_filename(fname);
       }
 
-      procinfo_t spawn_connection(size_t argc, char **argv)
+      virtual procinfo_t spawn_connection(size_t argc, char **argv)
       {
-            pid_ = this->impl().do_spawn_connection(argc, argv);
-            start_process_watcher();
+            if constexpr (is_uv_pipe_) {
+                  std::ignore = this->impl().do_spawn_connection(argc, argv);
+                  libuv_process_handle_ = this->impl().get_uv_process_handle();
+            } else {
+                  pid_ = this->impl().do_spawn_connection(argc, argv);
+            }
+
+            //start_process_watcher();
+
 #ifdef _WIN32
             if (this->impl().spawn_with_shim())
-                  this->impl().accept()
+                  this->impl().accept();
 #endif
+
             return pid_;
       }
 
@@ -134,18 +148,15 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return spawn_connection(const_cast<char **>(argv));
       }
 
-      procinfo_t spawn_connection(std::vector<char *> &vec)
-      {
-            if (vec[vec.size() - 1] != nullptr)
-                  vec.emplace_back(nullptr);
-            return spawn_connection(vec.size(), vec.data());
-      }
+      procinfo_t spawn_connection(std::vector<char *> &vec)       { return spawn_connection(reinterpret_cast<std::vector<char const *>  &>(vec)); }
+      procinfo_t spawn_connection(std::vector<char *> &&vec)      { return spawn_connection(reinterpret_cast<std::vector<char const *> &&>(vec)); }
+      procinfo_t spawn_connection(std::vector<char const *> &vec) { return spawn_connection(std::forward<std::vector<char const *> &&>(vec));     }
 
-      procinfo_t spawn_connection(std::vector<char const *> &vec)
+      procinfo_t spawn_connection(std::vector<char const *> &&vec)
       {
             if (vec[vec.size() - 1] != nullptr)
                   vec.emplace_back(nullptr);
-            return spawn_connection(vec.size(), const_cast<char **>(vec.data()));
+            return spawn_connection(vec.size() - 1, const_cast<char **>(vec.data()));
       }
 
 #ifdef __TAG_HIGHLIGHT__
@@ -171,21 +182,89 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return spawn_connection(argc, const_cast<char **>(pack));
       }
 
-      ND procinfo_t const &pid() const & { return pid_; }
+      //--------------------------------------------------------------------------------
+
+      ND procinfo_t const &pid() const &
+      {
+            return pid_;
+      }
+
+      int waitpid() noexcept
+      {
+            if constexpr (is_uv_pipe_) {
+                  if (!libuv_process_handle_)
+                        return -1;
+            } else {
+                  if (!proc_probably_exists(pid_))
+                        return -1;
+            }
+            int status = 0;
+
+#ifdef _WIN32
+            HANDLE proc_hand;
+            if constexpr (is_uv_pipe_)
+                  proc_hand = libuv_process_handle_->process_handle;
+            else
+                  proc_hand = pid_.hProcess;
+
+            WaitForSingleObject(proc_hand, INFINITE);
+            GetExitCodeProcess (proc_hand, reinterpret_cast<LPDWORD>(&status));
+
+            if (owns_process) {
+                  CloseHandle(pid_.hThread);
+                  CloseHandle(pid_.hProcess);
+            }
+#else
+            pid_t proc_id;
+            if constexpr (is_uv_pipe_)
+                  proc_id = libuv_process_handle_->pid;
+            else
+                  proc_id = pid_;
+            ::waitpid(proc_id, reinterpret_cast<int *>(&status), 0);
+#endif
+
+            pid_ = {};
+            return status;
+      }
+
+      //--------------------------------------------------------------------------------
 
     private:
+      static bool proc_probably_exists(procinfo_t const &pid)
+      {
+#ifdef _WIN32
+            return pid.dwProcessId != 0;
+#else
+            return pid != 0;
+#endif
+      }
+
       void kill(bool const in_destructor)
       {
 #ifdef _WIN32
             if (process_watcher_) {
+# ifdef __GLIBCXX__
+                  pthread_cancel(process_watcher_->native_handle());
+# else
                   TerminateThread(process_watcher_->native_handle(), 0);
+# endif
                   process_watcher_->join();
             }
 #endif
-            util::kill_process(pid_);
+            if constexpr (is_uv_pipe_) {
+                  if (libuv_process_handle_) {
+                        uv_process_kill(libuv_process_handle_, SIGTERM);
+                        libuv_process_handle_ = nullptr;
+                  }
+            } else {
+                  if (proc_probably_exists(pid_)) {
+                        util::kill_process(pid_);
+                        if (!in_destructor)
+                              pid_ = {};
+                  }
+            }
+
             this->impl().close();
-            if (!in_destructor)
-                  pid_ = {};
       }
 
       void start_process_watcher()
@@ -202,6 +281,34 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 };
 
 
+template <> inline detail::procinfo_t const &
+spawn_dialer<detail::libuv_pipe_handle_impl>::pid() const &
+{
+#ifdef _WIN32
+      static std::mutex          mtx{};
+      static std::atomic_flag    flg{};
+      static PROCESS_INFORMATION pinfo{};
+
+      std::lock_guard lock(mtx);
+
+      if (!flg.test_and_set(std::memory_order::relaxed)) {
+            pinfo.hProcess    = libuv_process_handle_->process_handle;
+            pinfo.hThread     = nullptr;
+            pinfo.dwProcessId = libuv_process_handle_->pid;
+            pinfo.dwThreadId  = 0;
+      }
+
+      return pinfo;
+#else
+      return libuv_process_handle_->pid;
+#endif
+}
+
+
+/*--------------------------------------------------------------------------------------*/
+
+
+WHAT_THE_FUCK()
 class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 {
     public:
@@ -215,9 +322,7 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 
       ~std_streams_dialer() noexcept override = default;
 
-      DELETE_COPY_CTORS(std_streams_dialer);
-      std_streams_dialer &operator=(std_streams_dialer &&) noexcept = delete;
-      std_streams_dialer(std_streams_dialer &&) noexcept = default;
+      DELETE_ALL_CTORS(std_streams_dialer);
 
       //--------------------------------------------------------------------------------
 
@@ -229,29 +334,26 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 
 
 namespace dialers {
-
-using pipe             = spawn_dialer<detail::pipe_connection_impl>;
-using std_streams      = std_streams_dialer;
-using inet_ipv4_socket = spawn_dialer<detail::inet_ipv4_socket_connection_impl>;
-using inet_ipv6_socket = spawn_dialer<detail::inet_ipv6_socket_connection_impl>;
-using inet_socket      = spawn_dialer<detail::inet_any_socket_connection_impl>;
-using unix_socket      = spawn_dialer<detail::unix_socket_connection_impl>;
+using pipe              = spawn_dialer<detail::pipe_connection_impl>;
+using std_streams       = std_streams_dialer;
+using inet_ipv4_socket  = spawn_dialer<detail::inet_ipv4_socket_connection_impl>;
+using inet_ipv6_socket  = spawn_dialer<detail::inet_ipv6_socket_connection_impl>;
+using inet_socket       = spawn_dialer<detail::inet_any_socket_connection_impl>;
+using unix_socket       = spawn_dialer<detail::unix_socket_connection_impl>;
+using libuv_pipe_handle = spawn_dialer<detail::libuv_pipe_handle_impl>;
 #ifdef HAVE_SOCKETPAIR
-using socketpair       = spawn_dialer<detail::socketpair_connection_impl>;
+using socketpair        = spawn_dialer<detail::socketpair_connection_impl>;
 #endif
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
-using win32_named_pipe   = spawn_dialer<detail::win32_named_pipe_impl>;
-using win32_handle_pipe  = spawn_dialer<detail::pipe_handle_connection_impl>;
-#if 0
-using dual_unix_socket   = spawn_dialer<detail::dual_socket_connection_impl>;
-#endif
+using win32_named_pipe  = spawn_dialer<detail::win32_named_pipe_impl>;
+using win32_handle_pipe = spawn_dialer<detail::pipe_handle_connection_impl>;
 #endif
 
 } // namespace dialers
 
 
 template <typename T>
-concept IsDialerVariant =
+concept BasicDialerVariant =
     std::derived_from<T, basic_dialer<typename T::connection_impl_type>>;
 
 

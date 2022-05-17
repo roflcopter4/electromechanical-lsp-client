@@ -68,7 +68,13 @@ R"({
 std::string
 init_msg(char const *root)
 {
-      return fmt::sprintf(FMT_STRING(initialization_message), getpid(), root);
+      char      buf[4096];
+      int const len = snprintf(buf, sizeof buf, initialization_message, getpid(), root);
+      fflush(stderr);
+      fprintf(stderr, "init\n\n%.*s\n\n", len, buf);
+      fflush(stderr);
+      //return fmt::sprintf(FMT_STRING(initialization_message), getpid(), root);
+      return {buf, static_cast<size_t>(len)};
 }
 
 

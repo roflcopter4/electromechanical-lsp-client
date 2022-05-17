@@ -45,20 +45,22 @@ static bool  file_exists(char const *fname);
 /*======================================================================================*/
 
 size_t
-braindead_tempname(_Notnull_   char       *restrict const buf,
-                   _Notnull_   char const *restrict const dir,
-                   _Maybenull_ char const *restrict const prefix,
-                   _Maybenull_ char const *restrict const suffix)
+braindead_tempname(_Out_      char       *restrict buf,
+                   _In_z_     char const *restrict dir,
+                   _In_opt_z_ char const *restrict prefix,
+                   _In_opt_z_ char const *restrict suffix)
 {
       /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
        * so this is about the best way I can think of to do this. Here's hoping the
        * compiler is smart enough to work out what's going on. */
 
       size_t len = strlen(dir);
-      memcpy(buf, dir, len + 1);
-
-      if (len > 0 && !CHAR_IS_FILESEP(buf[len - 1]))
-            buf[len++] = FILESEP_CHAR;
+      if (len > 0) {
+            memcpy(buf, dir, len);
+            if (!CHAR_IS_FILESEP(buf[len - 1]))
+                  buf[len++] = FILESEP_CHAR;
+      }
+      buf[len] = '\0';  /* Paranoia */
 
       char *ptr = buf + len;
 
@@ -108,6 +110,6 @@ file_exists(char const *fname)
 {
       struct stat st;
       errno = 0;
-      stat(fname, &st);
+      (void)stat(fname, &st);
       return errno != ENOENT;
 }

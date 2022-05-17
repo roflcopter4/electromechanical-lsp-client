@@ -47,6 +47,12 @@ template<typename T>
 concept IsInetSockaddr = std::same_as<T, sockaddr_in> ||
                          std::same_as<T, sockaddr_in6>;
 
+template <typename T>
+concept StdMutexVariant = std::derived_from<T, std::mutex> ||
+                          std::derived_from<T, std::recursive_mutex> ||
+                          std::derived_from<T, std::timed_mutex> ||
+                          std::derived_from<T, std::recursive_timed_mutex>;
+
 } // namespace detail
 
 

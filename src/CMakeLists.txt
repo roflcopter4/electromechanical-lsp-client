@@ -3,57 +3,54 @@ set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-add_executable(
-    lsp-thing
-
+set (lsp-thing_SOURCES
     "main.cc"
-    "sigh.cc"
     "testing01.cc"
+
+    "mpack/format.cc"
+    "msgpack/dumper.cc"
 
     "ipc/connection_impl.cc"
     "ipc/rpc/lsp/static-data.cc"
-
-    "util/demangle.cc"
-    "util/recode.cc"
-    "util/signals.cc"
-    "util/util.cc"
 
     "util/c_util.c"
     "util/err.c"
     "util/tmpfile.c"
 
-    "mpack/format.cc"
-    "msgpack/dumper.cc"
+    "util/demangle.cc"
+    "util/signals.cc"
+    "util/util.cc"
 
-    # Include headers to make using MSVC less infuriatingly tedious.
+    "util/recode/recode.cc"
+)
+
+
+# Include headers to make using MSVC less infuriatingly tedious.
+set (lsp-thing_HEADERS
     "Common.hh"
     "pch.hh"
     "rapid.hh"
     "toploop.hh"
 
+    "msgpack/dumper.hh"
+
+    "ipc/connection_impl.hh"
     "ipc/basic_connection.hh"
     "ipc/basic_dialer.hh"
     "ipc/basic_io_connection.hh"
-    "ipc/basic_io_wrapper.hh"
-    "ipc/basic_loop.hh"
-    "ipc/basic_rpc_connection.hh"
-    "ipc/connection_impl.hh"
+    "ipc/basic_protocol_connection.hh"
+    "ipc/misc.hh"
+
+    "ipc/io/basic_io_wrapper.hh"
+    "ipc/io/msgpack_io_wrapper.hh"
+    "ipc/io/ms_jsonrpc_io_wrapper.hh"
+
+    "ipc/protocols/msgpack_connection.hh"
+    "ipc/protocols/ms_jsonrpc_connection.hh"
 
     "ipc/rpc/lsp.hh"
-    "ipc/rpc/lsp/lsp_connection.hh"
     "ipc/rpc/lsp/static-data.hh"
-
     "ipc/rpc/neovim.hh"
-    "ipc/rpc/neovim/api.hh"
-    "ipc/rpc/neovim/neovim_connection.hh"
-
-    "util/concepts.hh"
-    "util/exceptions.hh"
-    "util/formatters.hh"
-    "util/hackish_templates.hh"
-    "util/recode.hh"
-    "util/strings.hh"
-    "util/util.hh"
 
     "util/c_util.h"
     "util/debug_trap.h"
@@ -62,7 +59,25 @@ add_executable(
     "util/myerr.h"
     "util/types.h"
 
-    "msgpack/dumper.hh"
+    # "util/errno.hh"
+    "util/concepts.hh"
+    "util/exceptions.hh"
+    "util/formatters.hh"
+    "util/hackish_templates.hh"
+    "util/strings.hh"
+    "util/util.hh"
+
+    "util/recode/recode.hh"
+    "util/recode/recode_private.hh"
+    "util/recode/strlen.hh"
 
     "${CMAKE_BINARY_DIR}/config.h"
 )
+
+add_executable(lsp-thing
+    ${lsp-thing_SOURCES}
+    ${lsp-thing_HEADERS}
+)
+
+unset (lsp-thing_SOURCES)
+unset (lsp-thing_HEADERS)

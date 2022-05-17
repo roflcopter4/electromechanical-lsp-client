@@ -1,5 +1,5 @@
 // ReSharper disable CppLocalVariableMayBeConst
-// ReSharper disable CppClangTidyPerformanceNoIntToPtr
+// ReSharper disable CppClangTidyPerformanceNoIntTjPtr
 #pragma once
 #ifndef HGUARD__IPC__CONNECTION_IMPL_HH_
 #define HGUARD__IPC__CONNECTION_IMPL_HH_ //NOLINT
@@ -9,12 +9,34 @@
 #include "util/debug_trap.h"
 
 #define WIN32_USE_PIPE_IMPL
+#define WHAT_THE_FUCK() [[maybe_unused]] static constexpr int P99_PASTE(z_VARIABLE_that_IS_not_USED_, __LINE__, _, __COUNTER__, _) = 0;
 
 inline namespace emlsp {
 namespace ipc::detail {
 /****************************************************************************************/
 
-using emlsp::util::detail::procinfo_t;
+
+using ::emlsp::util::detail::procinfo_t;
+#ifdef _WIN32
+using file_handle_t = HANDLE;
+using iovec         = WSABUF;
+constexpr void init_iovec(iovec &vec, char *buf, DWORD const size)
+{
+      vec.buf = buf;
+      vec.len = size;
+}
+#else
+using file_handle_t = int;
+using iovec         = struct ::iovec;
+constexpr void init_iovec(iovec &vec, char *buf, size_t const size)
+{
+      vec.iov_base = buf;
+      vec.iov_len  = size;
+}
+#endif
+
+constexpr auto invalid_socket = static_cast<socket_t>(-1);
+
 
 /****************************************************************************************/
 /* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
@@ -23,19 +45,18 @@ using emlsp::util::detail::procinfo_t;
    ┃  └───────────────────────────────────────────────┘                               ┃
    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
-template <typename DescriptorType>
+
+template <typename DescriptorType, typename MutexType>
+      REQUIRES (detail::StdMutexVariant<MutexType>)
 class base_connection_interface
 {
 #ifdef _WIN32
       using err_descriptor_type = HANDLE;
-      static constexpr char dev_null[] = "NUL";
+      static constexpr wchar_t dev_null[] = L"NUL";
 #else
       using err_descriptor_type = int;
       static constexpr char dev_null[] = "/dev/null";
 #endif
-
-      bool open_listener_  = true;
-      uint8_t initialized_ = 0;
 
     protected:
       enum class sink_type : uint8_t {
@@ -45,14 +66,19 @@ class base_connection_interface
             FD,
       };
 
-      sink_type           err_sink_type_ = sink_type::DEFAULT;
-      err_descriptor_type err_fd_        = err_descriptor_type(-1);
-      std::string         err_fname_     = {};
-      std::mutex          read_mtx_      = {};
-      std::mutex          write_mtx_     = {};
-
+    public:
       static constexpr int default_read_flags  = MSG_WAITALL;
       static constexpr int default_write_flags = 0;
+
+      MutexType           read_mtx_      = {};
+      MutexType           write_mtx_     = {};
+      std::string         err_fname_     = {};
+      err_descriptor_type err_fd_        = err_descriptor_type(-1);
+      sink_type           err_sink_type_ = sink_type::DEFAULT;
+
+    private:
+      bool    open_listener_ = true;
+      uint8_t initialized_   = 0;
 
     public:
       base_connection_interface() = default;
@@ -64,21 +90,11 @@ class base_connection_interface
       }
 
       DEFAULT_COPY_CTORS(base_connection_interface);
-      base_connection_interface &
-      operator=(base_connection_interface &&) noexcept = default;
+      DEFAULT_MOVE_CTORS(base_connection_interface);
 
-      base_connection_interface(base_connection_interface &&other) noexcept
-          : open_listener_ (other.open_listener_)
-          , initialized_ (other.initialized_)
-          , err_sink_type_ (other.err_sink_type_)
-          , err_fd_ (other.err_fd_)
-          , err_fname_ (std::move(other.err_fname_))
-      {
-            other.err_sink_type_ = sink_type::DEFAULT;
-            other.err_fd_        = err_descriptor_type(-1);
-      }
-
+      using this_type       = base_connection_interface<DescriptorType, MutexType>;
       using descriptor_type = DescriptorType;
+      using mutex_type      = MutexType;
 
       //--------------------------------------------------------------------------------
 
@@ -112,7 +128,10 @@ class base_connection_interface
             err_fname_     = fname;
       }
 
-      virtual void should_open_listener(bool const val) { open_listener_ = val; }
+      virtual void should_open_listener(bool const val) noexcept
+      {
+            open_listener_ = val;
+      }
 
       virtual ssize_t read(void *buf, ssize_t const nbytes)
       {
@@ -124,25 +143,31 @@ class base_connection_interface
             return write(buf, nbytes, default_write_flags);
       }
 
-      virtual ssize_t    read (void       *buf, ssize_t nbytes, int flags) = 0;
-      virtual ssize_t    write(void const *buf, ssize_t nbytes, int flags) = 0;
-      virtual void       open()                                            = 0;
-      virtual void       close()                                           = 0;
-      virtual procinfo_t do_spawn_connection(size_t argc, char **argv)     = 0;
+      virtual ssize_t writev(iovec const *buf, size_t const nbytes)
+      {
+            return writev(buf, nbytes, default_write_flags);
+      }
 
-      ND virtual DescriptorType fd()        const noexcept                 = 0;
-      ND virtual size_t         available() const noexcept(false)          = 0;
+      virtual ssize_t    read (void       *buf, ssize_t nbytes, int flags)  = 0;
+      virtual ssize_t    write(void const *buf, ssize_t nbytes, int flags)  = 0;
+      virtual ssize_t    writev(iovec const *bufs, size_t nbufs, int flags) = 0;
+      virtual void       open()                                             = 0;
+      virtual void       close() noexcept                                   = 0;
+      virtual procinfo_t do_spawn_connection(size_t argc, char **argv)      = 0;
+
+      ND virtual DescriptorType fd()        const noexcept                  = 0;
+      ND virtual size_t         available() const noexcept(false)           = 0;
 
       //--------------------------------------------------------------------------------
 
     protected:
       ND err_descriptor_type get_err_handle();
-      ND virtual bool should_open_listener() const { return open_listener_; }
-      ND bool check_initialized(uint8_t const val) const { return initialized_ >= val; }
-      void    set_initialized(uint8_t const val = 1) { initialized_ = val; }
+      ND virtual bool should_open_listener() const noexcept       { return open_listener_; }
+      ND bool check_initialized(uint8_t const val) const noexcept { return initialized_ >= val; }
+      void    set_initialized(uint8_t const val = 1) noexcept     { initialized_ = val; }
 
-      void throw_if_initialized(std::type_info const &id, uint8_t const val = 1) const
-          noexcept(false)
+      void throw_if_initialized(std::type_info const &id, uint8_t const val = 1)
+          const noexcept(false)
       {
             if (check_initialized(val))
                   throw std::logic_error{
@@ -160,12 +185,21 @@ class base_connection_interface
 #else
       std::thread *get_child_watcher_thread() { return nullptr; }
 #endif
+
+#ifdef _WIN32
+    public:
+         virtual DescriptorType accept() { return DescriptorType(-1); }
+      ND virtual bool spawn_with_shim() const noexcept { return false; }
+         virtual void spawn_with_shim(bool) noexcept {}
+#endif
 };
 
 
 template <typename T>
-concept IsConnectionImplVariant =
-    std::derived_from<T, base_connection_interface<typename T::descriptor_type>>;
+concept ConnectionImplVariant =
+    std::derived_from<T,
+                      base_connection_interface<typename T::descriptor_type,
+                                                typename T::mutex_type>>;
 
 
 /****************************************************************************************/
@@ -176,38 +210,44 @@ concept IsConnectionImplVariant =
    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
 
+#pragma push_macro("SETERRNO")
+#undef SETERRNO
 #ifdef _WIN32
 # define ERRNO WSAGetLastError()
 # define SETERRNO(v) WSASetLastError(v)
-# define ERR(n, t) util::win32::error_exit_wsa(L ## t)
+# define ERR(t) util::win32::error_exit_wsa(L ## t)
 #else
 # define ERRNO errno
 # define SETERRNO(v) (errno = (v))
-# define ERR(n, t) err(n, t)
+# define ERR(t) err(t)
 #endif
 
 
 template <typename AddrType>
-class socket_connection_base_impl : public base_connection_interface<socket_t>
+class socket_connection_base_impl
+      : public base_connection_interface<socket_t, std::mutex>
 {
       using this_type = socket_connection_base_impl;
-      using base_type = base_connection_interface<socket_t>;
+      using base_type = base_connection_interface<socket_t, std::mutex>;
+
 #ifdef _WIN32
       using sock_int_type = int;
 #else
       using sock_int_type = size_t;
 #endif
-      bool should_open_listener_  = true;
-      bool should_close_listener_ = true;
-      bool should_connect_        = true;
-      bool use_dual_sockets_      = false;
+      using cbool = bool const;
+
+      bool should_open_listener_  : 1 = true;
+      bool should_close_listener_ : 1 = true;
+      bool should_connect_        : 1 = true;
+      bool use_dual_sockets_      : 1 = false;
 
     protected:
-      socket_t  listener_  = static_cast<socket_t>(-1);
-      socket_t  con_read_  = static_cast<socket_t>(-1);
-      socket_t  con_write_ = static_cast<socket_t>(-1);
-      socket_t  acc_read_  = static_cast<socket_t>(-1);
-      socket_t  acc_write_ = static_cast<socket_t>(-1);
+      socket_t  listener_  = invalid_socket;
+      socket_t  con_read_  = invalid_socket;
+      socket_t  con_write_ = invalid_socket;
+      socket_t  acc_read_  = invalid_socket;
+      socket_t  acc_write_ = invalid_socket;
       AddrType  addr_      = {};
 
     public:
@@ -224,47 +264,33 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
       }
 
       DEFAULT_COPY_CTORS(socket_connection_base_impl);
-      socket_connection_base_impl &
-      operator=(socket_connection_base_impl &&) noexcept = default;
-
-      socket_connection_base_impl(socket_connection_base_impl &&other) noexcept
-          : base_type (std::move(other)),
-            should_open_listener_ (other.should_open_listener_),
-            should_close_listener_ (other.should_close_listener_),
-            should_connect_ (other.should_connect_),
-            use_dual_sockets_ (other.use_dual_sockets_),
-            listener_ (other.listener_),
-            acc_read_ (other.acc_read_),
-            acc_write_ (other.acc_write_),
-            addr_ (std::move(other.addr_))
-      {
-            other.listener_  = static_cast<socket_t>(-1);
-            other.acc_read_  = static_cast<socket_t>(-1);
-            other.acc_write_ = static_cast<socket_t>(-1);
-      }
+      DELETE_MOVE_CTORS(socket_connection_base_impl);
 
       //--------------------------------------------------------------------------------
 
-      ND bool should_open_listener() const override { return should_open_listener_; }
-      void should_open_listener(bool val)  override { should_open_listener_ = val; }
+      ND bool should_open_listener() const noexcept override { return should_open_listener_; }
+      void should_open_listener(bool val)  noexcept override { should_open_listener_ = val; }
 
-      ND bool should_close_listnener() const { return should_close_listener_; }
-      ND bool should_connect()         const { return should_connect_; }
-      ND bool use_dual_sockets()       const { return use_dual_sockets_; }
-      void should_close_listnener(bool val)  { should_close_listener_ = val; }
-      void should_connect(bool val)          { should_connect_ = val; }
-      void use_dual_sockets(bool val)        { use_dual_sockets_ = val; }
+      ND bool should_close_listnener() const noexcept { return should_close_listener_; }
+      ND bool should_connect() const noexcept         { return should_connect_; }
+      ND bool use_dual_sockets() const noexcept       { return use_dual_sockets_; }
+      void should_close_listnener(cbool val) noexcept { should_close_listener_ = val; }
+      void should_connect(cbool val) noexcept         { should_connect_        = val; }
+      void use_dual_sockets(cbool val) noexcept       { use_dual_sockets_      = val; }
 
       using base_type::read;
       using base_type::write;
+      using base_type::writev;
 
       ssize_t read (void       *buf, ssize_t nbytes, int flags) final;
       ssize_t write(void const *buf, ssize_t nbytes, int flags) final;
-      void    close() final;
+      void    close() noexcept final;
+
+      ssize_t writev(iovec const *bufs, size_t nbufs, int flags) override;
 
       ND size_t available() const noexcept(false) override
       {
-            return util::available_in_fd(acc_read_);
+            return ::emlsp::util::available_in_fd(acc_read_);
       }
 
       ND socket_t fd() const noexcept final { return acc_read_; }
@@ -273,10 +299,9 @@ class socket_connection_base_impl : public base_connection_interface<socket_t>
       ND socket_t acceptor() const { return acc_read_; }
 
       ND virtual AddrType &addr() & { return addr_; }
-
-      virtual socket_t accept()  = 0;
-      virtual socket_t connect() = 0;
-      virtual void set_listener(socket_t sock, AddrType const &addr) = 0;
+      virtual socket_t     accept()                                          = 0;
+      virtual socket_t     connect()                                         = 0;
+      virtual void         set_listener(socket_t sock, AddrType const &addr) = 0;
 
     protected:
       virtual socket_t open_new_socket()      = 0;
@@ -294,19 +319,13 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       using base_type = socket_connection_base_impl<sockaddr_un>;
 
       std::string path_;
-      bool        use_shim_ = false;
 
     public:
       unix_socket_connection_impl()           = default;
       ~unix_socket_connection_impl() override = default;
 
       DELETE_COPY_CTORS(unix_socket_connection_impl);
-      unix_socket_connection_impl &operator=(this_type &&) noexcept = delete;
-
-      unix_socket_connection_impl(this_type &&other) noexcept
-            : base_type(std::move(other))
-            , path_(std::move(other.path_))
-      {}
+      DELETE_MOVE_CTORS(unix_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -316,26 +335,22 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       socket_t   accept() override;
       void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
-      void       set_listener(socket_t sock, sockaddr_un const &addr) override;
+      void       set_listener(socket_t sock, sockaddr_un const &addr) noexcept override;
 
-      ND auto const &path() const & { return path_; }
+      ND auto const &path() const & noexcept { return path_; }
 
 #ifdef _WIN32
-      bool spawn_with_shim() const { return use_shim_; }
-      void spawn_with_shim(bool const val)
-      {
-            use_shim_ = val;
-            if (val) {
-                  use_dual_sockets(true);
-                  should_connect(false);
-            }
-      }
+      ND bool spawn_with_shim() const noexcept override { return use_shim_; }
+      void spawn_with_shim(bool val) noexcept override;
+
+    private:
+      bool use_shim_ = false;
 #endif
 
     protected:
       socket_t open_new_socket()   override;
       socket_t connect_to_socket() override;
-      socket_t get_connected_socket() override { return con_read_; }
+      socket_t get_connected_socket() noexcept override { return con_read_; }
 };
 
 
@@ -360,13 +375,7 @@ class socketpair_connection_impl final : public socket_connection_base_impl<sock
       }
 
       DELETE_COPY_CTORS(socketpair_connection_impl);
-      socketpair_connection_impl &
-      operator=(socketpair_connection_impl &&) noexcept = delete;
-
-      socketpair_connection_impl(socketpair_connection_impl &&other) noexcept
-          : base_type(std::move(other))
-      {
-      }
+      DELETE_MOVE_CTORS(socketpair_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -402,20 +411,21 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
       using base_type = socket_connection_base_impl<AddrType>;
 
     protected:
+      std::string addr_string_{};
+      std::string addr_string_with_port_{};
       uint16_t    hport_     = 0;
       bool        addr_init_ = false;
-      std::string addr_string_{};
 
     public:
-      inet_socket_connection_base_impl()            = default;
-       ~inet_socket_connection_base_impl() override = default;
+      inet_socket_connection_base_impl()                   = default;
+      virtual ~inet_socket_connection_base_impl() override = default;
 
       DELETE_COPY_CTORS(inet_socket_connection_base_impl);
       DEFAULT_MOVE_CTORS(inet_socket_connection_base_impl);
 
       //--------------------------------------------------------------------------------
 
-      void set_listener(socket_t const sock, AddrType const &addr) override
+      void set_listener(socket_t const sock, AddrType const &addr) noexcept override
       {
             this->should_close_listnener(true);
             this->listener_ = sock;
@@ -443,18 +453,28 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             socklen_t size  = get_socklen();
             this->acc_read_ = ::accept(this->listener_,
                                        const_cast<sockaddr *>(get_addr_generic()), &size);
-            if (static_cast<intptr_t>(this->acc_read_) < 0 || size != get_socklen())
-                  ERR(1, "accept");
+            if (this->acc_read_ == invalid_socket || size != get_socklen())
+                  ERR("accept");
 
-            this->acc_write_ = this->acc_read_;
+            if (this->use_dual_sockets()) {
+                  this->acc_write_ = ::accept(
+                      this->listener_, const_cast<sockaddr *>(get_addr_generic()), &size);
+                  if (this->acc_write_ == invalid_socket || size != get_socklen())
+                        ERR("accept");
+            } else {
+                  this->acc_write_ = this->acc_read_;
+            }
+
             return this->acc_read_;
       }
 
       ND std::string const &get_addr_string() const & { return addr_string_; }
       ND uint16_t           get_port()        const   { return hport_; }
 
+      ND std::string const &get_addr_and_port_string() const & { return addr_string_with_port_; }
+
     protected:
-      socket_t get_connected_socket() override { return this->con_read_; }
+      socket_t get_connected_socket() noexcept override { return this->con_read_; }
       ND virtual sockaddr const *get_addr_generic() const = 0;
       ND virtual socklen_t       get_socklen() const      = 0;
       ND virtual int             get_type() const         = 0;
@@ -473,7 +493,7 @@ class inet_any_socket_connection_impl final
       int       type_        = AF_UNSPEC;
 
     public:
-      inet_any_socket_connection_impl();
+      inet_any_socket_connection_impl() noexcept;
       ~inet_any_socket_connection_impl() override;
 
       DELETE_MOVE_CTORS(inet_any_socket_connection_impl);
@@ -498,8 +518,9 @@ class inet_any_socket_connection_impl final
       ND int             get_type()         const override { return type_; }
 
     private:
-      void set_listener(socket_t const /*sock*/, sockaddr *const & /*addr*/) override
+      void set_listener(socket_t, sockaddr *const &) noexcept override
       {}
+      void init_strings();
 };
 
 /*--------------------------------------------------------------------------------------*/
@@ -574,15 +595,21 @@ class inet_ipv6_socket_connection_impl final
    ┃  └────────────────────────────────────────────────────────┘                      ┃
    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
+#ifdef _WIN32
+#  define MUTEX_TYPE std::recursive_mutex
+#else
+#  define MUTEX_TYPE std::mutex
+#endif
+
 class fd_connection_impl;
 
 /*
  * For regular pipes.
  */
-class pipe_connection_impl : public base_connection_interface<int>
+class pipe_connection_impl : public base_connection_interface<int, MUTEX_TYPE>
 {
       using this_type = pipe_connection_impl;
-      using base_type = base_connection_interface<int>;
+      using base_type = base_connection_interface<int, MUTEX_TYPE>;
       friend class fd_connection_impl;
 
       int volatile read_  = (-1);
@@ -596,30 +623,24 @@ class pipe_connection_impl : public base_connection_interface<int>
       }
 
       DELETE_COPY_CTORS(pipe_connection_impl);
-      pipe_connection_impl &operator=(pipe_connection_impl &&) noexcept = delete;
-      pipe_connection_impl(pipe_connection_impl &&other) noexcept
-          : base_type(std::move(other))
-          , read_(other.read_)
-          , write_(other.write_)
-      {
-            other.read_  = (-1);
-            other.write_ = (-1);
-      }
+      DELETE_MOVE_CTORS(pipe_connection_impl);
 
       //--------------------------------------------------------------------------------
 
       using base_type::read;
       using base_type::write;
+      using base_type::writev;
 
       ssize_t read (void       *buf, ssize_t nbytes, int flags) final;
       ssize_t write(void const *buf, ssize_t nbytes, int flags) final;
+      ssize_t writev(iovec const *vec, size_t nbufs, int flags) final;
 
       void       open() final { /* Do nothing. This method makes no sense for pipes. */ }
-      void       close() final;
+      void       close() noexcept final;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
       ND descriptor_type fd()        const noexcept final { return read_; }
-      ND size_t          available() const noexcept final { return util::available_in_fd(read_); }
+      ND size_t          available() const noexcept(false) final;
 
       ND virtual int read_fd()  const noexcept { return read_; }
       ND virtual int write_fd() const noexcept { return write_; }
@@ -641,21 +662,10 @@ class fd_connection_impl final : public pipe_connection_impl
       fd_connection_impl()           = default;
       ~fd_connection_impl() override = default;
 
-      fd_connection_impl(int const readfd, int const writefd)
-      {
-            set_descriptors(readfd, writefd);
-            set_initialized();
-      }
+      fd_connection_impl(int readfd, int writefd);
 
 #ifdef _WIN32
-      fd_connection_impl(HANDLE readfd, HANDLE writefd)
-      {
-            set_descriptors(_open_osfhandle(reinterpret_cast<intptr_t>(readfd),
-                                            _O_RDONLY | _O_BINARY),
-                            _open_osfhandle(reinterpret_cast<intptr_t>(writefd),
-                                            _O_WRONLY | _O_BINARY));
-            set_initialized();
-      }
+      fd_connection_impl(HANDLE readfd, HANDLE writefd);
 #endif
 
       DELETE_COPY_CTORS(fd_connection_impl);
@@ -664,17 +674,15 @@ class fd_connection_impl final : public pipe_connection_impl
       //--------------------------------------------------------------------------------
 
     private:
+      __attribute_error__(ERRMSG)
       procinfo_t do_spawn_connection(size_t /*argc*/, char ** /*argv*/) override
       {
+            __asm__ volatile ("");
             throw std::logic_error(ERRMSG);
       }
 
     public:
-      void set_descriptors(int const readfd, int const writefd)
-      {
-            read_  = readfd;
-            write_ = writefd;
-      }
+      void set_descriptors(int readfd, int writefd);
 
       static fd_connection_impl make_from_std_handles() { return {0, 1}; }
 
@@ -687,10 +695,10 @@ class fd_connection_impl final : public pipe_connection_impl
 
 #ifdef _WIN32
 
-class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
+class pipe_handle_connection_impl : public base_connection_interface<HANDLE, MUTEX_TYPE>
 {
       using this_type = pipe_connection_impl;
-      using base_type = base_connection_interface<HANDLE>;
+      using base_type = base_connection_interface<HANDLE, MUTEX_TYPE>;
       friend class fd_connection_impl;
 
       HANDLE volatile read_  = INVALID_HANDLE_VALUE;
@@ -704,30 +712,24 @@ class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
       }
 
       DELETE_COPY_CTORS(pipe_handle_connection_impl);
-      pipe_handle_connection_impl &operator=(pipe_handle_connection_impl &&) noexcept = default;
-      pipe_handle_connection_impl(pipe_handle_connection_impl &&other) noexcept
-          : base_type(std::move(other))
-          , read_(other.read_)
-          , write_(other.write_)
-      {
-            other.read_  = reinterpret_cast<HANDLE>(-1);
-            other.write_ = reinterpret_cast<HANDLE>(-1);
-      }
+      DELETE_MOVE_CTORS(pipe_handle_connection_impl);
 
       //--------------------------------------------------------------------------------
 
       using base_type::read;
       using base_type::write;
+      using base_type::writev;
 
       ssize_t read (void       *buf, ssize_t nbytes, int flags) final;
       ssize_t write(void const *buf, ssize_t nbytes, int flags) final;
+      ssize_t writev(iovec const *vec, size_t nbufs, int flags) final;
 
       void       open() final { /* Do nothing. This method makes no sense for pipes. */ }
-      void       close() final;
+      void       close() noexcept final;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
-      ND descriptor_type fd()        const noexcept final { return read_; }
-      ND size_t          available() const noexcept final { return util::available_in_fd(read_); }
+      ND descriptor_type fd() const noexcept final { return read_; }
+      ND size_t available() const noexcept(false) final { return util::available_in_fd(read_); }
 
       ND virtual HANDLE read_fd()  const noexcept { return read_; }
       ND virtual HANDLE write_fd() const noexcept { return write_; }
@@ -755,17 +757,17 @@ class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
 /**
  * XXX BUG: Totally broken.
  */
-class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
+class win32_named_pipe_impl final : public base_connection_interface<int, MUTEX_TYPE>
 {
-      HANDLE       pipe_ = INVALID_HANDLE_VALUE;
       std::string  pipe_narrow_name_;
       std::wstring pipe_fname_;
+      HANDLE       pipe_             = INVALID_HANDLE_VALUE;
+      int          crt_fd_           = -1;
+      int          file_mode_        = _O_BINARY;
+      bool         use_dual_sockets_ = false;
 
-      OVERLAPPED  overlapped_ = {};
-
-      uv_loop_t  *loop_     = nullptr;
-      uv_pipe_t   uvhandle_ = {};
-      int         crt_fd_   = -1;
+      std::mutex write_mtx_{};
+      std::condition_variable write_cond_{};
 
     public:
       win32_named_pipe_impl() = default;
@@ -774,16 +776,72 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
             close();
       }
 
-      void close() override
+      void       open() override;
+      void       close() noexcept override;
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+
+      ssize_t read (void       *buf, ssize_t const nbytes) override { return read(buf, nbytes, 0); }
+      ssize_t write(void const *buf, ssize_t const nbytes) override { return write(buf, nbytes, 0); }
+      ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
+      ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
+
+      ssize_t writev(iovec const *vec, size_t const nbufs) override { return writev(vec, nbufs, 0); }
+      ssize_t writev(iovec const *vec, size_t nbufs, int flags) override;
+
+      ND int    fd() const noexcept override { return crt_fd_; }
+      ND HANDLE handle() const noexcept      { return pipe_; }
+      ND size_t available() const noexcept(false) override;
+
+      ND bool use_dual_sockets() const noexcept { return use_dual_sockets_; }
+      void use_dual_sockets(bool val) noexcept  { use_dual_sockets_ = val; }
+      void set_file_mode(int val) noexcept      { file_mode_ = val; }
+
+      DELETE_COPY_CTORS(win32_named_pipe_impl);
+      DEFAULT_MOVE_CTORS(win32_named_pipe_impl);
+
+    private:
+      static void __stdcall write_callback(_In_ DWORD           dwErrorCode,
+                                           _In_ DWORD dwNumberOfBytesTransfered,
+                                           _Inout_ LPOVERLAPPED lpOverlapped);
+};
+
+#endif
+
+
+/****************************************************************************************/
+
+
+class libuv_pipe_handle_impl final
+    : public base_connection_interface<file_handle_t, std::mutex>
+{
+      using this_type = libuv_pipe_handle_impl;
+
+      uv_loop_t   *loop_         = nullptr;
+      uv_pipe_t    read_handle_  = {};
+      uv_pipe_t    write_handle_ = {};
+      uv_process_t proc_handle_  = {};
+
+      std::condition_variable write_cond_{};
+
+#ifdef _WIN32
+      int crt_err_fd_ = 2;
+#endif
+
+    public:
+      libuv_pipe_handle_impl() = default;
+      ~libuv_pipe_handle_impl() override
       {
-            if (pipe_ != INVALID_HANDLE_VALUE) {
-                  CloseHandle(pipe_);
-                  DeleteFileW(pipe_fname_.c_str());
+#ifdef _WIN32
+            if (crt_err_fd_ > 2) {
+                  _close(crt_err_fd_);
+                  crt_err_fd_ = 2;
+                  err_fd_     = INVALID_HANDLE_VALUE;
             }
-            pipe_       = nullptr;
-            pipe_fname_ = {};
+#endif
+            close();
       }
 
+      void       close() noexcept override;
       void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
@@ -792,83 +850,47 @@ class win32_named_pipe_impl final : public base_connection_interface<HANDLE>
       ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
       ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
 
-      ND HANDLE fd() const noexcept override { return pipe_; }
-      ND size_t available() const noexcept(false) override
-      {
-            throw util::except::not_implemented();
-      }
+      ssize_t writev(iovec const *vec, size_t nbufs) override { return writev(vec, nbufs, 0); };
+      ssize_t writev(iovec const *vec, size_t nbufs, int flags) override;
 
-      void set_loop(uv_loop_t *loop)
-      {
-            loop_ = loop;
-            uv_pipe_init(loop, &uvhandle_, 0);
-      }
+      ND file_handle_t fd() const noexcept override;
+      ND size_t        available() const noexcept(false) override;
+      ND uv_pipe_t    *get_uv_handle()         noexcept { return &read_handle_; }
+      ND uv_process_t *get_uv_process_handle() noexcept { return &proc_handle_; }
 
-      uv_pipe_t *get_uv_handle() { return &uvhandle_; }
+      ND uv_pipe_t    const *get_uv_handle()         const noexcept { return &read_handle_; }
+      ND uv_process_t const *get_uv_process_handle() const noexcept { return &proc_handle_; }
 
-      DELETE_COPY_CTORS(win32_named_pipe_impl);
-      DEFAULT_MOVE_CTORS(win32_named_pipe_impl);
+      void set_loop(uv_loop_t *loop);
+
+      DELETE_COPY_CTORS(libuv_pipe_handle_impl);
+      DELETE_MOVE_CTORS(libuv_pipe_handle_impl);
+
+    private:
+      static void uvwrite_callback(uv_write_t *req, int status);
 };
 
-#endif
-
-#if defined _WIN32 && false
-
-class dual_socket_connection_impl final : public base_connection_interface<SOCKET>
-{
-      using this_type = dual_socket_connection_impl;
-      using base_type = base_connection_interface<SOCKET>;
-
-      socket_t read_  = static_cast<socket_t>(-1);
-      socket_t write_ = static_cast<socket_t>(-1);
-
-    public:
-      dual_socket_connection_impl() = default;
-      ~dual_socket_connection_impl() override
-      {
-            close();
-      }
-
-      DELETE_COPY_CTORS(dual_socket_connection_impl);
-      DEFAULT_MOVE_CTORS(dual_socket_connection_impl);
-
-      using base_type::read;
-      using base_type::write;
-
-      ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
-      ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
-
-      void       open() override { /* Do nothing. */ }
-      void       close() override;
-      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
-
-      ND socket_t fd()        const noexcept override { return read_; }
-      ND size_t   available() const noexcept override { return util::available_in_fd(read_); }
-
-      ND SOCKET read_fd()  const noexcept { return read_; }
-      ND SOCKET write_fd() const noexcept { return write_; }
-};
-
-#endif
+#undef MUTEX_TYPE
 
 
 /****************************************************************************************/
 /****************************************************************************************/
 /* Out of line implementations for the base interface. */
 
+
 #ifdef _WIN32
-template <typename DescriptorType>
+template <typename DescriptorType, typename MutexType>
 HANDLE
-base_connection_interface<DescriptorType>::get_err_handle()
+base_connection_interface<DescriptorType, MutexType>::get_err_handle()
 {
-      HANDLE err_handle;
+      HANDLE err_handle = INVALID_HANDLE_VALUE;
 
       switch (err_sink_type_) {
       case sink_type::DEFAULT:
             err_handle = GetStdHandle(STD_ERROR_HANDLE);
             break;
       case sink_type::DEVNULL:
-            err_handle = CreateFileA(dev_null, GENERIC_WRITE, 0, nullptr,
+            err_handle = CreateFileW(dev_null, GENERIC_WRITE, 0, nullptr,
                                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             err_fd_ = err_handle;
             break;
@@ -876,13 +898,11 @@ base_connection_interface<DescriptorType>::get_err_handle()
             err_handle = err_fd_;
             break;
       case sink_type::FILENAME:
-            err_handle = CreateFileA(err_fname_.c_str(), GENERIC_WRITE, 0, nullptr,
-                                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            err_handle = CreateFileW(util::recode<wchar_t>(err_fname_).c_str(),
+                                     GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                     FILE_ATTRIBUTE_NORMAL, nullptr);
             err_fd_ = err_handle;
             break;
-      default:
-            throw std::logic_error(fmt::format(FC("Invalid value for err_sink_type_: {}"),
-                                               static_cast<int>(err_sink_type_)));
       }
 
       return err_handle;
@@ -890,9 +910,9 @@ base_connection_interface<DescriptorType>::get_err_handle()
 
 #else
 
-template <typename DescriptorType>
-int
-base_connection_interface<DescriptorType>::get_err_handle()
+template <typename DescriptorType, typename MutexType>
+      REQUIRES (detail::StdMutexVariant<MutexType>)
+int base_connection_interface<DescriptorType, MutexType>::get_err_handle()
 {
       int fd;
 
@@ -929,16 +949,18 @@ base_connection_interface<DescriptorType>::get_err_handle()
 # define XLATE_ERR(e) e
 #endif
 
-inline void close_socket(socket_t &sock)
+WHAT_THE_FUCK()
+
+inline void close_socket(socket_t &sock) noexcept
 {
-      if (sock != static_cast<socket_t>(-1)) {
+      if (sock != invalid_socket) {
             ::shutdown(sock, 2);
             util::close_descriptor(sock);
       }
 }
 
 template <typename AddrType>
-void socket_connection_base_impl<AddrType>::close()
+void socket_connection_base_impl<AddrType>::close() noexcept
 {
       if (acc_write_ != acc_read_)
             close_socket(acc_write_);
@@ -950,33 +972,91 @@ void socket_connection_base_impl<AddrType>::close()
       close_socket(con_read_);
 }
 
+
+#ifdef _WIN32
+namespace win32 {
+extern size_t block_nonblocking_recv(SOCKET sock, void       *buf, size_t nbytes, int flags);
+extern size_t block_nonblocking_send(SOCKET sock, void const *buf, size_t nbytes, int flags);
+} // namespace win32
+#endif
+
+WHAT_THE_FUCK()
+extern size_t socket_recv_impl(socket_t sock, void       *buf, size_t nbytes, int flags);
+extern size_t socket_send_impl(socket_t sock, void const *buf, size_t nbytes, int flags);
+extern size_t socket_writev_impl(socket_t sock, iovec const *, size_t nbufs, int flags);
+
+
+
+template <typename File, size_t (*WriteFn)(File, iovec const *, size_t, int)>
+size_t
+writev_all(File fd, iovec const *buf_vec, size_t nbufs, int flags)
+{
+#ifdef _WIN32
+# define iov_len  len
+# define iov_base buf
+#endif
+      size_t total   = 0;
+      auto *vec_cpy  = static_cast<iovec *>(alloca((nbufs + SIZE_C(1)) * sizeof(iovec)));
+      init_iovec(vec_cpy[nbufs], nullptr, 0);
+      memcpy(vec_cpy, buf_vec, nbufs * sizeof(iovec));
+
+      while (nbufs > 0 && vec_cpy[0].iov_len > 0) {
+            size_t delta = WriteFn(fd, vec_cpy, nbufs, flags);
+            assert(delta > 0);
+            total += delta;
+
+            for (iovec *vec; (vec = vec_cpy)->iov_len > 0; ++vec_cpy, --nbufs) {
+                  if (vec->iov_len > delta) {
+                        // NOLINTNEXTLINE (google-runtime-int)
+                        vec->iov_len -= static_cast<unsigned long>(delta);
+                        vec->iov_base = (static_cast<char *>(vec->iov_base)) + delta;
+                        break;
+                  }
+                  delta -= vec->iov_len;
+            }
+      }
+
+      return total;
+
+#undef iov_len
+#undef iov_base
+}
+
+
 template <typename AddrType>
 ssize_t
 socket_connection_base_impl<AddrType>::read(void         *buf,
                                             ssize_t const nbytes,
-                                            int           flags)
+                                            int     const flags)
 {
-      auto    lock  = std::lock_guard{read_mtx_};
-      ssize_t total = 0;
-      ssize_t n     = 0;
+      auto lock = std::lock_guard{read_mtx_};
       SETERRNO(0);
+      // PSNIP_TRAP();
+      return socket_recv_impl(acc_read_, buf, nbytes, flags);
+
+#if 0
+#ifdef _WIN32
+      return win32::block_nonblocking_recv(acc_read_, buf, nbytes, flags);
+#else
+      ssize_t n;
+      ssize_t total = 0;
+      errno         = 0;
 
       if (flags & MSG_WAITALL) {
             // Put it in a loop just in case...
             flags &= ~MSG_WAITALL;
             do {
-                  if (acc_read_ == socket_t(-1)) [[unlikely]]
+                  if (acc_read_ == invalid_socket) [[unlikely]]
                         throw except::connection_closed();
                   n = ::recv(acc_read_, static_cast<char *>(buf) + total,
-                             sock_int_type(nbytes - total), flags);
+                             static_cast<sock_int_type>(nbytes - total), flags);
             } while ((n != (-1)) && (total += n) < nbytes);
       } else {
             for (;;) {
-                  if (acc_read_ == socket_t(-1)) [[unlikely]]
+                  if (acc_read_ == invalid_socket) [[unlikely]]
                         throw except::connection_closed();
                    n = ::recv(acc_read_, static_cast<char *>(buf),
-                              sock_int_type(nbytes), flags);
-                  //psnip_dbg_assert(n > 0);
+                              static_cast<sock_int_type>(nbytes), flags);
                   if (n != 0)
                         break;
                   std::this_thread::sleep_for(10ms);
@@ -985,18 +1065,15 @@ socket_connection_base_impl<AddrType>::read(void         *buf,
       }
 
       if (n == (-1)) [[unlikely]] {
-            auto const e = ERRNO;
-            if (e == XLATE_ERR(EBADF) //|| e == XLATE_ERR(ECONNRESET)
-                )
+            auto const e = errno;
+            if (e == EBADF || e == ECONNRESET)
                   throw except::connection_closed();
-#ifdef _WIN32
-            util::win32::error_exit_explicit(L"recv() failed", e);
-#else
-            err(1, "send()");
-#endif
+            err("send()");
       }
 
       return total;
+#endif
+#endif
 }
 
 template <typename AddrType>
@@ -1005,34 +1082,76 @@ socket_connection_base_impl<AddrType>::write(void    const *buf,
                                              ssize_t const  nbytes,
                                              int     const  flags)
 {
-      auto    lock  = std::lock_guard{write_mtx_};
-      ssize_t total = 0;
-      ssize_t n;
+      std::lock_guard lock{write_mtx_};
       SETERRNO(0);
+      return socket_send_impl(acc_write_, buf, nbytes, flags);
+
+#if 0
+#ifdef _WIN32
+      return (ssize_t)win32::block_nonblocking_send(acc_write_, buf, nbytes);
+#else
+      ssize_t n;
+      ssize_t total = 0;
+      errno         = 0;
 
       do {
             n = ::send(acc_write_, static_cast<char const *>(buf) + total,
-                       sock_int_type(nbytes - total), flags);
+                       static_cast<sock_int_type>(nbytes - total), flags);
       } while (n != (-1) && (total += n) < nbytes);
 
       if (n == (-1)) [[unlikely]] {
             auto const e = ERRNO;
-            if (e == XLATE_ERR(EBADF) || e == XLATE_ERR(ECONNRESET))
+            if (e == EBADF || e == ECONNRESET)
                   throw except::connection_closed();
-#ifdef _WIN32
-            util::win32::error_exit_explicit(L"send() failed", e);
-#else
-            err(1, "send()");
-#endif
+            err("send()");
       }
 
       return total;
+#endif
+#endif
+}
+
+
+template <typename AddrType>
+ssize_t
+socket_connection_base_impl<AddrType>::writev(iovec  const *bufs,
+                                              size_t const  nbufs,
+                                              int    const  flags)
+{
+      std::lock_guard lock{write_mtx_};
+      SETERRNO(0);
+      return writev_all<socket_t, socket_writev_impl>(acc_write_, bufs, nbufs, flags);
+
+#if 0
+#ifdef _WIN32
+      return (ssize_t)win32::block_nonblocking_send(acc_write_, bufs, nbufs, nullptr);
+#else
+      struct msghdr hdr = {};
+      hdr.msg_iov       = const_cast<::iovec *>(bufs);
+      hdr.msg_iovlen    = nbufs;
+
+      int bytes_sent = sendmsg(acc_write_, &hdr, flags);
+      if (bytes_sent == (-1))
+            err("sendmsg()");
+
+      {
+            ssize_t total = 0;
+            for (unsigned i = 0; i < nbufs; ++i)
+                  total += static_cast<ssize_t>(bufs[i].iov_len);
+            if (bytes_sent != total)
+                  err("Error: WSASend sent only %d of %zu requested bytes.",
+                      bytes_sent, total);
+      }
+      return static_cast<ssize_t>(bytes_sent);
+#endif
+#endif
 }
 
 
 #undef ERR
 #undef ERRNO
 #undef XLATE_ERR
+#pragma pop_macro("SETERRNO")
 
 
 /****************************************************************************************/

@@ -2,6 +2,8 @@
 #include "Common.hh"
 #include "recode.hh"
 
+#include "util/debug_trap.h"
+
 #include <unistr.h>
 
 #undef uint8_t
@@ -31,11 +33,35 @@ conversion_error(errno_t const e, int const from, int const to) noexcept(false)
       char errbuf[128];
       auto const *eptr = my_strerror(e, errbuf, sizeof errbuf);
 
+#ifndef NDEBUG
+      PSNIP_TRAP();
+#endif
       /* This ought to be evaluated to a constant string at compile time. */
       throw std::runtime_error(
           fmt::format(FC("Failed to convert UTF{} string to UTF{} ({} -> {})"),
                       from, to, e, eptr));
 }
+
+
+#if defined _WIN32 && defined EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
+struct use_win32_errcode_tag {};
+
+NORETURN static void
+conversion_error(use_win32_errcode_tag, int const from, int const to) noexcept(false)
+{
+      auto const e = GetLastError();
+      auto const ecode = std::error_code{static_cast<int>(e),
+                                         std::system_category()};
+
+#ifndef NDEBUG
+      PSNIP_TRAP();
+#endif
+      /* This ought to be evaluated to a constant string at compile time. */
+      throw std::runtime_error(
+          fmt::format(FC("Failed to convert UTF{} string to UTF{} ({} -> {})"),
+                      from, to, e, ecode.message()));
+}
+#endif
 
 
 #define ABSURDLY_EVIL_MACRO_OF_DOOM(FROM, TO)                                              \
@@ -170,12 +196,20 @@ char16_to_char(char16_t const *ws, size_t const len) noexcept(false)
 {
       std::string str;
       size_t      resultlen = (len + SIZE_C(1)) * SIZE_C(2);
-
       str.reserve(resultlen);
+
+#if defined _WIN32 && defined EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
+      resultlen = WideCharToMultiByte(CP_UTF8, 0, reinterpret_cast<LPCWSTR>(ws),
+                                      static_cast<int>(len), str.data(),
+                                      static_cast<int>(resultlen), nullptr, nullptr);
+      if (resultlen == 0)
+            conversion_error(use_win32_errcode_tag{}, 8, 16);
+#else
       AUTOC *result = u16_to_u8(reinterpret_cast<uint16_t const *>(ws), len,
                                 reinterpret_cast<uint8_t *>(str.data()), &resultlen);
       if (!result)
             conversion_error(errno, 16, 8);
+#endif
 
       str.data()[resultlen] = 0;
       resize_string_hack(str, resultlen);
@@ -203,9 +237,11 @@ std::wstring
 char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
 {
 #if defined WCHAR_IS_U16
+# ifndef EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
       using uint_type = uint16_t;
+      constexpr auto       func    = &::u8_to_u16;
       static constexpr int numbits = 16;
-      auto const func = &::u8_to_u16;
+# endif
 #elif defined WCHAR_IS_U32
       using uint_type = uint32_t;
       static constexpr int numbits = 32;
@@ -216,11 +252,12 @@ char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
       size_t      resultlen = len + SIZE_C(1);
       str.reserve(resultlen);
 
-#if defined _WIN32 && false
-      fmt::print(stderr, FC("Hi from {}!!\n"), FUNCTION_NAME);
-      resultlen = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<LPCCH>(ws), len, str.data(), resultlen);
-      if (auto const e = GetLastError())
-            conversion_error(e, 8, numbits);
+#if defined _WIN32 && defined EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
+      resultlen = MultiByteToWideChar(CP_UTF8, 0, reinterpret_cast<LPCSTR>(ws),
+                                      static_cast<int>(len), str.data(),
+                                      static_cast<int>(resultlen));
+      if (resultlen == 0)
+            conversion_error(use_win32_errcode_tag{}, 8, 16);
 #else
       AUTOC *result = func(reinterpret_cast<uint8_t const *>(ws), len,
                            reinterpret_cast<uint_type *>(str.data()), &resultlen);

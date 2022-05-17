@@ -15,11 +15,12 @@ namespace ipc {
  * TODO: Documentation of some kind...
  */
 template <typename DialerVariant>
-      REQUIRES (IsDialerVariant<DialerVariant>)
+      REQUIRES (BasicDialerVariant<DialerVariant>)
 class basic_connection : public DialerVariant
 {
       using cint    = int const;
       using csize_t = size_t const;
+      using cvoidp  = void const *const;
 
       using this_type = basic_connection<DialerVariant>;
       using base_type = DialerVariant;
@@ -43,16 +44,18 @@ class basic_connection : public DialerVariant
       ssize_t raw_read(void *buf, csize_t nbytes)             { return impl().read(buf, static_cast<ssize_t>(nbytes)); }
       ssize_t raw_read(void *buf, csize_t nbytes, cint flags) { return impl().read(buf, static_cast<ssize_t>(nbytes), flags); }
 
-      ssize_t raw_write(void const *buf, csize_t nbytes)
+      ssize_t raw_write(cvoidp buf, csize_t nbytes)
       {
-            fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}\033[1;33m\n_eof_\033[0m\n"),
-                       nbytes, std::string_view(static_cast<char const *>(buf), nbytes));
+            util::eprint(FC("\033[1;33mwriting {} bytes <<'_EOF_'\n\033[0;32m{}\033[1;33m\n_EOF_\033[0m\n"),
+                         nbytes, std::string_view(static_cast<char const *>(buf), nbytes));
             return impl().write(buf, static_cast<ssize_t>(nbytes));
       }
-      ssize_t raw_write(void const *buf, csize_t nbytes, cint flags)
+      ssize_t raw_write(cvoidp buf, csize_t nbytes, cint flags)
       {
-            fmt::print(stderr, FC("\033[1;33mwriting {} bytes <<'_eof_'\n\033[0;32m{}\033[1;33m\n_eof_\033[0m\n"),
-                       nbytes, std::string_view(static_cast<char const *>(buf), nbytes));
+            return impl().write(buf, static_cast<ssize_t>(nbytes), flags);
+      }
+      ssize_t raw_writev(cvoidp buf, csize_t nbytes, cint flags)
+      {
             return impl().write(buf, static_cast<ssize_t>(nbytes), flags);
       }
 
@@ -68,34 +71,27 @@ class basic_connection : public DialerVariant
 
 namespace connections {
 
-using pipe             = basic_connection<dialers::pipe>;
-using std_streams      = basic_connection<dialers::std_streams>;
-using unix_socket      = basic_connection<dialers::unix_socket>;
-using inet_ipv4_socket = basic_connection<dialers::inet_ipv4_socket>;
-using inet_ipv6_socket = basic_connection<dialers::inet_ipv6_socket>;
-using inet_socket      = basic_connection<dialers::inet_socket>;
+using pipe              = basic_connection<dialers::pipe>;
+using std_streams       = basic_connection<dialers::std_streams>;
+using unix_socket       = basic_connection<dialers::unix_socket>;
+using inet_ipv4_socket  = basic_connection<dialers::inet_ipv4_socket>;
+using inet_ipv6_socket  = basic_connection<dialers::inet_ipv6_socket>;
+using inet_socket       = basic_connection<dialers::inet_socket>;
+using libuv_pipe_handle = basic_connection<dialers::libuv_pipe_handle>;
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using win32_named_pipe  = basic_connection<dialers::win32_named_pipe>;
 using win32_handle_pipe = basic_connection<dialers::win32_handle_pipe>;
-#if 0
-using dual_unix_socket  = basic_connection<dialers::dual_unix_socket>;
-#endif
 #endif
 #ifdef HAVE_SOCKETPAIR
-using socketpair       = basic_connection<dialers::socketpair>;
-using Default          = socketpair;
-#elif !defined _WIN32 || true
-using Default          = unix_socket;
-#else
-using Default          = dual_unix_socket;
+using socketpair        = basic_connection<dialers::socketpair>;
 #endif
-
+using Default           = libuv_pipe_handle;
 
 } // namespace connections
 
 
 template <typename T>
-concept IsBasicConnectionVariant =
+concept BasicConnectionVariant =
     std::derived_from<T, basic_connection<typename T::dialer_type>>;
 
 

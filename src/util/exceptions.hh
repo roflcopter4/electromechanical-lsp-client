@@ -20,7 +20,7 @@ class not_implemented final : public std::logic_error
       {}
 
     public:
-      not_implemented() : not_implemented("Feature not yet implememented", FUNCTION_NAME)
+      not_implemented() noexcept : not_implemented("Feature not yet implememented", FUNCTION_NAME)
       {}
 
       explicit not_implemented(char const *message)

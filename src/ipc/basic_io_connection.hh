@@ -6,16 +6,19 @@
 
 #include "ipc/basic_connection.hh"
 #include "ipc/basic_dialer.hh"
-#include "ipc/basic_io_wrapper.hh"
+
+#include "ipc/io/basic_io_wrapper.hh"
+#include "ipc/io/ms_jsonrpc_io_wrapper.hh"
+#include "ipc/io/msgpack_io_wrapper.hh"
 
 inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
 
 
-template <typename Connection, template <typename> class IOWrapper>
-      REQUIRES (IsBasicConnectionVariant<Connection> &&
-                io::IsWrapperVariant<IOWrapper<Connection>>)
+template <typename Connection, template <class> typename IOWrapper>
+      requires (BasicConnectionVariant<Connection> &&
+                io::WrapperVariant<IOWrapper<Connection>>)
 class basic_io_connection : public Connection,
                             public IOWrapper<Connection>
 {
@@ -25,11 +28,11 @@ class basic_io_connection : public Connection,
       using io_packer_type  = typename io_wrapper_type::packer_type;
 
     public:
-      basic_io_connection()
+      basic_io_connection() noexcept
           : Connection(), IOWrapper<Connection>(dynamic_cast<Connection *>(this))
       {}
 
-      ~basic_io_connection() override = default;
+      virtual ~basic_io_connection() override = default;
 
       basic_io_connection(basic_io_connection const &)                = delete;
       basic_io_connection &operator=(basic_io_connection const &)     = delete;
@@ -41,14 +44,19 @@ class basic_io_connection : public Connection,
       {
             std::mutex              mtx_{};
             std::condition_variable cnd_{};
+            std::atomic_uint cnt_ = 0;
+            std::atomic_flag flag_{};
 
           public:
             my_cond() = default;
 
             bool wait()
             {
-                  auto lock = std::unique_lock{mtx_};
+                  std::unique_lock<std::mutex> lock(mtx_);
+                  // flag_.clear();
                   cnd_.wait(lock);
+                  // flag_.test_and_set();
+                  // flag_.wait(true);
                   return false;
             }
 
@@ -60,16 +68,25 @@ class basic_io_connection : public Connection,
                   return ret == std::cv_status::timeout;
             }
 
-            void notify_one() { cnd_.notify_one(); }
-            void notify_all() { cnd_.notify_all(); }
+            void notify_one() noexcept
+            { 
+                  cnd_.notify_one();
+                  // do cnd_.notify_one();
+                  // while (!flag_.test());
+                  // flag_.clear();
+                  // flag_.notify_one();
+            }
+
+            // void notify_one() noexcept { cnd_.notify_one(); }
+            void notify_all() noexcept { cnd_.notify_all(); }
       };
 
       my_cond cond_{};
 
     public:
-      void notify_one() { cond_.notify_one(); }
-      void notify_all() { cond_.notify_all(); }
-      bool wait()       { return cond_.wait(); }
+      void notify_one() noexcept { cond_.notify_one(); }
+      void notify_all() noexcept { cond_.notify_all(); }
+      bool wait()                { return cond_.wait(); }
 
       template <typename Rep, typename Period>
       bool wait(std::chrono::duration<Rep, Period> const &dur)
@@ -85,7 +102,7 @@ template <typename Connection>
 using msgpack_connection = basic_io_connection<Connection, io::msgpack_wrapper>;
 
 template <typename Connection>
-using jsonrpc_connection = basic_io_connection<Connection, io::ms_jsonrpc2_wrapper>;
+using ms_jsonrpc_connection = basic_io_connection<Connection, io::ms_jsonrpc_wrapper>;
 
 } // namespace connections
 

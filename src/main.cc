@@ -1,55 +1,31 @@
 #include "Common.hh"
+#include "ipc/connection_impl.hh"
 
-#include "util/recode.hh"
+#include <x86intrin.h>
 
+#if defined _WIN32 && defined _MSC_VER
+# include <Shlwapi.h>
+#endif
 //#include <vld.h>
 
 /****************************************************************************************/
 
 inline namespace emlsp {
 
- namespace libevent {
-  NOINLINE extern void testing01(std::filesystem::path const &fname);
-  NOINLINE extern void testing02(std::filesystem::path const &fname);
-  NOINLINE extern void testing03();
-  NOINLINE extern void testing04();
-  NOINLINE extern void testing05();
- } // namespace libevent
-
- namespace rpc {
-  namespace mpack {
-   NOINLINE void test01();
-  } // namespace mpack
- } // namespace rpc
-
- namespace sigh {
-  NOINLINE extern void sigh01();
-  NOINLINE extern void sigh02();
-  NOINLINE extern void sigh03();
-  NOINLINE extern void sigh04();
-  NOINLINE extern void sigh05();
-  NOINLINE extern void sigh06();
- } // namespace sigh
-
- namespace fool {
-  NOINLINE void fool01();
- } // namespace fool
-
  namespace testing01 {
-  NOINLINE void foo01();
   NOINLINE void foo02();
+  NOINLINE void foo03();
  } // namespace testing01
 
 } // namespace emlsp
 
 /****************************************************************************************/
 
-static void init_locale()
+static void init_locale() noexcept
 {
       ::setlocale(LC_ALL, "en_US.UTF8");
       ::setlocale(LC_COLLATE, "en_US.UTF8");
       ::setlocale(LC_CTYPE, "en_US.UTF8");
-      ::setlocale(LC_MESSAGES, "en_US.UTF8");
       ::setlocale(LC_MONETARY, "en_US.UTF8");
       ::setlocale(LC_NUMERIC, "en_US.UTF8");
       ::setlocale(LC_TIME, "en_US.UTF8");
@@ -61,19 +37,18 @@ static void init_wsa()
       constexpr WORD w_version_requested = MAKEWORD(2, 2);
       WSADATA        wsa_data;
 
-      if (auto const err1 = WSAStartup(w_version_requested, &wsa_data) != 0) {
-            std::cerr << "WSAStartup failed with error: " <<  err1 << '\n';
-            util::win32::error_exit(L"Bad winsock dll");
-      }
+      if (::WSAStartup(w_version_requested, &wsa_data) != 0)
+            util::win32::error_exit_wsa(L"Bad WinSock dll");
 
       if (LOBYTE(wsa_data.wVersion) != 2 || HIBYTE(wsa_data.wVersion) != 2) {
-            std::cerr << "Could not find a usable version of Winsock.dll\n";
-            WSACleanup();
-            util::win32::error_exit(L"Bad winsock dll");
+            int const e = WSAGetLastError();
+            ::WSACleanup();
+            util::win32::error_exit_explicit(L"Bad WinSock dll", e);
       }
 }
 #endif
 
+#if 0
 UNUSED static void init_libevent()
 {
       //event_set_mem_functions(malloc, realloc, free);
@@ -85,9 +60,10 @@ UNUSED static void init_libevent()
             util::win32::error_exit(L"evthread_use_windows_threads()");
 #else
       if (::evthread_use_pthreads() != 0)
-            err(1, "evthread_use_pthreads()");
+            err("evthread_use_pthreads()");
 #endif
 }
+#endif
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -99,15 +75,13 @@ do_main(UNUSED int argc, UNUSED char *argv[])
       init_wsa();
       if (_setmode(0, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(0)");
-      if (_setmode(1, _O_TEXT) == (-1))
+      if (_setmode(1, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(1)");
-      if (_setmode(2, _O_TEXT) == (-1))
+      if (_setmode(2, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(2)");
+      if (!::SetConsoleCtrlHandler(util::win32::myCtrlHandler, true))
+            util::win32::error_exit(L"SetConsoleCtrlHandler");
 #endif
-      //init_libevent();
-
-      // if (argc != 2 || !argv[1] || !*argv[1])
-      //       exit(1);
 
 #if 0
       if (argc < 2)
@@ -126,28 +100,53 @@ do_main(UNUSED int argc, UNUSED char *argv[])
             dump_and_exit(6, FC("ERROR: Invalid paramater \"{}\": Must be a regular file.\n"), src_file.string());
 #endif
 
+      //wchar_t sbuf[4096]{};
+      //::GetShortPathNameW(long_filename[5], sbuf, std::size(sbuf));
+      //fmt::print(FC("Got short name as \"{}\"\n"), util::recode<char>(sbuf));
 
-      // fool::fool01();
-      // sigh::sigh04();
       testing01::foo02();
+      //testing01::foo03();
 
 #ifdef _WIN32
-      WSACleanup();
+      ::WSACleanup();
 #endif
 
       return 0;
 }
 
 
+static int
+do_main_wrap(int const argc, char *argv[])
+{
+      int r = 1;
+
+      try {
+            r = do_main(argc, argv);
+      } catch (std::exception const &e) {
+            DUMP_EXCEPTION(e);
+      }
+
+      return r;
+}
+
+
 int
 main(int const argc, char *argv[])
 {
-      try {
-            do_main(argc, argv);
-      } catch (std::exception &e) {
-            DUMP_EXCEPTION(e);
-            return 1;
-      }
+#ifdef _MSC_VER
+      int e = 0;
+      int r = 1;
 
-      return 0;
+      //NOLINTNEXTLINE(clang-diagnostic-language-extension-token)
+      __try {
+            r = do_main_wrap(argc, argv);
+      }
+      __except (e = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+            fprintf(stderr, "Caught SEH exception %d -> %s\n", e, "dunno");
+            fflush(stderr);
+      }
+      return r;
+#else
+      return do_main_wrap(argc, argv);
+#endif
 }

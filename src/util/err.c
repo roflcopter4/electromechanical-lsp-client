@@ -22,17 +22,16 @@
 #else
 #  define SHOW_STACKTRACE(...)
 #endif
-#ifndef _Printf_format_string_
-#  define _Printf_format_string_
-#endif
 
 /*--------------------------------------------------------------------------------------*/
 
 #if defined _WIN32
 static CRITICAL_SECTION error_write_mtx;
 INITIALIZER_HACK(mutex_init) { InitializeCriticalSection(&error_write_mtx); }
-static void dumb_wrapper_mutex_lock(CRITICAL_SECTION *mtx)   { EnterCriticalSection(mtx); }
-static void dumb_wrapper_mutex_unlock(CRITICAL_SECTION *mtx) { LeaveCriticalSection(mtx); }
+_Acquires_exclusive_lock_(*mtx)
+static void dumb_wrapper_mutex_lock(_In_ CRITICAL_SECTION *mtx)   { EnterCriticalSection(mtx); }
+_Releases_exclusive_lock_(*mtx)
+static void dumb_wrapper_mutex_unlock(_In_ CRITICAL_SECTION *mtx) { LeaveCriticalSection(mtx); }
 #else
 static pthread_mutex_t error_write_mtx;
 INITIALIZER_HACK(mutex_init) { pthread_mutex_init(&error_write_mtx, NULL); }
@@ -51,12 +50,11 @@ static __inline void dump_error(int const errval)
 /*--------------------------------------------------------------------------------------*/
 
 void
-my_err_(int  const           status,
-        bool const           print_err,
-        char const *restrict file,
-        int  const           line,
-        char const *restrict func,
-        _Printf_format_string_ _Notnull_
+my_err_(_In_   bool const           print_err,
+        _In_z_ char const *restrict file,
+        _In_   int  const           line,
+        _In_z_ char const *restrict func,
+        _Printf_format_string_ _In_z_
         char const *restrict format,
         ...)
 {
@@ -78,18 +76,18 @@ my_err_(int  const           status,
       SHOW_STACKTRACE();
 
       dumb_wrapper_mutex_unlock(&error_write_mtx);
-      exit(status);
+      abort();
 }
 
 void
-my_warn_(       bool const           print_err,
-         UNUSED bool const           force,
-                char const *restrict file,
-                int  const           line,
-                char const *restrict func,
-                _Printf_format_string_ _Notnull_
-                char const *restrict format,
-                ...)
+my_warn_(   _In_   bool const           print_err,
+         UU _In_   bool const           force,
+            _In_z_ char const *restrict file,
+            _In_   int  const           line,
+            _In_z_ char const *restrict func,
+            _Printf_format_string_ _In_z_
+            char const *restrict format,
+            ...)
 {
 #ifdef NDEBUG
       if (!force)

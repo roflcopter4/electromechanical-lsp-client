@@ -7,35 +7,46 @@
 #include "util/c_util.h"
 #include "util/concepts.hh"
 #include "util/exceptions.hh"
-#include "util/formatters.hh"
+#include "util/hackish_templates.hh"
 #include "util/strings.hh"
 
-#include "hackish_templates.hh"
-
-#include "util/recode.hh"
+#include "util/recode/recode.hh"
 
 inline namespace emlsp {
 namespace util {
 /****************************************************************************************/
+
 
 namespace hacks {
 typedef std::filesystem::path path;
 typedef std::string_view      sview;
 } // namespace hacks
 
+
 extern hacks::path get_temporary_directory(char const *prefix = nullptr);
-extern hacks::path get_temporary_filename(char const *prefix = nullptr, char const *suffix = nullptr);
+extern hacks::path get_temporary_filename(char const *prefix = nullptr,
+                                          char const *suffix = nullptr);
+
 
 extern std::string slurp_file(char const *fname, bool binary = false);
-inline std::string slurp_file(std::string const &fname, bool binary = false)  { return slurp_file(fname.c_str(), binary); }
-inline std::string slurp_file(hacks::path const &fname, bool binary = false)  { return slurp_file(fname.string().c_str(), binary); }
-inline std::string slurp_file(hacks::sview const &fname, bool binary = false) { return slurp_file(fname.data(), binary); }
+
+inline std::string slurp_file(std::string const &fname,  bool const binary = false) {
+      return slurp_file(fname.c_str(), binary);
+}
+inline std::string slurp_file(hacks::path const &fname,  bool const binary = false) {
+      return slurp_file(fname.string().c_str(), binary);
+}
+inline std::string slurp_file(hacks::sview const &fname, bool const binary = false) {
+      return slurp_file(fname.data(), binary);
+}
+
 
 ND extern std::string char_repr(char ch);
 ND extern std::string my_strerror(errno_t errval);
 using ::my_strerror;
 
-ND extern std::string demangle(_Notnull_ char const *raw_name) __attribute__((__nonnull__));
+
+ND extern std::string demangle(_In_z_ char const *raw_name) __attribute__((__nonnull__));
 ND extern std::string demangle(std::type_info const &id);
 
 
@@ -45,10 +56,10 @@ template <typename T>
 ND __forceinline T *
 xmalloc(size_t const size = sizeof(T)) noexcept(false)
 {
-      //NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
+      //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = malloc(size);
       if (ret == nullptr) [[unlikely]]
-            throw std::runtime_error("Out of memory.");
+            throw std::system_error(std::make_error_code(std::errc::not_enough_memory));
       return static_cast<T *>(ret);
 }
 
@@ -56,10 +67,10 @@ template <typename T>
 ND __forceinline T *
 xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(false)
 {
-      //NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
+      //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = calloc(nmemb, size);
       if (ret == nullptr) [[unlikely]]
-            throw std::runtime_error("Out of memory.");
+            throw std::system_error(std::make_error_code(std::errc::not_enough_memory));
       return static_cast<T *>(ret);
 }
 
@@ -80,22 +91,21 @@ using procinfo_t = pid_t;
 #endif
 } // namespace detail
 
+
+extern int  kill_process(detail::procinfo_t const &pid) noexcept;
+extern void close_descriptor(int &fd) noexcept;
+extern void close_descriptor(intptr_t &fd) noexcept;
+
 #ifdef _WIN32
-void      close_descriptor(HANDLE &fd);
-void      close_descriptor(SOCKET &fd);
-ND size_t available_in_fd(SOCKET s) noexcept(false);
-ND size_t available_in_fd(HANDLE s) noexcept(false);
-# if !defined(__clang__) || (defined(__clang__) && __clang_major__ >= 14)
-__attribute__((__error__(WIN32_ERRMSG)))
-ND size_t available_in_fd(int s) noexcept(false);
-# endif
-#else
-ND size_t available_in_fd(int s) noexcept(false);
+
+extern    void   close_descriptor(HANDLE &fd) noexcept;
+extern    void   close_descriptor(SOCKET &fd) noexcept;
+ND extern size_t available_in_fd (SOCKET s) noexcept(false);
+ND extern size_t available_in_fd (HANDLE s) noexcept(false);
+
 #endif
 
-extern void close_descriptor(int &fd);
-extern void close_descriptor(intptr_t &fd);
-extern int  kill_process(detail::procinfo_t const &pid);
+ND extern size_t available_in_fd(int s) noexcept(false);
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -105,11 +115,12 @@ inline int putenv(char const *str) { return ::putenv(const_cast<char *>(str)); }
 
 /*--------------------------------------------------------------------------------------*/
 
+
 ND __attr_access((__write_only__, 1)) __attribute__((__artificial__, __nonnull__))
 __forceinline size_t
-strlcpy(_Notnull_ char       *__restrict dst,
-        _Notnull_ char const *__restrict src,
-        size_t const                     size)
+strlcpy(_Out_z_cap_(size) char       *__restrict dst,
+        _In_z_            char const *__restrict src,
+        _In_              size_t const           size) noexcept
 {
 #ifdef HAVE_STRLCPY
       return ::strlcpy(dst, src, size);
@@ -118,11 +129,12 @@ strlcpy(_Notnull_ char       *__restrict dst,
 #endif
 }
 
-template <size_t N>
+
+template <_In_ size_t N>
 ND __attr_access((__write_only__, 1)) __attribute__((__artificial__, __nonnull__))
 __forceinline size_t
-strlcpy(_Notnull_ char                  (&dst)[N],
-        _Notnull_ char const *__restrict src)
+strlcpy(_Out_z_cap_(N) char (&dst)[N],
+        _In_z_         char const *__restrict src) noexcept
 {
 #if defined HAVE_STRLCPY
       return ::strlcpy(dst, src, N);
@@ -133,32 +145,43 @@ strlcpy(_Notnull_ char                  (&dst)[N],
 #endif
 }
 
+
 template <typename T>
 ND __attribute__((__const__, __artificial__, __nonnull__))
 __forceinline constexpr uintptr_t
-ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2)
+ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2) noexcept
 {
       return static_cast<uintptr_t>(reinterpret_cast<ptrdiff_t>(ptr1) -
                                     reinterpret_cast<ptrdiff_t>(ptr2));
 }
 
-template <typename ...Types>
-void eprint(Types &&...args)
+
+template <typename Elem, size_t N>
+size_t fwritel(Elem const (&buffer)[N], FILE *dst)
 {
-      fmt::print(stderr, args...);
-      fflush(stderr);
-      std::cerr.flush();
-      std::wcerr.flush();
+      return ::fwrite(buffer, sizeof(Elem), N - SIZE_C(1), dst);
 }
+
+
+template <typename S, typename... Args>
+    REQUIRES (fmt::detail::is_compiled_string_c<S>)
+constexpr void
+eprint(S const &format_str, Args const &...args)
+{
+      fwritel("emlsp (warning):  ", stderr);
+      ::fmt::print(stderr, format_str, std::forward<Args const &>(args)...);
+      ::fflush(stderr);
+}
+
 
 /*--------------------------------------------------------------------------------------*/
 
 namespace ipc {
 
-extern socket_t  open_new_unix_socket(char const *path);
-extern socket_t  connect_to_unix_socket(char const *path);
-extern socket_t  connect_to_unix_socket(sockaddr_un const *addr);
-extern struct addrinfo *resolve_addr(char const *server, char const *port);
+extern ::socket_t  open_new_unix_socket  (char const *path,           int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
+extern ::socket_t  connect_to_unix_socket(char const *path,           int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
+extern ::socket_t  connect_to_unix_socket(::sockaddr_un const *addr,  int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
+extern ::addrinfo *resolve_addr(char const *server, char const *port, int type = SOCK_STREAM);
 
 } // namespace ipc
 
@@ -166,17 +189,27 @@ extern struct addrinfo *resolve_addr(char const *server, char const *port);
 namespace win32 {
 
 NORETURN void error_exit_explicit(wchar_t const *msg, DWORD errval);
+NORETURN void error_exit_message (wchar_t const *msg);
+NORETURN void error_exit_explicit(char const *msg, DWORD errval);
+NORETURN void error_exit_message (char const *msg);
 
-NORETURN inline void error_exit(wchar_t const *msg)       { error_exit_explicit(msg, GetLastError()); }
-NORETURN inline void error_exit_wsa(wchar_t const *msg)   { error_exit_explicit(msg, WSAGetLastError()); }
-NORETURN inline void error_exit_errno(wchar_t const *msg) { error_exit_explicit(msg, errno); }
+NORETURN inline void error_exit        (wchar_t const *msg)      { error_exit_explicit(msg,         GetLastError());    }
+NORETURN inline void error_exit_wsa    (wchar_t const *msg)      { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN inline void error_exit_errno  (wchar_t const *msg)      { error_exit_explicit(msg,         errno);             }
+NORETURN inline void error_exit        (std::wstring const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN inline void error_exit_wsa    (std::wstring const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN inline void error_exit_errno  (std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN inline void error_exit_message(std::wstring const &msg) { error_exit_message (msg.c_str());                    }
 
-NORETURN inline void error_exit(std::wstring const &msg)       { error_exit_explicit(msg.c_str(), GetLastError()); }
-NORETURN inline void error_exit_wsa(std::wstring const &msg)   { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
-NORETURN inline void error_exit_errno(std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno); }
+NORETURN inline void error_exit        (char const *msg)        { error_exit_explicit(msg,         GetLastError());    }
+NORETURN inline void error_exit_wsa    (char const *msg)        { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN inline void error_exit_errno  (char const *msg)        { error_exit_explicit(msg,         errno);             }
+NORETURN inline void error_exit        (std::string const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN inline void error_exit_wsa    (std::string const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN inline void error_exit_errno  (std::string const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN inline void error_exit_message(std::string const &msg) { error_exit_message (msg.c_str());                    }
 
-//void error_exit(wchar_t const *lpsz_function);
-//void WSA_error_exit(wchar_t const *lpsz_function);
+extern BOOL WINAPI myCtrlHandler(DWORD type);
 
 } // namespace win32
 #endif
@@ -190,7 +223,9 @@ NORETURN inline void error_exit_errno(std::wstring const &msg) { error_exit_expl
 using emlsp::util::putenv;  //NOLINT(google-global-names-in-headers)
 #endif
 
+#include "util/formatters.hh"
+
 
 /****************************************************************************************/
-#endif /* util.hh */
+#endif
 // vim: ft=cpp

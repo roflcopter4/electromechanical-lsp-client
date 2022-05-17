@@ -1,13 +1,10 @@
 #pragma once
-#ifndef HGUARD__IPC__BASIC_RPC_CONNECTION_HH_
-#define HGUARD__IPC__BASIC_RPC_CONNECTION_HH_ //NOLINT
+#ifndef HGUARD__IPC__BASIC_PROTOCOL_CONNECTION_HH_
+#define HGUARD__IPC__BASIC_PROTOCOL_CONNECTION_HH_ //NOLINT
 /****************************************************************************************/
 #include "Common.hh"
 
-#include "ipc/basic_connection.hh"
-#include "ipc/basic_dialer.hh"
 #include "ipc/basic_io_connection.hh"
-#include "ipc/basic_io_wrapper.hh"
 
 inline namespace emlsp {
 namespace ipc {
@@ -31,7 +28,8 @@ using callback = std::function<void(expected<T>)>;
 template <typename Value>
 class transport_interface
 {
-      using this_type  = transport_interface<Value>;
+      using this_type = transport_interface<Value>;
+      using str_ref   = util::string_ref<char>;
 
     public:
       using value_type = Value;
@@ -42,9 +40,9 @@ class transport_interface
       transport_interface &operator=(transport_interface const &)     = delete;
       transport_interface &operator=(transport_interface &&) noexcept = delete;
 
-      virtual int notify(util::string_ref Method, Value Params)            = 0;
-      virtual int request(util::string_ref Method, Value Params, Value ID) = 0;
-      virtual int reply(Value ID, Value Result)                            = 0;
+      virtual int notify(str_ref Method, Value Params)            = 0;
+      virtual int request(str_ref Method, Value Params, Value ID) = 0;
+      virtual int reply(Value ID, Value Result)                   = 0;
 
       class MessageHandler
       {
@@ -56,9 +54,9 @@ class transport_interface
             MessageHandler &operator=(MessageHandler &&) noexcept = default;
 
             // Handler returns true to keep processing messages, or false to shut down.
-            virtual int on_notify(util::string_ref Method, Value Params)            = 0;
-            virtual int on_request(util::string_ref Method, Value Params, Value ID) = 0;
-            virtual int on_reply(Value ID, Value Result)                            = 0;
+            virtual int on_notify(str_ref Method, Value Params)            = 0;
+            virtual int on_request(str_ref Method, Value Params, Value ID) = 0;
+            virtual int on_reply(Value ID, Value Result)                   = 0;
       };
 
       virtual int dispatch(MessageHandler &) = 0;
@@ -129,11 +127,11 @@ class transport_interface
 
 
 template <typename Connection, template <typename> class IOWrapper>
-      REQUIRES (IsBasicConnectionVariant<Connection> &&
-                io::IsWrapperVariant<IOWrapper<Connection>>)
-class basic_rpc_connection : public basic_io_connection<Connection, IOWrapper>
+      REQUIRES (BasicConnectionVariant<Connection> &&
+                io::WrapperVariant<IOWrapper<Connection>>)
+class basic_protocol_connection : public basic_io_connection<Connection, IOWrapper>
 {
-      using this_type = basic_rpc_connection<Connection, IOWrapper>;
+      using this_type = basic_protocol_connection<Connection, IOWrapper>;
       using base_type = basic_io_connection<Connection, IOWrapper>;
 
       std::atomic_uint64_t request_id_ = 0;
@@ -146,13 +144,13 @@ class basic_rpc_connection : public basic_io_connection<Connection, IOWrapper>
       using io_wrapper_type = IOWrapper<Connection>;
       using value_type      = typename io_wrapper_type::value_type;
 
-      basic_rpc_connection()           = default;
-      ~basic_rpc_connection() override = default;
+      basic_protocol_connection() = default;
+      virtual ~basic_protocol_connection() override = default;
 
-      basic_rpc_connection(basic_rpc_connection const &)                = delete;
-      basic_rpc_connection(basic_rpc_connection &&) noexcept            = default;
-      basic_rpc_connection &operator=(basic_rpc_connection const &)     = delete;
-      basic_rpc_connection &operator=(basic_rpc_connection &&) noexcept = default;
+      basic_protocol_connection(basic_protocol_connection const &)                = delete;
+      basic_protocol_connection(basic_protocol_connection &&) noexcept            = default;
+      basic_protocol_connection &operator=(basic_protocol_connection const &)     = delete;
+      basic_protocol_connection &operator=(basic_protocol_connection &&) noexcept = default;
 
       /*------------------------------------------------------------------------------*/
 
@@ -161,79 +159,23 @@ class basic_rpc_connection : public basic_io_connection<Connection, IOWrapper>
       virtual int response()       = 0;
       virtual int error_response() = 0;
 
-      ND virtual uv_poll_cb  poll_callback() const  = 0;
-      ND virtual uv_timer_cb timer_callback() const = 0;
-      ND virtual void       *data()                 = 0;
+      ND virtual uv_poll_cb  poll_callback() const       = 0;
+      ND virtual uv_timer_cb timer_callback() const      = 0;
+      ND virtual uv_alloc_cb pipe_alloc_callback() const = 0;
+      ND virtual uv_read_cb  pipe_read_callback() const  = 0;
+      ND virtual void       *data()                      = 0;
+};
+
+
+template <typename T>
+concept BasicProtocolConnectionVariant = requires {
+      requires BasicConnectionVariant<T>;
+      requires io::WrapperVariant<T>;
+      requires std::derived_from<T, typename T::base_type>;
 };
 
 
 /*======================================================================================*/
-
-
-class callback_bridge
-{
-    public:
-      callback_bridge()          = default;
-      virtual ~callback_bridge() = default;
-
-      DEFAULT_ALL_CTORS(callback_bridge);
-
-      /*------------------------------------------------------------------------------*/
-
-      ND virtual uv_poll_cb  poll_callback() const  = 0;
-      ND virtual uv_timer_cb timer_callback() const = 0;
-      ND virtual void       *data()                 = 0;
-
-      ND virtual std::type_info const &type_info() const & = 0;
-};
-
-
-/*======================================================================================*/
-
-} // namespace ipc
-} // namespace emlsp
-
-#include "ipc/rpc/lsp.hh"
-#include "ipc/rpc/neovim.hh"
-
-inline namespace emlsp {
-namespace ipc {
-
-
-template <typename Ty>
-class neovim_callback_bridge final : public callback_bridge
-{
-    public:
-      explicit neovim_callback_bridge(Ty *connection)
-            : connection_(connection)
-      {}
-      explicit neovim_callback_bridge(std::unique_ptr<Ty> &&connection)
-            : connection_(std::move(connection))
-      {}
-
-      ~neovim_callback_bridge() override = default;
-
-      neovim_callback_bridge(neovim_callback_bridge &&) noexcept            = default;
-      neovim_callback_bridge(neovim_callback_bridge const &)                = delete;
-      neovim_callback_bridge &operator=(neovim_callback_bridge &&) noexcept = default;
-      neovim_callback_bridge &operator=(neovim_callback_bridge const &)     = delete;
-
-      /*------------------------------------------------------------------------------*/
-
-      ND uv_poll_cb  poll_callback() const override { return nullptr; }
-      ND uv_timer_cb timer_callback() const override { return [](uv_timer_t *){/**/}; }
-
-      ND void *data() override { return connection_.get(); }
-      ND std::type_info const &type_info() const & override { return typeid(*this); }
-
-      ND Ty *con() { return connection_.get(); }
-
-    private:
-      std::unique_ptr<Ty> connection_;
-};
-
-
-/****************************************************************************************/
 } // namespace ipc
 } // namespace emlsp
 #endif

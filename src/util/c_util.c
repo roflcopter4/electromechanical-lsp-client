@@ -14,8 +14,8 @@
  * conforms to C99. Microsoft's current one is supposed to so I won't bother checking.
  */
 int
-asprintf(_Notnull_ char **destp,
-         _Notnull_ _Printf_format_string_ char const *__restrict fmt,
+asprintf(_Notnull_ _Outptr_result_z_ char **destp,
+         _Notnull_ _In_ _Printf_format_string_ char const *__restrict fmt,
          ...)
 {
       int     len;
@@ -31,7 +31,7 @@ asprintf(_Notnull_ char **destp,
 
       *destp = malloc(len + SIZE_C(1));
       if (!*destp)
-            err(1, "malloc");
+            err("malloc");
       vsprintf(*destp, fmt, ap1);
       va_end(ap1);
 
@@ -50,7 +50,9 @@ asprintf(_Notnull_ char **destp,
 #endif
 
 _Check_return_ char const *
-my_strerror(errno_t const errval, _Notnull_ char *buf, size_t const buflen)
+my_strerror(_In_                 errno_t errval,
+            _Out_writes_(buflen) char   *buf,
+            _In_                 size_t  buflen)
 {
       char const *estr;
 
@@ -76,9 +78,9 @@ DIAG_POP()
 
 
 #ifndef HAVE_STRLCPY
-extern size_t emlsp_strlcpy(_Notnull_ char       *restrict dst,
-                            _Notnull_ char const *restrict src,
-                                      size_t const         size)
+extern size_t emlsp_strlcpy(_Out_z_cap_(size) char       *restrict dst,
+                            _In_z_            char const *restrict src,
+                            _In_              size_t const         size)
 {
       /* Do it the stupid way. It's, frankly, probably faster anyway. */
       size_t const slen = strlen(src);

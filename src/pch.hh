@@ -84,6 +84,7 @@
 #include <cerrno>
 #include <cinttypes>
 #include <climits>
+#include <csetjmp>
 #include <csignal>
 #include <cstdarg>
 #include <cstdint>
@@ -97,6 +98,10 @@
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN 1
 #  endif
+#  ifndef C_ASSERT
+#    define C_ASSERT(x) __mingw_assert(x)
+#  endif
+#  include <sal.h>
 #  include <Windows.h>
 #  include <WinSock2.h>
 #  include <WS2tcpip.h>
@@ -105,6 +110,7 @@
 #  include <direct.h>
 #  include <io.h>
 #  include <process.h>
+#  include <detours/detours.h>
 #else
 #  include <netdb.h>
 #  include <netinet/in.h>
@@ -143,6 +149,7 @@
 #include "util/macros.h"
 #include "util/types.h"
 #include "util/util.hh"
+
 #include "rapid.hh"
 
 
@@ -158,8 +165,8 @@
 #include <event2/listener.h>
 #include <event2/thread.h>
 
-#include <boost/asio.hpp>
-#include <boost/system.hpp>
+//#include <boost/asio.hpp>
+//#include <boost/system.hpp>
 
 
 #include <glib.h> //NOLINT

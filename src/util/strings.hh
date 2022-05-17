@@ -10,25 +10,27 @@ namespace util {
 /****************************************************************************************/
 
 
-class string_ref : public std::string_view
+template <typename Elem, template <typename> typename Traits = std::char_traits>
+class string_ref : public std::basic_string_view<Elem, Traits<Elem>>
 {
     public:
       template <size_t N>
-      explicit string_ref(char const (&str)[N]) : std::string_view(str, N)
+      explicit string_ref(char const (&str)[N]) noexcept : std::string_view(str, N - 1LLU)
       {}
-      explicit string_ref(std::string const &str) : std::string_view(str.data(), str.size())
+      explicit string_ref(std::string const &str) noexcept : std::string_view(str.data(), str.size())
       {}
-      explicit string_ref(std::string_view str) : std::string_view(str)
+      explicit string_ref(std::string_view str) noexcept : std::string_view(std::move(str))
       {}
-      explicit string_ref(char const *str) : std::string_view(str, __builtin_strlen(str))
+      explicit string_ref(char const *str) noexcept : std::string_view(str, __builtin_strlen(str))
       {}
 };
 
-class string_literal : public std::string_view
+template <typename Elem, template <typename> typename Traits = std::char_traits>
+class string_literal : public std::basic_string_view<Elem, Traits<Elem>>
 {
     public:
       template <size_t N>
-      explicit string_literal(char const (&str)[N]) : std::string_view(str, N)
+      explicit string_literal(Elem const (&str)[N]) : std::string_view(str, N - 1LLU)
       {}
 };
 
