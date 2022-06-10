@@ -12,6 +12,8 @@ template <typename T> concept Array     = std::is_array_v<std::remove_reference_
 template <typename T> concept Integral  = std::is_integral_v<std::remove_reference_t<T>>;
 template <typename T> concept Function  = std::is_function_v<T>;
 template <typename T> concept Reference = std::is_reference_v<T>;
+template <typename T> concept GenericPointer = std::convertible_to<std::remove_cvref_t<T>, void *>;
+
 
 template <typename T> concept UniquePtr =
     std::same_as<std::remove_cvref_t<T>, std::unique_ptr<typename T::pointer>> ||

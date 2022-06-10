@@ -6,7 +6,7 @@
 #include "Common.hh"
 
 #if defined __GNUC__ || defined __clang__
-# ifdef __clang__
+# ifdef _clang__
 #  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
 # else
 #  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
@@ -32,10 +32,13 @@
 
 
 __BEGIN_DECLS
+/*--------------------------------------------------------------------------------------*/
 
 
 _Check_return_ char const *
-my_strerror(_In_ errno_t errval, _Out_writes_(buflen) char *buf, _In_ size_t buflen)
+my_strerror(_In_                 errno_t errval,
+            _Out_writes_(buflen) char   *buf,
+            _In_                 size_t  buflen)
     __attribute__((__nonnull__(2)));
 
 
@@ -49,7 +52,7 @@ my_strerror(_In_ errno_t errval, _Out_writes_(buflen) char *buf, _In_ size_t buf
  * TEMPORARY DIRECTORY SUCH AS '/tmp`! This function is totally insecure and does not
  * check whether the filename is unique!
  *
- * It is only safe if the directory you provide has been created securely by a function
+ * It is safe only if the directory you provide has been created securely by a function
  * like mkdtemp, or otherwise guarantee that the file you're creating does not already
  * exist.
  *
@@ -59,36 +62,38 @@ my_strerror(_In_ errno_t errval, _Out_writes_(buflen) char *buf, _In_ size_t buf
  * \param suffix Optional suffix for the filename. May be NULL.
  * \return Length of the generated filename.
  */
-extern size_t braindead_tempname(_Out_      char       *restrict buf,
-                                 _In_z_     char const *restrict dir,
-                                 _In_opt_z_ char const *restrict prefix,
-                                 _In_opt_z_ char const *restrict suffix)
+extern size_t braindead_tempname(_Out_      char       *__restrict buf,
+                                 _In_z_     char const *__restrict dir,
+                                 _In_opt_z_ char const *__restrict prefix,
+                                 _In_opt_z_ char const *__restrict suffix)
     __attribute__((__nonnull__(1, 2)))
     __attr_access((__write_only__, 1)) __attr_access((__read_only__, 2))
     __attr_access((__read_only__,  3)) __attr_access((__read_only__, 4));
 
+
 #ifndef HAVE_ASPRINTF
-extern int asprintf(_Notnull_ _Outptr_result_z_ char       **restrict destp,
-                    _Notnull_ _In_ PFSAL        char const  *restrict fmt,
+extern int asprintf(_Notnull_ _Outptr_result_z_ char       **__restrict destp,
+                    _Notnull_ _In_ PFSAL        char const  *__restrict fmt,
                     ...)
     __attribute__((__nonnull__)) ATTRIBUTE_PRINTF(2, 3);
 #endif
 #ifdef HAVE_STRLCPY
-__always_inline __attribute__((__artificial__))
-size_t emlsp_strlcpy(_Notnull_ char *restrict dst,
-                     _Notnull_ char const *restrict src,
-                     size_t size)
-    __attribute__((__nonnull__, __warn_unused_result__))
+_Check_return_ __always_inline
+size_t emlsp_strlcpy(_Notnull_ char       *__restrict dst,
+                     _Notnull_ char const *__restrict src,
+                     size_t                           size)
+    __attribute__((__nonnull__, __artificial__, __warn_unused_result__))
     __attr_access((__write_only__, 1))
     __attr_access((__read_only__, 2))
 {
       return strlcpy(dst, src, size);
 }
 #else
-extern size_t emlsp_strlcpy(_Out_z_cap_(size) char *restrict dst,
-                            _In_z_            char const *restrict src,
-                            _In_              size_t size)
-    __attribute__((__nonnull__, __warn_unused_result__))
+_Check_return_
+extern size_t emlsp_strlcpy(_Out_z_cap_(size) char       *__restrict dst,
+                            _In_z_            char const *__restrict src,
+                            _In_              size_t                 size)
+    __attribute__((__nonnull__(1, 2)))
     __attr_access((__write_only__, 1))
     __attr_access((__read_only__,  2));
 
@@ -97,15 +102,24 @@ extern size_t emlsp_strlcpy(_Out_z_cap_(size) char *restrict dst,
 # endif
 #endif
 
-// Not listed by default, but still available.
-//extern uint32_t cxx_random_device_get_random_val(void);
 
+extern uint32_t cxx_random_device_get_random_val(void)
+      __attribute__((__visibility__("hidden")));
 // Get random 32 bit value. Duh.
-extern uint32_t cxx_random_engine_get_random_val_32(void);
+extern uint32_t cxx_random_engine_get_random_val_32(void)
+      __attribute__((__visibility__("hidden")));
 // Get random 64 bit value. Duh.
-extern uint64_t cxx_random_engine_get_random_val_64(void);
+extern uint64_t cxx_random_engine_get_random_val_64(void)
+      __attribute__((__visibility__("hidden")));
 
 
+#ifdef _WIN32
+extern _Check_return_ DWORD getppid(void)
+      __attribute__((__warn_unused_result__));
+#endif
+
+
+/*--------------------------------------------------------------------------------------*/
 __END_DECLS
 
 

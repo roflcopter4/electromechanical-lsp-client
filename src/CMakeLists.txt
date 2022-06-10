@@ -6,6 +6,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set (lsp-thing_SOURCES
     "main.cc"
     "testing01.cc"
+    fuckwad.cc
 
     "mpack/format.cc"
     "msgpack/dumper.cc"

@@ -6,7 +6,10 @@
 #include "util/myerr.h"
 #include "util/util.hh"
 
+#include <backtrace.h>
 #include <charconv>
+
+#include <boost/stacktrace.hpp>
 
 #define AUTOC auto const
 
@@ -46,6 +49,12 @@
 
 inline namespace emlsp {
 namespace util {
+
+namespace constants {
+bool const coloured_stderr = ::isatty(2);
+} // namespace constants
+
+
 namespace {
 
 void cleanup_sighandler(int signum);
@@ -54,7 +63,7 @@ class cleanup_c
 {
       std::filesystem::path             tmp_path_{};
       std::stack<std::filesystem::path> delete_list_{};
-      std::recursive_mutex              mut_{};
+      std::recursive_mutex              mtx_{};
 
       template <typename ...Types>
       static constexpr void dbg_log(UNUSED Types &&...args)
@@ -67,7 +76,7 @@ class cleanup_c
     public:
       void push(std::filesystem::path const &path_arg)
       {
-            std::lock_guard lock(mut_);
+            std::lock_guard lock(mtx_);
             if (tmp_path_.empty())
                   tmp_path_ = path_arg;
             if (delete_list_.empty() || path_arg != delete_list_.top())
@@ -76,15 +85,15 @@ class cleanup_c
 
       std::filesystem::path const &get_path() &
       {
-            std::lock_guard lock(mut_);
-            if (tmp_path_ == "")
+            std::lock_guard lock(mtx_);
+            if (tmp_path_ == L"")
                   push(get_temporary_directory(MAIN_PROJECT_NAME "."));
             return tmp_path_;
       }
 
       void do_cleanup()
       {
-            std::lock_guard lock(mut_);
+            std::lock_guard lock(mtx_);
             dbg_log(FC("\n"));
 
             while (!delete_list_.empty()) {
@@ -137,6 +146,7 @@ class cleanup_c
             sigaction(SIGQUIT, &act, nullptr);
             sigaction(SIGSEGV, &act, nullptr);
             sigaction(SIGTERM, &act, nullptr);
+            sigaction(SIGPIPE, &act, nullptr);
 #endif
       }
 
@@ -203,7 +213,7 @@ get_temporary_directory(char const *prefix)
 }
 
 std::filesystem::path
-get_temporary_filename(char const *prefix, char const *suffix)
+get_temporary_filename(char const *__restrict prefix, char const *__restrict suffix)
 {
       char        buf[PATH_MAX];
       auto const &dir_str  = cleanup.get_path().string();
@@ -221,7 +231,7 @@ namespace ipc {
 static constexpr socket_t invalid_socket = static_cast<socket_t>(-1);
 
 static __forceinline void
-init_sockaddr_un(sockaddr_un &addr, char const *const path)
+init_sockaddr_un(struct sockaddr_un &addr, char const *const path)
 {
       size_t const len = util::strlcpy(addr.sun_path, path);
       addr.sun_family  = AF_UNIX;
@@ -254,29 +264,31 @@ open_socket(int dom, int type, int proto)
 socket_t
 open_new_unix_socket(char const *const path, int dom, int type, int proto)
 {
-      sockaddr_un addr{};
+      struct sockaddr_un addr{};
       init_sockaddr_un(addr, path);
       socket_t const sock = open_socket(dom, type, proto);
 
       int const ret = ::bind(
-          sock, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_un)
+          sock, reinterpret_cast<struct sockaddr *>(&addr),
+          sizeof(struct sockaddr_un)
       );
 
       if (ret == (-1)) [[unlikely]]
             FATAL_ERROR("bind");
-      if (::listen(sock, 0) == (-1)) [[unlikely]]
+      if (::listen(sock, 1) == (-1)) [[unlikely]]
             FATAL_ERROR("listen");
 
       return sock;
 }
 
 socket_t
-connect_to_unix_socket(sockaddr_un const *addr, int dom, int type, int proto)
+connect_to_unix_socket(struct sockaddr_un const *addr, int dom, int type, int proto)
 {
       socket_t const sock = open_socket(dom, type, proto);
 
       int const ret = ::connect(
-          sock, reinterpret_cast<sockaddr const *>(addr), sizeof(sockaddr_un)
+          sock, reinterpret_cast<struct sockaddr const *>(addr),
+          sizeof(struct sockaddr_un)
       );
 
       if (ret == (-1))
@@ -288,57 +300,30 @@ connect_to_unix_socket(sockaddr_un const *addr, int dom, int type, int proto)
 socket_t
 connect_to_unix_socket(char const *const path, int dom, int type, int proto)
 {
-      sockaddr_un addr{};
+      struct sockaddr_un addr{};
       init_sockaddr_un(addr, path);
       return connect_to_unix_socket(&addr, dom, type, proto);
 }
 
 
-addrinfo *
+struct addrinfo *
 resolve_addr(char const *server, char const *port, int const type)
 {
-#ifdef _WIN32
-# define ERR(t) win32::error_exit_wsa(L ## t)
-#else
-# define ERR(t) err(t)
-#endif
-
-      struct in_addr   in4_addr{};
-      struct in6_addr  in6_addr{};
       struct addrinfo  hints{};
       struct addrinfo *res = nullptr;
+
+      if (auto const portnum = xatoi(port); portnum >= 65536)
+            errx("Error: port %ju is not within the range (1, 65536).", portnum);
 
       hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
       hints.ai_socktype = type;
 
-      int rc = inet_pton(AF_INET, server, &in4_addr);
-
-      /* valid IPv4 text address? */
-      if (rc == 1) {
-            hints.ai_family = AF_INET;
-            hints.ai_flags |= AI_NUMERICHOST;
-      } else {
-            rc = inet_pton(AF_INET6, server, &in6_addr);
-
-            /* valid IPv6 text address? */
-            if (rc == 1) {
-                  hints.ai_family = AF_INET6;
-                  hints.ai_flags |= AI_NUMERICHOST;
-            }
-      }
-
-      rc = getaddrinfo(server, port, &hints, &res);
-      if (rc != 0) {
-            auto const e = std::error_code{rc, std::system_category()};
-            warnx("Host not found for ('%s') and ('%s') --> %s",
-                  server, port, e.message().c_str());
-            if (rc == EAI_FAIL)
-                  ERR("getaddrinfo() failed");
-      }
+      int rc = getaddrinfo(server, port, &hints, &res);
+      if (rc != 0)
+            errx("Host not found for ('%s') and ('%s') --> %s",
+                 server, port, gai_strerror(rc));
 
       return res;
-
-#undef ERR
 }
 
 
@@ -347,10 +332,6 @@ resolve_addr(char const *server, char const *port, int const type)
 
 /****************************************************************************************/
 /* RNG helper utils for C code */
-
-
-extern "C" uint32_t cxx_random_device_get_random_val(void)
-      __attribute__((__visibility__("hidden")));
 
 
 extern "C" unsigned
@@ -405,17 +386,18 @@ my_err_throw(_In_    bool const           print_err,
       buf += fmt::format(FC("\033[1;31m" "Exception at:"
                             "\033[0m"    " `{}:{}' - func `{}':\n  "
                             "\033[1;32m" "what():"
-                            "\033[0m"    " '"),
+                            "\033[0m"    " `"),
                          file, line, func);
 
       {
             va_list ap;
             char c_buf[2048];
             va_start(ap, format);
-            AUTOC len = vsnprintf(c_buf, sizeof c_buf, format, ap);
+            auto const len = vsnprintf(c_buf, sizeof c_buf, format, ap);
             va_end(ap);
 
             buf.append(c_buf, len);
+            buf.push_back('\'');
       }
 
       if (print_err)
@@ -427,7 +409,19 @@ my_err_throw(_In_    bool const           print_err,
 }
 
 
-#ifdef HAVE_EXECINFO_H
+#if 0
+
+static void
+add_backtrace(std::string &buf)
+{
+      //g_on_error_stack_trace(program_invocation_short_name);
+      std::stringstream ss;
+      ss << boost::stacktrace::stacktrace();
+      buf.push_back('\n');
+      buf.append(ss.str());
+}
+
+#elif defined HAVE_EXECINFO_H
 
 static void
 add_backtrace(std::string &buf)
@@ -439,7 +433,7 @@ add_backtrace(std::string &buf)
       buf.append("\n\n\033[1mBACKTRACE:\033[0m"sv);
 
       for (int i = 0; i < num; ++i) {
-            char *ptr = strchr(symbols[i], '(');
+            char *ptr = ::strchr(symbols[i], '(');
             if (!ptr || !*++ptr)
                   continue;
 
@@ -449,7 +443,7 @@ add_backtrace(std::string &buf)
                   buf += fmt::format(FC("\n{:3}: {}"),
                                      i, std::string_view(symbols[i], len));
 
-                  char *end = strchr(ptr, '+');
+                  char *end = ::strchr(ptr, '+');
                   if (end) {
                         bool success = true;
                         *end = '\0';
@@ -467,7 +461,7 @@ add_backtrace(std::string &buf)
 
                   buf += ptr;
             } else if (ptr[0] != '+') {
-                  char *end = strchr(ptr, '+');
+                  char *end = ::strchr(ptr, '+');
                   if (end) {
                         *end = '\0';
                         buf += fmt::format(FC("\n{:3}: {}\033[0;36m{}\033[0m + "),
@@ -481,7 +475,8 @@ add_backtrace(std::string &buf)
             }
       }
 
-      free(symbols);  //NOLINT(*-no-malloc)
+      //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
+      free(symbols);
 }
 
 #elif defined _WIN32
@@ -596,19 +591,20 @@ error_exit_message(char const *msg)
 
 
 std::string
-slurp_file(char const *fname, bool const binary)
+slurp_file(char const *const fname, bool const binary)
 {
-      struct stat  st;  //NOLINT(cppcoreguidelines-pro-type-member-init)
+      //NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
+      struct stat  st;
       std::string  buf;
       FILE        *fp = ::fopen(fname, binary ? "rb" : "r");
       if (!fp)
             err("fopen()");
 
       ::fstat(::fileno(fp), &st);
-      buf.reserve(static_cast<size_t>(st.st_size) + SIZE_C(1));
+      buf.reserve(size_t(st.st_size) + SIZE_C(1));
 
-      auto const nread = ::fread(buf.data(), 1, static_cast<size_t>(st.st_size), fp);
-      if ((binary && nread != static_cast<size_t>(st.st_size)) || static_cast<ssize_t>(nread) <= 0)
+      auto const nread = ::fread(buf.data(), 1, size_t(st.st_size), fp);
+      if ((binary && nread != size_t(st.st_size)) || ssize_t(nread) <= 0)
             err("fread()");
 
       ::fclose(fp);
@@ -638,6 +634,19 @@ my_strerror(errno_t const errval)
       char buf[128];
       return {::my_strerror(errval, buf, sizeof(buf))};
 }
+
+uintmax_t
+xatoi(char const *const number, bool const strict)
+{
+      char      *endptr;
+      auto const val = ::strtoumax(number, &endptr, 0);
+
+      if ((endptr == number) || (strict && *endptr != '\0'))
+            errx("Invalid integer \"%s\".\n", number);
+
+      return val;
+}
+
 
 /****************************************************************************************/
 
@@ -727,40 +736,58 @@ size_t available_in_fd(int const s) noexcept(false)
 }
 
 
-uintmax_t
-xatoi(char const *const str, bool const strict)
-{
-      char           *endptr;
-      uintmax_t const val = strtoumax(str, &endptr, 0);
-
-      if ((endptr == str) || (strict && *endptr != '\0'))
-            errx("Invalid integer \"%s\".\n", str);
-
-      return val;
-}
-
-
 int
-kill_process(detail::procinfo_t const &pid) noexcept
+kill_process(detail::procinfo_t &pid) noexcept
 {
       int status = 0;
 
 #ifdef _WIN32
-      if (pid.hProcess) {
+      if (pid.hProcess && pid.hProcess != INVALID_HANDLE_VALUE) {
             ::TerminateProcess(pid.hProcess, 0);
             ::WaitForSingleObject(pid.hProcess, INFINITE);
             ::GetExitCodeProcess(pid.hProcess, reinterpret_cast<DWORD *>(&status));
-            ::CloseHandle(pid.hThread);
+            if (pid.hThread && pid.hThread != INVALID_HANDLE_VALUE)
+                  ::CloseHandle(pid.hThread);
             ::CloseHandle(pid.hProcess);
+
+            memset(&pid, 0, sizeof(pid));
+            pid.hProcess = pid.hThread = HANDLE(-1);
       }
 #else
       if (pid) {
             ::kill(pid, SIGTERM);
             ::waitpid(pid, &status, 0);
             status = WEXITSTATUS(status);
+            pid    = 0;
       }
 #endif
 
+      return status;
+}
+
+
+#ifdef _WIN32
+int
+waitpid(HANDLE proc_hand)
+{
+      DWORD status;
+      WaitForSingleObject(proc_hand, INFINITE);
+      GetExitCodeProcess (proc_hand, &status);
+      return static_cast<int>(status);
+}
+#endif
+
+
+int
+waitpid(detail::procinfo_t const &pid)
+{
+      int status;
+#ifdef _WIN32
+      status = waitpid(pid.hProcess);
+#else
+      ::waitpid(pid, &status, 0);
+      status = WEXITSTATUS(status);
+#endif
       return status;
 }
 

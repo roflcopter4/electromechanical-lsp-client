@@ -45,10 +45,10 @@ static bool  file_exists(char const *fname);
 /*======================================================================================*/
 
 size_t
-braindead_tempname(_Out_      char       *restrict buf,
-                   _In_z_     char const *restrict dir,
-                   _In_opt_z_ char const *restrict prefix,
-                   _In_opt_z_ char const *restrict suffix)
+braindead_tempname(_Out_      char       *__restrict buf,
+                   _In_z_     char const *__restrict dir,
+                   _In_opt_z_ char const *__restrict prefix,
+                   _In_opt_z_ char const *__restrict suffix)
 {
       /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
        * so this is about the best way I can think of to do this. Here's hoping the
@@ -91,16 +91,12 @@ braindead_tempname(_Out_      char       *restrict buf,
 static char *
 get_random_chars(char *buf)
 {
+      static char const repertoir[] =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
       char *ptr = buf;
 
-      for (int i = 0; i < NUM_RANDOM_CHARS; ++i) {
-            uint32_t const tmp = RAND();
-
-            if ((tmp & (0xF0 >> 4)) < 2U)
-                  *ptr++ = (char)((RAND() % 10) + '0');
-            else
-                  *ptr++ = (char)((RAND() % 26) + ((tmp & 1) ? 'a' : 'A'));
-      }
+      for (int i = 0; i < NUM_RANDOM_CHARS; ++i)
+            *ptr++ = repertoir[RAND() % (sizeof(repertoir) - SIZE_C(1))];
 
       return ptr;
 }

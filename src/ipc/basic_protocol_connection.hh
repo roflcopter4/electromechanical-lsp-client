@@ -5,6 +5,7 @@
 #include "Common.hh"
 
 #include "ipc/basic_io_connection.hh"
+#include "ipc/ipc_connection.hh"
 
 inline namespace emlsp {
 namespace ipc {
@@ -26,6 +27,7 @@ using callback = std::function<void(expected<T>)>;
 
 
 template <typename Value>
+      REQUIRES(false)
 class transport_interface
 {
       using this_type = transport_interface<Value>;
@@ -143,6 +145,19 @@ class basic_protocol_connection : public basic_io_connection<Connection, IOWrapp
       using connection_type = Connection;
       using io_wrapper_type = IOWrapper<Connection>;
       using value_type      = typename io_wrapper_type::value_type;
+
+      //using connection_type::raw_read;
+      //using connection_type::raw_write;
+      //using connection_type::raw_writev;
+      //using connection_type::available;
+      //using connection_type::raw_descriptor;
+      //using connection_type::close;
+      //using connection_type::redirect_stderr_to_default;
+      //using connection_type::redirect_stderr_to_devnull;
+      //using connection_type::redirect_stderr_to_fd;
+      //using connection_type::redirect_stderr_to_filename;
+      //using connection_type::spawn_connection;
+      //using connection_type::pid;
 
       basic_protocol_connection() = default;
       virtual ~basic_protocol_connection() override = default;

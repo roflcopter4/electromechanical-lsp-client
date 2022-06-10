@@ -17,7 +17,7 @@ namespace ipc {
 
 
 template <typename Connection, template <class> typename IOWrapper>
-      requires (BasicConnectionVariant<Connection> &&
+      REQUIRES (BasicConnectionVariant<Connection> &&
                 io::WrapperVariant<IOWrapper<Connection>>)
 class basic_io_connection : public Connection,
                             public IOWrapper<Connection>
@@ -28,11 +28,26 @@ class basic_io_connection : public Connection,
       using io_packer_type  = typename io_wrapper_type::packer_type;
 
     public:
+      //using connection_type::raw_read;
+      //using connection_type::raw_write;
+      //using connection_type::raw_writev;
+      //using connection_type::available;
+      //using connection_type::raw_descriptor;
+      //using connection_type::close;
+      //using connection_type::waitpid;
+      //using connection_type::redirect_stderr_to_default;
+      //using connection_type::redirect_stderr_to_devnull;
+      //using connection_type::redirect_stderr_to_fd;
+      //using connection_type::redirect_stderr_to_filename;
+      //using connection_type::spawn_connection;
+      //using connection_type::pid;
+
+
       basic_io_connection() noexcept
           : Connection(), IOWrapper<Connection>(dynamic_cast<Connection *>(this))
       {}
 
-      virtual ~basic_io_connection() override = default;
+      ~basic_io_connection() override = default;
 
       basic_io_connection(basic_io_connection const &)                = delete;
       basic_io_connection &operator=(basic_io_connection const &)     = delete;

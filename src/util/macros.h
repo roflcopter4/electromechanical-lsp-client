@@ -94,13 +94,15 @@
       DEFAULT_COPY_CTORS(t); \
       DEFAULT_MOVE_CTORS(t)
 
-# define DUMP_EXCEPTION(e)                                                                                     \
-      do {                                                                                                     \
-            fflush(stderr);                                                                                    \
-            fmt::print(stderr,                                                                                 \
-                       FC("\nCaught exception in function '{}', at line {} '{}'\n\033[1;32mWhat:\033[0m\t{}\n"), \
-                       FUNCTION_NAME, __LINE__, __FILE__, (e).what());                                         \
-            fflush(stderr);                                                                                    \
+#define DUMP_EXCEPTION(e)                                                                \
+      do {                                                                               \
+            fflush(stderr);                                                              \
+            fmt::print(                                                                  \
+                stderr,                                                                  \
+                FC("\nCaught exception in function '{}', at line {} "                    \
+                   "'{}'\n\033[1;32mWhat <<_EOF_\033[0m\n{}\n\033[1;32m_EOF_\033[0m\n"), \
+                FUNCTION_NAME, __LINE__, __FILE__, (e).what());                          \
+            fflush(stderr);                                                              \
       } while (0)
 
 # ifdef __TAG_HIGHLIGHT__

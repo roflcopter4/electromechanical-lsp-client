@@ -12,6 +12,11 @@ inline namespace emlsp {
 namespace ipc::io {
 /****************************************************************************************/
 
+
+template <typename Connection>
+      //REQUIRES (BasicConnectionVariant<Connection>)
+class ms_jsonrpc_wrapper;
+
 namespace detail {
 
 #ifdef _WIN32
@@ -20,6 +25,8 @@ using iovec_size_type = DWORD;
 using iovec_size_type = size_t;
 #endif
 
+template <typename Connection>
+      //REQUIRES (BasicConnectionVariant<Connection>)
 class ms_jsonrpc_packer
 {
       std::condition_variable &cond_;
@@ -30,9 +37,10 @@ class ms_jsonrpc_packer
       using value_type      = std::unique_ptr<rapidjson::Document>;
       using marshaller_type = ipc::json::rapid_doc<>;
 
-      ms_jsonrpc_packer *get_new_packer()
+    protected:
+      ms_jsonrpc_packer *get_if_available()
       {
-            std::lock_guard lock(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             bool expect = true;
             is_free_.compare_exchange_strong(expect, false,
                                              std::memory_order::seq_cst,
@@ -41,9 +49,12 @@ class ms_jsonrpc_packer
             return ret;
       }
 
+      friend ms_jsonrpc_wrapper<Connection>;
+
+    public:
       void clear()
       {
-            std::lock_guard lock(mtx_);
+            std::lock_guard<std::mutex> lock(mtx_);
             pk.doc().RemoveAllMembers();
             pk.clear();
             is_free_.store(true, std::memory_order::seq_cst);
@@ -65,16 +76,19 @@ class ms_jsonrpc_packer
 
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
-class ms_jsonrpc_wrapper
-      : public basic_wrapper<Connection, detail::ms_jsonrpc_packer, rapidjson::Document>
+      //REQUIRES(BasicConnectionVariant<Connection>)
+class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
+                                                detail::ms_jsonrpc_packer<Connection>,
+                                                rapidjson::Document>
 {
-      using base_type = basic_wrapper<Connection, detail::ms_jsonrpc_packer, rapidjson::Document>;
       using this_type = ms_jsonrpc_wrapper<Connection>;
+      using base_type = basic_wrapper<Connection,
+                                      detail::ms_jsonrpc_packer<Connection>,
+                                      rapidjson::Document>;
 
     public:
       using connection_type = Connection;
-      using packer_type     = detail::ms_jsonrpc_packer;
+      using packer_type     = detail::ms_jsonrpc_packer<Connection>;
       using unpacker_type   = rapidjson::Document;
 
       using value_type      = std::unique_ptr<rapidjson::Document>;
@@ -264,7 +278,7 @@ class ms_jsonrpc_wrapper
             return write_string(sbuf.GetString(), sbuf.GetSize());
       }
 
-      __inline size_t write_object(detail::ms_jsonrpc_packer &pk) override
+      __inline size_t write_object(packer_type &pk) override
       {
             return write_object(pk.pk.doc());
       }
@@ -282,9 +296,9 @@ class ms_jsonrpc_wrapper
       std::unique_ptr<rapidjson::Document> read_object() override
       {
             std::lock_guard lock(this->read_mtx_);
-            AUTOC len  = get_content_length();
+            AUTOC len = get_content_length();
             assert(len > 0);
-            AUTOC msg  = std::make_unique<char[]>(len + 1);
+            AUTOC msg = std::make_unique<char[]>(len + 1);
 
             UNUSED auto const nread = con_->raw_read(msg.get(), len, MSG_WAITALL);
             assert(static_cast<size_t>(nread) == len);
@@ -323,6 +337,11 @@ class ms_jsonrpc_wrapper
             msg     += len;
             msg_len -= len;
             return {std::move(doc), 0};
+      }
+
+      packer_type *get_packer_if_available(packer_type &pack) override
+      {
+            return pack.get_if_available();
       }
 };
 

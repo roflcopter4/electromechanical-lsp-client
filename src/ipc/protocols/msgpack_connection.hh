@@ -44,8 +44,8 @@ class alignas(4096) connection final
 
       //-------------------------------------------------------------------------------
 
-      static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
-      static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
+      NOINLINE static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
+      NOINLINE static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
 
       //-------------------------------------------------------------------------------
 
@@ -107,41 +107,33 @@ class alignas(4096) connection final
       void
       true_poll_callback(UNUSED uv_poll_t *handle, UNUSED int status, UNUSED int events)
       {
-            auto lock = std::lock_guard<std::mutex>{mtx_};
+            std::lock_guard<std::mutex> lock(mtx_);
 
-            if (events & UV_DISCONNECT)
-            {
+            if (!(events & (UV_DISCONNECT | UV_READABLE))) {
+                  util::eprint(FC("Unexpected event(s):  0x{:X}\n"), events);
+                  return;
+            }
+
+            if (events & UV_READABLE) {
+                  this->just_read();
+                  msgpack::object_handle obj;
+
+                  while (get_unpacker().next(obj))
+                        util::mpack::dumper(obj.get(), std::cout);
+            }
+            if (events & UV_DISCONNECT) {
                   util::eprint(
                       FC("({}): Got disconnect signal, status {}, for fd {}, within "
                          "{}\n"),
                       this->raw_descriptor(), status, handle->u.fd,
                       util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
 
+                  auto const &key_deleter = cast_deleter(handle->loop->data);
                   uv_poll_stop(handle);
-                  (*static_cast<std::function<void(std::string const &, bool)> *>(
-                      handle->loop->data))(key_name, false);
-            }
-            else if (events & UV_READABLE)
-            {
-                  this->just_read();
-                  msgpack::object_handle obj;
-
-                  //try {
-                  //      read_object();
-                  //} catch (ipc::except::connection_closed &) {
-                  //      //goto disconnect;
-                  //      return;
-                  //}
-
-                  while (get_unpacker().next(obj)) {
-                        util::mpack::dumper(obj.get(), std::cout);
-                  }
-            }
-            else {
-                  util::eprint(FC("Unexpected event:  0x{:X}\n"), events);
+                  key_deleter(key_name, false);
             }
 
-      /*
+#if 0
             if (events & UV_DISCONNECT) {
                   uv_poll_stop(handle);
             } else if (events & UV_READABLE) {
@@ -160,14 +152,16 @@ class alignas(4096) connection final
                   //START_DETACHED_PTHREAD(handle_nvim_message_wrapper, data);
                   //handle_nvim_message(data);
             }
-      */
+#endif
       }
 
       void
       true_timer_callback(UU uv_timer_t *timer)
       {
-            // if (want_close_)
-            //       uv_timer_stop(timer);
+#if 0
+            if (want_close_)
+                  uv_timer_stop(timer);
+#endif
       }
 
       void
@@ -186,14 +180,17 @@ class alignas(4096) connection final
             if (nread == 0)
                   return;
             if (nread < 0) {
-                  // throw ipc::except::connection_closed(fmt::format_int(nread).c_str());
+                  auto const &key_deleter =
+                      *static_cast<std::function<void(std::string const &, bool)> *>(
+                          handle->loop->data);
+
                   util::eprint(
                       FC("({}): Got zero read (disconnect?), within {}, for {}, of type {}\n"),
-                      this->raw_descriptor(), util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)),
+                      this->raw_descriptor(),
+                      util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)),
                       static_cast<void const *>(handle), handle->type);
                   uv_read_stop(handle);
-                  (*static_cast<std::function<void(std::string const &, bool)> *>(
-                      handle->loop->data))(key_name, false);
+                  key_deleter(key_name, false);
                   return;
             }
             util::eprint(FC("Read {} bytes...\n"), nread);
@@ -216,6 +213,14 @@ class alignas(4096) connection final
                   util::eprint(FC("Warning: Incomplete msgpack object read: "
                                   "{} bytes still unparsed.\n"),
                                unpacker.nonparsed_size());
+      }
+
+      __forceinline __attribute__((__artificial__))
+      static auto const &
+      cast_deleter(void const *data_ptr)
+      {
+            using deleter_type = std::function<void(std::string const &, bool)>;
+            return *static_cast<deleter_type const *>(data_ptr);
       }
 
     public:

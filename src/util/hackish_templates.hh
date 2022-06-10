@@ -15,20 +15,20 @@ template <typename V>
       REQUIRES (concepts::NotAnyPointer<V>)
 void resize_vector_hack(V &vec, size_t const new_size)
 {
-      struct nothing {
+      struct do_nothing {
             typename V::value_type v;
             /* The constructor must be an empty function for this to work. Setting to
              * `default' results in allocated memory being initialized anyway. */
-            nothing() {} // NOLINT
+            do_nothing() {} // NOLINT
       };
-      static_assert(sizeof(nothing[10]) == sizeof(typename V::value_type[10]),
+      static_assert(sizeof(do_nothing[10]) == sizeof(typename V::value_type[10]),
                     "alignment error");
 
       using alloc_traits = std::allocator_traits<typename V::allocator_type>;
-      using rebind_type  = typename alloc_traits::template rebind_alloc<nothing>;
-      using hack_type    = std::vector<nothing, rebind_type>;
+      using rebind_type  = typename alloc_traits::template rebind_alloc<do_nothing>;
+      using hack_vector  = std::vector<do_nothing, rebind_type>;
 
-      reinterpret_cast<hack_type &>(vec).resize(new_size);
+      reinterpret_cast<hack_vector &>(vec).resize(new_size);
 }
 
 /*--------------------------------------------------------------------------------------*/
@@ -43,6 +43,9 @@ class my_char_traits : public std::char_traits<Elem>
     public:
       using base_type::assign;
 
+      /* This function is supposed to set `count' elements from `first' to the value
+       * `ch'. Typically `ch' is 0. In other words, this function is meant to zero the
+       * memory. Instead, this function does nothing. Much better. */
       static constexpr Elem *
       assign(Elem *const first, UNUSED size_t count, UNUSED Elem const ch) noexcept
       {
@@ -52,25 +55,26 @@ class my_char_traits : public std::char_traits<Elem>
 };
 
 template <typename T>
-concept IsString =
+concept StdStringDerived =
     std::derived_from<T,
                       std::basic_string<typename T::value_type,
                                         std::char_traits<typename T::value_type>,
                                         std::allocator<typename T::value_type>>>;
 } // namespace impl
 
+
+/* Resize a standard string without zeroing any memory. */
 template <typename T>
-      REQUIRES (impl::IsString<T>)
+      REQUIRES (impl::StdStringDerived<T>)
 void resize_string_hack(T &str, size_t const new_size)
 {
       using alloc_traits = std::allocator_traits<typename T::allocator_type>;
       using value_t      = typename T::value_type;
-      using rebind_type  = typename alloc_traits::template rebind_alloc<value_t>;
+      using rebind_t     = typename alloc_traits::template rebind_alloc<value_t>;
       using char_traits  = impl::my_char_traits<value_t>;
+      using hack_string  = std::basic_string<value_t, char_traits, rebind_t>;
 
-      using hackstr = std::basic_string<value_t, char_traits, rebind_type>;
-
-      reinterpret_cast<hackstr &>(str).resize(new_size);
+      reinterpret_cast<hack_string &>(str).resize(new_size);
 }
 
 

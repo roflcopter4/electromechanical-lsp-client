@@ -153,7 +153,7 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
                                    ? ENCODE_FMT_ARRSIZE + (size_hint * 6U)
                                    : ENCODE_FMT_ARRSIZE;
 
-#if defined HAVE_CXX_VLA || defined __GNUC__ || defined __clang__
+#if defined HAVE_CXX_VLA //|| defined __GNUC__ || defined __clang__
       unsigned sub_lengths[arr_size];
 #elif defined HAVE__MALLOCA
       auto *sub_lengths = static_cast<unsigned *>(
@@ -233,7 +233,7 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
       msgpack::packer   pack{ss};
       // pack.pack_array(sub_lengths[0]);
 
-#if defined HAVE_CXX_VLA || defined __GNUC__ || defined __clang__
+#if defined HAVE_CXX_VLA //|| defined __GNUC__ || defined __clang__
       unsigned sub_ctrlist[len_ctr + SIZE_C(1)];
 #elif defined HAVE__MALLOCA
       auto *sub_ctrlist = static_cast<unsigned *>(_malloca(sizeof(unsigned) * (len_ctr + SIZE_C(1))));

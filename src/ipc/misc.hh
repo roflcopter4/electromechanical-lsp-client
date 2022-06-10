@@ -17,11 +17,10 @@ namespace except {
 
 class connection_closed final : public std::runtime_error
 {
-      std::string text_;
       connection_closed(std::string const &message, char const *function)
-          : std::runtime_error("Connection closed")
+          : std::runtime_error(message + " : "s + function)
       {
-            text_ = message + " : "s + function;
+            
       }
       connection_closed(char const *message, char const *function)
           : connection_closed(std::string(message), function)
@@ -35,7 +34,6 @@ class connection_closed final : public std::runtime_error
       explicit connection_closed(std::string const &message)
           : connection_closed(message, FUNCTION_NAME)
       {}
-      ND char const *what() const noexcept override { return text_.c_str(); }
 };
 
 } // namespace except

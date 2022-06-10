@@ -17,6 +17,7 @@ namespace ipc::detail {
 
 
 using ::emlsp::util::detail::procinfo_t;
+
 #ifdef _WIN32
 using file_handle_t = HANDLE;
 using iovec         = WSABUF;
@@ -39,15 +40,17 @@ constexpr auto invalid_socket = static_cast<socket_t>(-1);
 
 
 /****************************************************************************************/
-/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+/* ┏----------------------------------------------------------------------------------┓
    ┃  ┌───────────────────────────────────────────────┐                               ┃
    ┃  │Base interface for an automatic ipc connection.│                               ┃
    ┃  └───────────────────────────────────────────────┘                               ┃
-   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
+   ┗----------------------------------------------------------------------------------┛ */
 
 
-template <typename DescriptorType, typename MutexType>
-      REQUIRES (detail::StdMutexVariant<MutexType>)
+/*
+ * TODO: Document
+ */
+// template <typename DescriptorType>
 class base_connection_interface
 {
 #ifdef _WIN32
@@ -57,6 +60,7 @@ class base_connection_interface
       using err_descriptor_type = int;
       static constexpr char dev_null[] = "/dev/null";
 #endif
+      using DescriptorType = intptr_t;
 
     protected:
       enum class sink_type : uint8_t {
@@ -70,15 +74,15 @@ class base_connection_interface
       static constexpr int default_read_flags  = MSG_WAITALL;
       static constexpr int default_write_flags = 0;
 
-      MutexType           read_mtx_      = {};
-      MutexType           write_mtx_     = {};
-      std::string         err_fname_     = {};
-      err_descriptor_type err_fd_        = err_descriptor_type(-1);
-      sink_type           err_sink_type_ = sink_type::DEFAULT;
+      std::recursive_mutex read_mtx_  = {};
+      std::recursive_mutex write_mtx_ = {};
+      std::string          err_fname_ = {};
+      err_descriptor_type  err_fd_    = err_descriptor_type(-1); // NOLINT(*cast*)
+      sink_type            err_sink_type_ : 2 = sink_type::DEFAULT;
 
     private:
-      bool    open_listener_ = true;
-      uint8_t initialized_   = 0;
+      uint8_t initialized_   : 3 = 0;
+      bool    open_listener_ : 1 = true;
 
     public:
       base_connection_interface() = default;
@@ -89,12 +93,10 @@ class base_connection_interface
                   util::close_descriptor(err_fd_);
       }
 
-      DEFAULT_COPY_CTORS(base_connection_interface);
-      DEFAULT_MOVE_CTORS(base_connection_interface);
+      DELETE_ALL_CTORS(base_connection_interface);
 
-      using this_type       = base_connection_interface<DescriptorType, MutexType>;
+      using this_type       = base_connection_interface;
       using descriptor_type = DescriptorType;
-      using mutex_type      = MutexType;
 
       //--------------------------------------------------------------------------------
 
@@ -183,7 +185,7 @@ class base_connection_interface
     protected:
       std::thread *get_child_watcher_thread() { return &child_watcher_thread_; }
 #else
-      std::thread *get_child_watcher_thread() { return nullptr; }
+      std::thread *get_child_watcher_thread() { (void)this; return nullptr; }
 #endif
 
 #ifdef _WIN32
@@ -197,9 +199,7 @@ class base_connection_interface
 
 template <typename T>
 concept ConnectionImplVariant =
-    std::derived_from<T,
-                      base_connection_interface<typename T::descriptor_type,
-                                                typename T::mutex_type>>;
+    std::derived_from<T, base_connection_interface>;
 
 
 /****************************************************************************************/
@@ -222,13 +222,16 @@ concept ConnectionImplVariant =
 # define ERR(t) err(t)
 #endif
 
+// class unix_socket_connection_impl;
 
-template <typename AddrType>
+
+// template <typename AddrType>
 class socket_connection_base_impl
-      : public base_connection_interface<socket_t, std::mutex>
+      : public base_connection_interface
 {
       using this_type = socket_connection_base_impl;
-      using base_type = base_connection_interface<socket_t, std::mutex>;
+      using base_type = base_connection_interface;
+      // using AddrType  = sockaddr_storage;
 
 #ifdef _WIN32
       using sock_int_type = int;
@@ -248,14 +251,14 @@ class socket_connection_base_impl
       socket_t  con_write_ = invalid_socket;
       socket_t  acc_read_  = invalid_socket;
       socket_t  acc_write_ = invalid_socket;
-      AddrType  addr_      = {};
+      // AddrType  addr_      = {};
 
     public:
-      using addr_type = AddrType;
+      using addr_type = sockaddr;
 
       socket_connection_base_impl() = default;
       explicit socket_connection_base_impl(socket_t const sock)
-            : acc_read_(sock)
+            : acc_read_(sock), acc_write_(sock)
       {}
 
       ~socket_connection_base_impl() override
@@ -263,8 +266,7 @@ class socket_connection_base_impl
             close();
       }
 
-      DEFAULT_COPY_CTORS(socket_connection_base_impl);
-      DELETE_MOVE_CTORS(socket_connection_base_impl);
+      DELETE_ALL_CTORS(socket_connection_base_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -286,46 +288,59 @@ class socket_connection_base_impl
       ssize_t write(void const *buf, ssize_t nbytes, int flags) final;
       void    close() noexcept final;
 
-      ssize_t writev(iovec const *bufs, size_t nbufs, int flags) override;
+      ssize_t writev(iovec const *bufs, size_t nbufs, int flags) final;
 
       ND size_t available() const noexcept(false) override
       {
             return ::emlsp::util::available_in_fd(acc_read_);
       }
 
-      ND socket_t fd() const noexcept final { return acc_read_; }
+      ND descriptor_type fd() const noexcept final { return acc_read_; }
       ND socket_t listener() const { return listener_; }
       ND socket_t peer()     const { return con_read_; }
       ND socket_t acceptor() const { return acc_read_; }
 
-      ND virtual AddrType &addr() & { return addr_; }
+      // ND virtual AddrType &addr() & { return addr_; }
       virtual socket_t     accept()                                          = 0;
       virtual socket_t     connect()                                         = 0;
-      virtual void         set_listener(socket_t sock, AddrType const &addr) = 0;
+      ND virtual sockaddr &addr() & = 0;
+
+      virtual void set_listener(socket_t sock, sockaddr const &newaddr) noexcept //= 0;
+      {
+            should_close_listnener(false);
+            listener_ = sock;
+            memcpy(&addr(), &newaddr, get_socklen());
+      }
+
+      // friend unix_socket_connection_impl;
 
     protected:
       virtual socket_t open_new_socket()      = 0;
-      virtual socket_t connect_to_socket()    = 0;
+      virtual socket_t connect_internally()   = 0;
       virtual socket_t get_connected_socket() = 0;
+
+      ND constexpr virtual socklen_t get_socklen() const = 0;
 };
 
 
 /*======================================================================================*/
 
 
-class unix_socket_connection_impl final : public socket_connection_base_impl<sockaddr_un>
+class unix_socket_connection_impl final
+      : public socket_connection_base_impl//<sockaddr_un>
 {
       using this_type = unix_socket_connection_impl;
-      using base_type = socket_connection_base_impl<sockaddr_un>;
+      using base_type = socket_connection_base_impl;//<sockaddr_un>;
 
-      std::string path_;
+      std::string path_{};
+      sockaddr_un addr_{};
 
     public:
       unix_socket_connection_impl()           = default;
       ~unix_socket_connection_impl() override = default;
 
-      DELETE_COPY_CTORS(unix_socket_connection_impl);
-      DELETE_MOVE_CTORS(unix_socket_connection_impl);
+      DELETE_ALL_CTORS(unix_socket_connection_impl);
+      // using base_type::set_listener;
 
       //--------------------------------------------------------------------------------
 
@@ -335,7 +350,10 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
       socket_t   accept() override;
       void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
-      void       set_listener(socket_t sock, sockaddr_un const &addr) noexcept override;
+
+      ND sockaddr &addr() & override { return reinterpret_cast<sockaddr &>(addr_); }
+
+      // void set_listener(socket_t sock, sockaddr const &addr) noexcept override;
 
       ND auto const &path() const & noexcept { return path_; }
 
@@ -349,8 +367,10 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
 
     protected:
       socket_t open_new_socket()   override;
-      socket_t connect_to_socket() override;
+      socket_t connect_internally() override;
       socket_t get_connected_socket() noexcept override { return con_read_; }
+
+      ND constexpr socklen_t get_socklen() const override { return sizeof(sockaddr_un); }
 };
 
 
@@ -358,38 +378,41 @@ class unix_socket_connection_impl final : public socket_connection_base_impl<soc
 
 
 #ifdef HAVE_SOCKETPAIR
-class socketpair_connection_impl final : public socket_connection_base_impl<sockaddr_un>
+class socketpair_connection_impl final
+      : public socket_connection_base_impl//<sockaddr_un>
 {
       using this_type = socketpair_connection_impl;
-      using base_type = socket_connection_base_impl<sockaddr_un>;
+      using base_type = socket_connection_base_impl; //<sockaddr_un>;
 
     public:
       socketpair_connection_impl()           = default;
       ~socketpair_connection_impl() override = default;
 
+      DELETE_ALL_CTORS(socketpair_connection_impl);
+ 
+    private:
       [[deprecated("Don't use this function. It will just crash. On purpose.")]]
-      void set_listener(socket_t /*sock*/, sockaddr_un const & /*addr*/) override
+      void set_listener(socket_t /*sock*/, sockaddr const & /*addr*/) noexcept override
       {
-            throw std::logic_error(
-                "This function makes no sense at all for this type of socket.");
+            // throw std::logic_error(
+            //     "This function makes no sense at all for this type of socket.");
+            err_nothrow("This function makes no sense at all for this type of socket.");
       }
 
-      DELETE_COPY_CTORS(socketpair_connection_impl);
-      DELETE_MOVE_CTORS(socketpair_connection_impl);
-
-      //--------------------------------------------------------------------------------
-
+    public:
       void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
     protected:
       socket_t open_new_socket()   override;
-      socket_t connect_to_socket() override;
-      socket_t get_connected_socket() override { return connect_to_socket(); }
+      socket_t connect_internally() override __attribute__((__pure__));
+      socket_t get_connected_socket() override { return connect_internally(); }
 
     private:
       socket_t connect() override { throw util::except::not_implemented(""); }
       socket_t accept() override { throw util::except::not_implemented(""); }
+      sockaddr &addr() & override { throw util::except::not_implemented("");; }
+      ND socklen_t get_socklen() const override { return 0; }
 };
 #endif
 
@@ -405,32 +428,34 @@ connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int proto
 template <typename AddrType>
       REQUIRES (IsInetSockaddr<AddrType> ||
                 std::same_as<AddrType, sockaddr *>)
-class inet_socket_connection_base_impl : public socket_connection_base_impl<AddrType>
+class inet_socket_connection_base_impl : public socket_connection_base_impl //<AddrType>
 {
       using this_type = inet_socket_connection_base_impl;
-      using base_type = socket_connection_base_impl<AddrType>;
+      using base_type = socket_connection_base_impl; //<AddrType>;
 
     protected:
+      bool        addr_init_  = false;
+      uint16_t    hport_      = 0;
       std::string addr_string_{};
       std::string addr_string_with_port_{};
-      uint16_t    hport_     = 0;
-      bool        addr_init_ = false;
+      AddrType    addr_{};
 
     public:
-      inet_socket_connection_base_impl()                   = default;
-      virtual ~inet_socket_connection_base_impl() override = default;
+      inet_socket_connection_base_impl()           = default;
+      ~inet_socket_connection_base_impl() override = default;
 
-      DELETE_COPY_CTORS(inet_socket_connection_base_impl);
-      DEFAULT_MOVE_CTORS(inet_socket_connection_base_impl);
+      DELETE_ALL_CTORS(inet_socket_connection_base_impl);
 
       //--------------------------------------------------------------------------------
 
-      void set_listener(socket_t const sock, AddrType const &addr) noexcept override
+#if 0
+      void set_listener(socket_t const sock, sockaddr const &addr) noexcept override
       {
             this->should_close_listnener(true);
             this->listener_ = sock;
             this->addr_     = addr;
       }
+#endif
 
       socket_t connect() override
       {
@@ -450,16 +475,17 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             if (!this->check_initialized(1))
                   throw std::logic_error("Cannot accept from uninitialized address!");
 
-            socklen_t size  = get_socklen();
+            socklen_t const mylen = get_socklen();
+            socklen_t size  = mylen;
             this->acc_read_ = ::accept(this->listener_,
                                        const_cast<sockaddr *>(get_addr_generic()), &size);
-            if (this->acc_read_ == invalid_socket || size != get_socklen())
+            if (this->acc_read_ == invalid_socket || size != mylen)
                   ERR("accept");
 
             if (this->use_dual_sockets()) {
                   this->acc_write_ = ::accept(
                       this->listener_, const_cast<sockaddr *>(get_addr_generic()), &size);
-                  if (this->acc_write_ == invalid_socket || size != get_socklen())
+                  if (this->acc_write_ == invalid_socket || size != mylen)
                         ERR("accept");
             } else {
                   this->acc_write_ = this->acc_read_;
@@ -468,16 +494,24 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl<Addr
             return this->acc_read_;
       }
 
+      ND sockaddr & addr() & final
+      {
+            if constexpr (std::is_pointer_v<AddrType>)
+                  return *addr_;
+            else
+                  return reinterpret_cast<sockaddr &>(addr_);
+      }
+
       ND std::string const &get_addr_string() const & { return addr_string_; }
       ND uint16_t           get_port()        const   { return hport_; }
-
       ND std::string const &get_addr_and_port_string() const & { return addr_string_with_port_; }
 
     protected:
-      socket_t get_connected_socket() noexcept override { return this->con_read_; }
+      socket_t     get_connected_socket() noexcept override { return this->con_read_; }
+      ND constexpr socklen_t get_socklen() const override { return sizeof(AddrType); }
       ND virtual sockaddr const *get_addr_generic() const = 0;
-      ND virtual socklen_t       get_socklen() const      = 0;
       ND virtual int             get_type() const         = 0;
+      // ND virtual socklen_t       get_socklen() const      = 0;
 };
 
 /*--------------------------------------------------------------------------------------*/
@@ -487,17 +521,16 @@ class inet_any_socket_connection_impl final
     : public inet_socket_connection_base_impl<sockaddr *>
 {
       using this_type = inet_any_socket_connection_impl;
-      using base_type = socket_connection_base_impl<addr_type>;
+      using base_type = socket_connection_base_impl; //<addr_type>;
 
-      socklen_t addr_length_ = 0;
       int       type_        = AF_UNSPEC;
+      socklen_t addr_length_ = 0;
 
     public:
       inet_any_socket_connection_impl() noexcept;
       ~inet_any_socket_connection_impl() override;
 
-      DELETE_MOVE_CTORS(inet_any_socket_connection_impl);
-      DELETE_COPY_CTORS(inet_any_socket_connection_impl);
+      DELETE_ALL_CTORS(inet_any_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -511,14 +544,14 @@ class inet_any_socket_connection_impl final
 
     protected:
       socket_t open_new_socket()   override;
-      socket_t connect_to_socket() override;
+      socket_t connect_internally() override;
 
       ND sockaddr const *get_addr_generic() const override { return addr_; }
-      ND socklen_t       get_socklen()      const override { return addr_length_; }
+      ND constexpr socklen_t       get_socklen()      const override { return addr_length_; }
       ND int             get_type()         const override { return type_; }
 
     private:
-      void set_listener(socket_t, sockaddr *const &) noexcept override
+      void set_listener(socket_t /*sock*/, sockaddr const & /*addr*/) noexcept override
       {}
       void init_strings();
 };
@@ -530,13 +563,13 @@ class inet_ipv4_socket_connection_impl final
     : public inet_socket_connection_base_impl<sockaddr_in>
 {
       using this_type = inet_ipv4_socket_connection_impl;
-      using base_type = socket_connection_base_impl<addr_type>;
+      using base_type = socket_connection_base_impl; //<addr_type>;
 
     public:
       inet_ipv4_socket_connection_impl()           = default;
       ~inet_ipv4_socket_connection_impl() override = default;
-      DELETE_MOVE_CTORS(inet_ipv4_socket_connection_impl);
-      DELETE_COPY_CTORS(inet_ipv4_socket_connection_impl);
+
+      DELETE_ALL_CTORS(inet_ipv4_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -545,13 +578,13 @@ class inet_ipv4_socket_connection_impl final
 
     protected:
       socket_t open_new_socket()   override;
-      socket_t connect_to_socket() override;
+      socket_t connect_internally() override;
 
       ND sockaddr const *get_addr_generic() const override
       {
             return reinterpret_cast<sockaddr const *>(&addr_);
       }
-      ND socklen_t get_socklen() const override { return sizeof(sockaddr_in); }
+      // ND socklen_t get_socklen() const override { return sizeof(sockaddr_in); }
       ND int       get_type()    const override { return AF_INET; }
 };
 
@@ -562,7 +595,7 @@ class inet_ipv6_socket_connection_impl final
     : public inet_socket_connection_base_impl<sockaddr_in6>
 {
       using this_type = inet_ipv6_socket_connection_impl;
-      using base_type = socket_connection_base_impl<addr_type>;
+      using base_type = socket_connection_base_impl; //<addr_type>;
 
     public:
       inet_ipv6_socket_connection_impl()           = default;
@@ -577,13 +610,13 @@ class inet_ipv6_socket_connection_impl final
 
     protected:
       socket_t open_new_socket()   override;
-      socket_t connect_to_socket() override;
+      socket_t connect_internally() override;
 
       ND sockaddr const *get_addr_generic() const override
       {
             return reinterpret_cast<sockaddr const *>(&addr_);
       }
-      ND socklen_t get_socklen() const override { return sizeof(sockaddr_in6); }
+      // ND socklen_t get_socklen() const override { return sizeof(sockaddr_in6); }
       ND int       get_type()    const override { return AF_INET6; }
 };
 
@@ -595,21 +628,15 @@ class inet_ipv6_socket_connection_impl final
    ┃  └────────────────────────────────────────────────────────┘                      ┃
    ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
 
-#ifdef _WIN32
-#  define MUTEX_TYPE std::recursive_mutex
-#else
-#  define MUTEX_TYPE std::mutex
-#endif
-
 class fd_connection_impl;
 
 /*
  * For regular pipes.
  */
-class pipe_connection_impl : public base_connection_interface<int, MUTEX_TYPE>
+class pipe_connection_impl : public base_connection_interface
 {
       using this_type = pipe_connection_impl;
-      using base_type = base_connection_interface<int, MUTEX_TYPE>;
+      using base_type = base_connection_interface;
       friend class fd_connection_impl;
 
       int volatile read_  = (-1);
@@ -695,10 +722,10 @@ class fd_connection_impl final : public pipe_connection_impl
 
 #ifdef _WIN32
 
-class pipe_handle_connection_impl : public base_connection_interface<HANDLE, MUTEX_TYPE>
+class pipe_handle_connection_impl : public base_connection_interface<HANDLE>
 {
       using this_type = pipe_connection_impl;
-      using base_type = base_connection_interface<HANDLE, MUTEX_TYPE>;
+      using base_type = base_connection_interface<HANDLE>;
       friend class fd_connection_impl;
 
       HANDLE volatile read_  = INVALID_HANDLE_VALUE;
@@ -757,7 +784,7 @@ class pipe_handle_connection_impl : public base_connection_interface<HANDLE, MUT
 /**
  * XXX BUG: Totally broken.
  */
-class win32_named_pipe_impl final : public base_connection_interface<int, MUTEX_TYPE>
+class win32_named_pipe_impl final : public base_connection_interface<int>
 {
       std::string  pipe_narrow_name_;
       std::wstring pipe_fname_;
@@ -788,7 +815,7 @@ class win32_named_pipe_impl final : public base_connection_interface<int, MUTEX_
       ssize_t writev(iovec const *vec, size_t const nbufs) override { return writev(vec, nbufs, 0); }
       ssize_t writev(iovec const *vec, size_t nbufs, int flags) override;
 
-      ND int    fd() const noexcept override { return crt_fd_; }
+      ND descriptor_type    fd() const noexcept override { return crt_fd_; }
       ND HANDLE handle() const noexcept      { return pipe_; }
       ND size_t available() const noexcept(false) override;
 
@@ -812,9 +839,13 @@ class win32_named_pipe_impl final : public base_connection_interface<int, MUTEX_
 
 
 class libuv_pipe_handle_impl final
-    : public base_connection_interface<file_handle_t, std::mutex>
+    : public base_connection_interface
 {
       using this_type = libuv_pipe_handle_impl;
+
+#ifdef _WIN32
+      int crt_err_fd_ = 2;
+#endif
 
       uv_loop_t   *loop_         = nullptr;
       uv_pipe_t    read_handle_  = {};
@@ -822,10 +853,6 @@ class libuv_pipe_handle_impl final
       uv_process_t proc_handle_  = {};
 
       std::condition_variable write_cond_{};
-
-#ifdef _WIN32
-      int crt_err_fd_ = 2;
-#endif
 
     public:
       libuv_pipe_handle_impl() = default;
@@ -845,15 +872,27 @@ class libuv_pipe_handle_impl final
       void       open() override;
       procinfo_t do_spawn_connection(size_t argc, char **argv) override;
 
-      ssize_t read (void       *buf, ssize_t const nbytes) override { return read(buf, nbytes, 0); }
-      ssize_t write(void const *buf, ssize_t const nbytes) override { return write(buf, nbytes, 0); }
-      ssize_t read (void       *buf, ssize_t nbytes, int flags) override;
+      ssize_t write(void const *buf, ssize_t const nbytes)      override { return write(buf, nbytes, 0); }
       ssize_t write(void const *buf, ssize_t nbytes, int flags) override;
 
+    private:
+      [[noreturn, gnu::__error__("This implementation can't read")]]
+      ssize_t read(void * /*buf*/, ssize_t /*nbytes*/, int  /*flags*/) override
+      {
+            throw std::logic_error("This implementation can't read");
+      }
+
+      [[noreturn, gnu::__error__("This implementation can't read")]]
+      ssize_t read(void * /*buf*/, UU ssize_t /*nbytes*/) override
+      {
+            throw std::logic_error("This implementation can't read.");
+      }
+
+    public:
       ssize_t writev(iovec const *vec, size_t nbufs) override { return writev(vec, nbufs, 0); };
       ssize_t writev(iovec const *vec, size_t nbufs, int flags) override;
 
-      ND file_handle_t fd() const noexcept override;
+      ND descriptor_type fd() const noexcept override __attribute__((__pure__));
       ND size_t        available() const noexcept(false) override;
       ND uv_pipe_t    *get_uv_handle()         noexcept { return &read_handle_; }
       ND uv_process_t *get_uv_process_handle() noexcept { return &proc_handle_; }
@@ -870,8 +909,6 @@ class libuv_pipe_handle_impl final
       static void uvwrite_callback(uv_write_t *req, int status);
 };
 
-#undef MUTEX_TYPE
-
 
 /****************************************************************************************/
 /****************************************************************************************/
@@ -879,9 +916,8 @@ class libuv_pipe_handle_impl final
 
 
 #ifdef _WIN32
-template <typename DescriptorType, typename MutexType>
-HANDLE
-base_connection_interface<DescriptorType, MutexType>::get_err_handle()
+inline base_connection_interface::err_descriptor_type
+base_connection_interface<DescriptorType>::get_err_handle()
 {
       HANDLE err_handle = INVALID_HANDLE_VALUE;
 
@@ -905,14 +941,13 @@ base_connection_interface<DescriptorType, MutexType>::get_err_handle()
             break;
       }
 
-      return err_handle;
+      return static_cast<base_connection_interface::err_descriptor_type>(err_handle);
 }
 
 #else
 
-template <typename DescriptorType, typename MutexType>
-      REQUIRES (detail::StdMutexVariant<MutexType>)
-int base_connection_interface<DescriptorType, MutexType>::get_err_handle()
+inline base_connection_interface::err_descriptor_type
+base_connection_interface::get_err_handle()
 {
       int fd;
 
@@ -959,8 +994,8 @@ inline void close_socket(socket_t &sock) noexcept
       }
 }
 
-template <typename AddrType>
-void socket_connection_base_impl<AddrType>::close() noexcept
+// template <typename AddrType>
+inline void socket_connection_base_impl/*<AddrType>*/::close() noexcept
 {
       if (acc_write_ != acc_read_)
             close_socket(acc_write_);
@@ -1023,128 +1058,39 @@ writev_all(File fd, iovec const *buf_vec, size_t nbufs, int flags)
 }
 
 
-template <typename AddrType>
-ssize_t
-socket_connection_base_impl<AddrType>::read(void         *buf,
-                                            ssize_t const nbytes,
-                                            int     const flags)
+// template <typename AddrType>
+inline ssize_t
+socket_connection_base_impl/*<AddrType>*/::read(void         *buf,
+                                                ssize_t const nbytes,
+                                                int     const flags)
 {
-      auto lock = std::lock_guard{read_mtx_};
+      std::lock_guard<std::recursive_mutex> lock{read_mtx_};
       SETERRNO(0);
       // PSNIP_TRAP();
       return socket_recv_impl(acc_read_, buf, nbytes, flags);
-
-#if 0
-#ifdef _WIN32
-      return win32::block_nonblocking_recv(acc_read_, buf, nbytes, flags);
-#else
-      ssize_t n;
-      ssize_t total = 0;
-      errno         = 0;
-
-      if (flags & MSG_WAITALL) {
-            // Put it in a loop just in case...
-            flags &= ~MSG_WAITALL;
-            do {
-                  if (acc_read_ == invalid_socket) [[unlikely]]
-                        throw except::connection_closed();
-                  n = ::recv(acc_read_, static_cast<char *>(buf) + total,
-                             static_cast<sock_int_type>(nbytes - total), flags);
-            } while ((n != (-1)) && (total += n) < nbytes);
-      } else {
-            for (;;) {
-                  if (acc_read_ == invalid_socket) [[unlikely]]
-                        throw except::connection_closed();
-                   n = ::recv(acc_read_, static_cast<char *>(buf),
-                              static_cast<sock_int_type>(nbytes), flags);
-                  if (n != 0)
-                        break;
-                  std::this_thread::sleep_for(10ms);
-            }
-            total = n;
-      }
-
-      if (n == (-1)) [[unlikely]] {
-            auto const e = errno;
-            if (e == EBADF || e == ECONNRESET)
-                  throw except::connection_closed();
-            err("send()");
-      }
-
-      return total;
-#endif
-#endif
 }
 
-template <typename AddrType>
-ssize_t
-socket_connection_base_impl<AddrType>::write(void    const *buf,
-                                             ssize_t const  nbytes,
-                                             int     const  flags)
+// template <typename AddrType>
+inline ssize_t
+socket_connection_base_impl/*<AddrType>*/::write(void    const *buf,
+                                                 ssize_t const  nbytes,
+                                                 int     const  flags)
 {
-      std::lock_guard lock{write_mtx_};
+      std::lock_guard<std::recursive_mutex> lock{write_mtx_};
       SETERRNO(0);
       return socket_send_impl(acc_write_, buf, nbytes, flags);
-
-#if 0
-#ifdef _WIN32
-      return (ssize_t)win32::block_nonblocking_send(acc_write_, buf, nbytes);
-#else
-      ssize_t n;
-      ssize_t total = 0;
-      errno         = 0;
-
-      do {
-            n = ::send(acc_write_, static_cast<char const *>(buf) + total,
-                       static_cast<sock_int_type>(nbytes - total), flags);
-      } while (n != (-1) && (total += n) < nbytes);
-
-      if (n == (-1)) [[unlikely]] {
-            auto const e = ERRNO;
-            if (e == EBADF || e == ECONNRESET)
-                  throw except::connection_closed();
-            err("send()");
-      }
-
-      return total;
-#endif
-#endif
 }
 
 
-template <typename AddrType>
-ssize_t
-socket_connection_base_impl<AddrType>::writev(iovec  const *bufs,
+// template <typename AddrType>
+inline ssize_t
+socket_connection_base_impl/*<AddrType>*/::writev(iovec  const *bufs,
                                               size_t const  nbufs,
                                               int    const  flags)
 {
-      std::lock_guard lock{write_mtx_};
+      std::lock_guard<std::recursive_mutex> lock{write_mtx_};
       SETERRNO(0);
       return writev_all<socket_t, socket_writev_impl>(acc_write_, bufs, nbufs, flags);
-
-#if 0
-#ifdef _WIN32
-      return (ssize_t)win32::block_nonblocking_send(acc_write_, bufs, nbufs, nullptr);
-#else
-      struct msghdr hdr = {};
-      hdr.msg_iov       = const_cast<::iovec *>(bufs);
-      hdr.msg_iovlen    = nbufs;
-
-      int bytes_sent = sendmsg(acc_write_, &hdr, flags);
-      if (bytes_sent == (-1))
-            err("sendmsg()");
-
-      {
-            ssize_t total = 0;
-            for (unsigned i = 0; i < nbufs; ++i)
-                  total += static_cast<ssize_t>(bufs[i].iov_len);
-            if (bytes_sent != total)
-                  err("Error: WSASend sent only %d of %zu requested bytes.",
-                      bytes_sent, total);
-      }
-      return static_cast<ssize_t>(bytes_sent);
-#endif
-#endif
 }
 
 

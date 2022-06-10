@@ -4,6 +4,7 @@
 
 #include "Common.hh"
 #include "ipc/basic_connection.hh"
+#include "ipc/ipc_connection.hh"
 
 inline namespace emlsp {
 namespace ipc::io {
@@ -11,7 +12,7 @@ namespace ipc::io {
 
 
 template <typename Connection, typename Packer, typename Unpacker>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      // REQUIRES (BasicConnectionVariant<Connection>)
 class basic_wrapper
 {
       using this_type       = basic_wrapper;
@@ -78,15 +79,17 @@ class basic_wrapper
 
     /*----------------------------------------------------------------------------------*/
 
+      virtual Packer *get_packer_if_available(Packer &pack) = 0;
+
       ND packer_container get_new_packer()
       {
             for (;;) {
-                  for (auto &obj : packs_) {
-                        if (auto *ret = obj.get_new_packer())
+                  for (auto &obj : packs_)
+                        if (auto *ret = get_packer_if_available(obj))
                               return packer_container{ret};
-                  }
+
                   std::unique_lock lock{packing_mtx_};
-                  packing_cond_.wait_for(lock, 500ms);
+                  packing_cond_.wait_for(lock, 50ms);
             }
       }
 
@@ -121,7 +124,7 @@ class basic_wrapper
       std::condition_variable packing_cond_ = {};
 
 #define PACK packer_type{packing_cond_}
-      std::array<packer_type, 64> packs_ = {
+      std::array<packer_type, 64> packs_ = std::array<packer_type, 64>{
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,

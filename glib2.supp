@@ -302,3 +302,49 @@
    fun:_dl_init
    obj:/lib64/ld-linux-x86-64.so.2
 }
+{
+   glib2-leak-suppression-19
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:malloc
+   fun:g_malloc
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:glib_init_ctor
+   fun:call_init
+   fun:call_init
+   fun:_dl_init
+   obj:/lib64/ld-linux-x86-64.so.2
+}
+{
+   glib2-leak-suppression-20
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   fun:calloc
+   fun:g_malloc0
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:g_slice_alloc
+   fun:g_hash_table_new_full
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:UnknownInlinedFun
+   fun:glib_init_ctor
+   fun:call_init
+   fun:call_init
+   fun:_dl_init
+   obj:/lib64/ld-linux-x86-64.so.2
+}
+{
+   glib2-leak-suppression-21
+   Memcheck:Leak
+   match-leak-kinds: reachable
+   ...
+   fun:glib_init_ctor
+   fun:call_init
+   fun:call_init
+   fun:_dl_init
+   obj:/lib64/ld-linux-x86-64.so.2
+}

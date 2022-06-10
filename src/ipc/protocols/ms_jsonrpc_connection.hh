@@ -4,8 +4,11 @@
 /****************************************************************************************/
 
 #include "Common.hh"
-#include "ipc/basic_io_connection.hh"
+
+// #include "ipc/basic_io_connection.hh"
 #include "ipc/basic_protocol_connection.hh"
+
+#include "ipc/ipc_connection.hh"
 
 #include <new>
 
@@ -48,32 +51,28 @@ class read_buffer
       ND char const *raw_buf() const { return buf_; }
       ND size_t      max()     const { return max_; }
 
-      ND char *end() const
+      ND char *end() const __attribute__((__pure__))
       {
             assert(used_ < max_);
             return buf_ + used_;
       }
 
-      ND size_t avail() const
+      ND size_t avail() const __attribute__((__pure__))
       {
             assert(max_ >= used_);
             return max_ - used_;
-            // return static_cast<ssize_t>(max_) -
-            //        static_cast<ssize_t>(used_);
       }
 
-      ND char *unparsed_start() const
+      ND char *unparsed_start() const __attribute__((__pure__))
       {
             assert(max_ >= offset_);
             return buf_ + offset_;
       }
 
-      ND size_t unparsed_size() const
+      ND size_t unparsed_size() const __attribute__((__pure__))
       {
             assert(used_ >= offset_);
             return used_ - offset_;
-            // return static_cast<ssize_t>(used_) -
-            //        static_cast<ssize_t>(offset_);
       }
 
       void consume(size_t const delta)
@@ -126,12 +125,26 @@ class alignas(4096) connection final
 
       using io_wrapper_type::read_object;
       using io_wrapper_type::parse_buffer;
-      using connection_type::raw_descriptor;
+      // using connection_type::raw_descriptor;
 
     protected:
       connection() = default;
 
     public:
+      // using connection_type::raw_read;
+      // using connection_type::raw_write;
+      // using connection_type::raw_writev;
+      // using connection_type::available;
+      // using connection_type::raw_descriptor;
+      // using connection_type::close;
+      // using connection_type::redirect_stderr_to_default;
+      // using connection_type::redirect_stderr_to_devnull;
+      // using connection_type::redirect_stderr_to_fd;
+      // using connection_type::redirect_stderr_to_filename;
+      // using connection_type::spawn_connection;
+      // using connection_type::pid;
+
+
       ~connection() override = default;
 
       connection(connection const &)                = delete;
@@ -141,8 +154,8 @@ class alignas(4096) connection final
 
       //-------------------------------------------------------------------------------
 
-      static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
-      static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
+      NOINLINE static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
+      NOINLINE static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
 
       //-------------------------------------------------------------------------------
 
@@ -220,7 +233,7 @@ class alignas(4096) connection final
 
                   util::eprint(
                       FC("({}): Got disconnect signal, status {}, for fd [UNKNOWN], within {} -- ignoring\n"),
-                      raw_descriptor(), status,
+                      this->raw_descriptor(), status,
                       util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
 
                   //throw ipc::except::connection_closed();
@@ -235,7 +248,7 @@ class alignas(4096) connection final
             } else if (events & UV_READABLE) {
                   util::eprint(
                       FC("({}): Descriptor {} is readable from within {}\n"),
-                      raw_descriptor(), handle->u.fd,
+                      this->raw_descriptor(), "[NO FUCKING CLUE]",
                       util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
 
                   std::unique_ptr<rapidjson::Document> doc;

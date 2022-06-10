@@ -3,7 +3,7 @@
 
 #include "c_util.h"
 
-#include <pthread.h>
+#include <glib.h>
 
 #define SHUTUPGCC __attribute__((__unused__)) \
       ssize_t const P99_PASTE(show_stacktrace_macro_variable_, __COUNTER__, _, __LINE__) =
@@ -33,11 +33,15 @@ static void dumb_wrapper_mutex_lock(_In_ CRITICAL_SECTION *mtx)   { EnterCritica
 _Releases_exclusive_lock_(*mtx)
 static void dumb_wrapper_mutex_unlock(_In_ CRITICAL_SECTION *mtx) { LeaveCriticalSection(mtx); }
 #else
+# include <pthread.h>
 static pthread_mutex_t error_write_mtx;
 INITIALIZER_HACK(mutex_init) { pthread_mutex_init(&error_write_mtx, NULL); }
 static void dumb_wrapper_mutex_lock(pthread_mutex_t *mtx)   { pthread_mutex_lock(mtx); }
 static void dumb_wrapper_mutex_unlock(pthread_mutex_t *mtx) { pthread_mutex_unlock(mtx); }
 #endif
+
+ND extern size_t emlsp_util_cxxdemangle(_In_z_ char const *raw_name, char *buffer)
+    __attribute__((__nonnull__));
 
 static __inline void dump_error(int const errval)
 {
@@ -49,6 +53,7 @@ static __inline void dump_error(int const errval)
 
 /*--------------------------------------------------------------------------------------*/
 
+#include <libunwind.h>
 void
 my_err_(_In_   bool const           print_err,
         _In_z_ char const *restrict file,
@@ -61,6 +66,7 @@ my_err_(_In_   bool const           print_err,
       va_list   ap;
       int const e = errno;
       dumb_wrapper_mutex_lock(&error_write_mtx);
+      flockfile(stderr);
 
       fprintf(stderr, "%s: (%s %d - %s): ", MAIN_PROJECT_NAME, file, line, func);
       va_start(ap, format);
@@ -72,10 +78,12 @@ my_err_(_In_   bool const           print_err,
       else
             fputc('\n', stderr);
 
-      fflush(stderr);
-      SHOW_STACKTRACE();
+      g_on_error_stack_trace("");
 
+      fflush(stderr);
+      funlockfile(stderr);
       dumb_wrapper_mutex_unlock(&error_write_mtx);
+
       abort();
 }
 

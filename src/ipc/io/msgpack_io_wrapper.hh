@@ -5,6 +5,7 @@
 
 #include "Common.hh"
 #include "ipc/io/basic_io_wrapper.hh"
+#include "ipc/ipc_connection.hh"
 
 #define AUTOC auto const
 
@@ -13,8 +14,15 @@ namespace ipc::io {
 /****************************************************************************************/
 
 
+template <typename Connection>
+      REQUIRES (BasicConnectionVariant<Connection>)
+class msgpack_wrapper;
+
+
 namespace detail {
 
+template <typename Connection>
+      REQUIRES (BasicConnectionVariant<Connection>)
 class msgpack_packer
 {
       std::condition_variable &cond_;
@@ -26,7 +34,25 @@ class msgpack_packer
       using buffer_type     = msgpack::vrefbuffer;
       using marshaller_type = msgpack::packer<buffer_type>;
 
-      msgpack_packer *get_new_packer()
+    protected:
+#if 0
+      friend msgpack_wrapper<ipc::connections::pipe>;
+      friend msgpack_wrapper<ipc::connections::std_streams>;
+      friend msgpack_wrapper<ipc::connections::unix_socket>;
+      friend msgpack_wrapper<ipc::connections::inet_ipv4_socket>;
+      friend msgpack_wrapper<ipc::connections::inet_ipv6_socket>;
+      friend msgpack_wrapper<ipc::connections::inet_socket>;
+      friend msgpack_wrapper<ipc::connections::libuv_pipe_handle>;
+#if defined _WIN32
+      friend msgpack_wrapper<ipc::connections::win32_named_pipe>;
+      friend msgpack_wrapper<ipc::connections::win32_handle_pipe>;
+#else
+      friend msgpack_wrapper<ipc::connections::socketpair>;
+#endif
+#endif
+      friend msgpack_wrapper<Connection>;
+
+      msgpack_packer *get_if_available()
       {
             std::lock_guard lock(mtx_);
             bool expect = true;
@@ -37,6 +63,7 @@ class msgpack_packer
             return ret;
       }
 
+    public:
       void clear()
       {
             std::lock_guard lock(mtx_);
@@ -61,19 +88,21 @@ class msgpack_packer
 
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
-class msgpack_wrapper
-      : public basic_wrapper<Connection, detail::msgpack_packer, msgpack::unpacker>
+      REQUIRES(BasicConnectionVariant<Connection>)
+class msgpack_wrapper : public basic_wrapper<Connection,
+                                             detail::msgpack_packer<Connection>,
+                                             msgpack::unpacker>
 {
       static constexpr size_t  read_buffer_size = SIZE_C(8'388'608);
 
       using this_type = msgpack_wrapper<Connection>;
       using base_type = basic_wrapper<Connection,
-                                         detail::msgpack_packer, msgpack::unpacker>;
+                                      detail::msgpack_packer<Connection>,
+                                      msgpack::unpacker>;
 
     public:
       using connection_type = Connection;
-      using packer_type     = detail::msgpack_packer;
+      using packer_type     = detail::msgpack_packer<Connection>;
       using unpacker_type   = msgpack::unpacker;
 
       using value_type  = msgpack::object_handle;
@@ -181,7 +210,15 @@ class msgpack_wrapper
             return write_object(rbuf);
       }
 
-      auto &get_unpacker() & noexcept { return unpacker_; }
+      packer_type *get_packer_if_available(packer_type &pack) override
+      {
+            return pack.get_if_available();
+      }
+
+      auto &get_unpacker() &noexcept
+      {
+            return unpacker_;
+      }
 };
 
 

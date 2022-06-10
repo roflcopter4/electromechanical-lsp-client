@@ -10,103 +10,29 @@
 
 #include "toploop.hh"
 
+#include "lazy.hh"
+
+#include <nlohmann/json.hpp>
+
 #define AUTOC auto const
 
 inline namespace emlsp {
-namespace testing01 {
+namespace testing {
 /****************************************************************************************/
-
-
-namespace lazy {
-
-#ifdef _WIN32
-static constexpr wchar_t fname_raw[] = LR"(D:\ass\VisualStudio\emlsp-win\src\sigh.cc)";
-static constexpr wchar_t path_raw[]  = LR"(D:\ass\VisualStudio\emlsp-win)";
-#else
-UU static constexpr char8_t fname_raw[] = u8R"(/home/bml/files/projects/FUCK_WINDOWS/src/testing01.cc)";
-UU static constexpr char8_t path_raw[]  = u8R"(/home/bml/files/projects/FUCK_WINDOWS)";
-#endif
-
-
-template <typename T1>
-class libc_free_deleter
-{
-    public:
-      constexpr libc_free_deleter() noexcept = default;
-
-      template <typename T2>
-            REQUIRES (std::convertible_to<T2 *, T1 *>)
-      libc_free_deleter(libc_free_deleter<T2> const &) noexcept
-      {}
-
-      void operator()(T1 *ptr) const noexcept
-      {
-            // NOLINTNEXTLINE(bugprone-sizeof-expression)
-            static_assert(sizeof(T1) > 0, "Can't delete an incomplete type");
-            ::free(ptr);  // NOLINT(hicpp-no-malloc, cppcoreguidelines-no-malloc)
-      }
-};
-
-
-template <typename T1>
-class glib_g_free_deleter
-{
-    public:
-      constexpr glib_g_free_deleter() noexcept = default;
-
-      template <typename T2>
-            REQUIRES (std::convertible_to<T2 *, T1 *>)
-      glib_g_free_deleter(glib_g_free_deleter<T2> const &) noexcept
-      {}
-
-      void operator()(T1 *ptr) const noexcept
-      {
-            // NOLINTNEXTLINE(bugprone-sizeof-expression)
-            static_assert(sizeof(T1) > 0, "Can't delete an incomplete type");
-            ::g_free(ptr);
-      }
-};
-
-
-template <typename T>
-using unique_ptr_malloc = std::unique_ptr<T, libc_free_deleter<T>>;
-
-template <typename T>
-using unique_ptr_glib = std::unique_ptr<T, glib_g_free_deleter<T>>;
-
-
-unique_ptr_glib<gchar> filename_to_uri(char const *fname)
-{
-      return unique_ptr_glib<gchar>(g_filename_to_uri(fname, "", nullptr));
-}
-
-unique_ptr_glib<gchar> filename_to_uri(std::string const &fname)
-{
-      return unique_ptr_glib<gchar>(g_filename_to_uri(fname.c_str(), "", nullptr));
-}
-
-unique_ptr_glib<gchar> filename_to_uri(std::string_view const &fname)
-{
-      return unique_ptr_glib<gchar>(g_filename_to_uri(fname.data(), "", nullptr));
-}
-
-
-} // namespace lazy
-
-
-/*--------------------------------------------------------------------------------------*/
 
 
 #ifdef _WIN32
 using con_type   = ipc::connections::libuv_pipe_handle;
 //using con_type   = ipc::connections::unix_socket;
 #else
-using con_type   = ipc::connections::libuv_pipe_handle;
+// using con_type   = ipc::connections::libuv_pipe_handle;
+// using con_type   = ipc::connections::unix_socket;
+using con_type   = ipc::connections::inet_ipv6_socket;
 #endif
 using nvim_type  = ipc::protocols::Msgpack::connection<con_type>;
 using clang_type = ipc::protocols::MsJsonrpc::connection<con_type>;
 
-#define USE_PIPES
+#define USE_PIPS
 
 
 WHAT_THE_FUCK()
@@ -122,17 +48,18 @@ NOINLINE void foo02()
       clangd->impl().set_loop(loop->base());
       clangd->impl().open();
 #else
-      // AUTOC nvim   = ipc::protocols::Msgpack  ::connection<ipc::connections::unix_socket>::new_unique();
-      AUTOC clangd = ipc::protocols::MsJsonrpc::connection<ipc::connections::inet_ipv4_socket>::new_unique();
+      auto nvim   = nvim_type::new_unique();
+      auto clangd = clang_type::new_unique();
       //nvim->impl().should_connect(false);
       //clangd->impl().use_dual_sockets(true);
-      clangd->impl().use_dual_sockets(true);
+      //clangd->impl().use_dual_sockets(true);
 # ifdef _WIN32
       clangd->impl().should_connect(false);
       clangd->impl().open();
 # endif
 #endif
 
+      clangd->redirect_stderr_to_filename("niggerfaggot");
 
 #if 1
       nvim->spawn_connection_l(
@@ -172,7 +99,7 @@ time.sleep(20)
       clangd->spawn_connection_l("clangd", "--log=verbose");
 
 #ifdef USE_PIPES
-      // loop->use_pipe_handle("nvim", nvim->impl().get_uv_handle(), nvim.get());
+      //loop->use_pipe_handle("nvim", nvim->impl().get_uv_handle(), nvim.get());
       loop->use_pipe_handle  ("clangd", clangd);
       loop->start_pipe_handle("clangd", clangd);
       loop->use_pipe_handle  ("nvim",   nvim);
@@ -192,25 +119,24 @@ time.sleep(20)
       loop->start_poll_handle("clangd", clangd);
 #endif
 
-      // std::this_thread::sleep_for(2s);
+      //std::this_thread::sleep_for(2s);
       //auto thrd = std::thread{[&loop]() { loop->loop_start(); }};
-      // std::this_thread::sleep_for(2s);
+      //std::this_thread::sleep_for(2s);
 
       loop->loop_start_async();
 
-      AUTOC fname_uri_ptr = lazy::filename_to_uri(util::recode<char>(lazy::fname_raw));
-      AUTOC fname_uri     = std::string_view{fname_uri_ptr.get()};
+      auto fname_uri_ptr = util::glib::filename_to_uri(util::recode<char>(lazy::fname_raw));
+      auto fname_uri     = std::string_view{fname_uri_ptr.get()};
 
       {
-            AUTOC path_uri = lazy::filename_to_uri(util::recode<char>(lazy::path_raw));
-            AUTOC init     = ipc::lsp::data::init_msg(path_uri.get());
-            AUTOC content  = util::slurp_file(lazy::fname_raw);
+            auto path_uri = util::glib::filename_to_uri(util::recode<char>(lazy::path_raw));
+            auto init     = ipc::lsp::data::init_msg(path_uri.get());
+            auto content  = util::slurp_file(lazy::fname_raw);
 
             clangd->write_string(init);
             std::this_thread::sleep_for(500ms);
-            // clangd->wait();
 
-            auto  wrap = clangd->get_new_packer();
+            auto wrap = clangd->get_new_packer();
 
             wrap().add_member("jsonrpc", "2.0");
             wrap().add_member("method", "textDocument/didOpen"sv);
@@ -239,7 +165,7 @@ time.sleep(20)
 
       std::this_thread::sleep_for(5s);
       loop->loop_stop();
-      loop->wait();
+      //loop->wait();
       //thrd.join();
 }
 
@@ -395,7 +321,7 @@ NOINLINE void foo03()
 #endif
       std::this_thread::sleep_for(1s);
 
-      AUTOC fname_uri = lazy::unique_ptr_glib<gchar>{g_filename_to_uri((gchar const *)lazy::fname_raw.data(), "", nullptr)};
+      AUTOC fname_uri = util::glib::unique_ptr_glib<gchar>{g_filename_to_uri((gchar const *)lazy::fname_raw.data(), "", nullptr)};
       AUTOC fname_len = static_cast<rapidjson::SizeType>(strlen(fname_uri.get()));
       {
             AUTOC init    = ipc::lsp::data::init_msg(lazy::path_raw.data());
@@ -458,22 +384,103 @@ NOINLINE void foo03()
 #endif
 
 
+NOINLINE static void donloh()
+{
+#define O(...) nlohmann::json::object( {__VA_ARGS__} ) //NOLINT(cppcoreguidelines-macro-usage)
+
+      auto foo = O(
+          {"jsonrpc", "2.0"},
+          {"method",  "textDocument/didOpen"},
+          {"params",  O({"textDocument",
+                         O({"languageId", "cpp"},
+                           {"version", 1},
+                           {"uri",  util::recode<char8_t>(lazy::fname_raw)},
+                           {"text", util::recode<char8_t>(lazy::path_raw)})
+                         })
+          }
+      );
+
+      std::cout << std::setw(4) << foo << std::setw(0) << std::endl;
+
+#undef O
+}
+
+NOINLINE static void dorapid()
+{
+      rapidjson::Document doc(rapidjson::kObjectType);
+      rapidjson::Value ob1(rapidjson::kObjectType);
+      rapidjson::Value ob2(rapidjson::kObjectType);
+      doc.AddMember("jsonrpc",      "2.0",                               doc.GetAllocator());
+      doc.AddMember("method",       "textDocument/didOpen",              doc.GetAllocator());
+      ob2.AddMember("languageId",   "cpp",                               doc.GetAllocator());
+      ob2.AddMember("text",         util::recode<char>(lazy::path_raw),  doc.GetAllocator());
+      ob2.AddMember("uri",          util::recode<char>(lazy::fname_raw), doc.GetAllocator());
+      ob2.AddMember("version",      1,                                   doc.GetAllocator());
+      ob1.AddMember("textDocument", std::move(ob2),                      doc.GetAllocator());
+      doc.AddMember("params",       std::move(ob1),                      doc.GetAllocator());
+
+      rapidjson::StringBuffer sb;
+      rapidjson::PrettyWriter wr{sb, &doc.GetAllocator()};
+      doc.Accept(wr);
+      std::cout << std::string_view(sb.GetString(), sb.GetLength()) << std::endl;
+}
+
+NOINLINE static void dodumbrapid()
+{
+#if 0
+      rapidjson::Document doc(rapidjson::kObjectType);
+      rapidjson::Value ob1(rapidjson::kObjectType);
+      rapidjson::Value ob2(rapidjson::kObjectType);
+      doc.AddMember("jsonrpc",      "2.0",                  doc.GetAllocator());
+      doc.AddMember("method",       "textDocument/didOpen", doc.GetAllocator());
+      ob2.AddMember("languageId",   "cpp",                  doc.GetAllocator());
+      ob2.AddMember("text",         lazy::path_raw,         doc.GetAllocator());
+      ob2.AddMember("uri",          lazy::fname_raw,        doc.GetAllocator());
+      ob2.AddMember("version",      1,                      doc.GetAllocator());
+      ob1.AddMember("textDocument", std::move(ob2),         doc.GetAllocator());
+      doc.AddMember("params",       std::move(ob1),         doc.GetAllocator());
+#endif
+
+      ipc::json::rapid_doc wrap;
+      wrap.add_member("jsonrpc", "2.0");
+      wrap.add_member("method", "textDocument/didOpen");
+      wrap.set_member("params");
+      wrap.set_member("textDocument");
+      wrap.add_member("languageId", "cpp");
+      wrap.add_member("text", util::recode<char>(lazy::path_raw));
+      wrap.add_member("uri", util::recode<char>(lazy::fname_raw));
+      wrap.add_member("version", 1);
+
+      rapidjson::StringBuffer sb;
+      rapidjson::Writer       wr{sb, &wrap.alloc()};
+      wrap.doc().Accept(wr);
+      std::cout << std::string_view(sb.GetString(), sb.GetLength()) << std::endl;
+}
+
 NOINLINE void foo04()
 {
-      auto clangd = ipc::protocols::MsJsonrpc::connection<ipc::connections::unix_socket>::new_unique();
-      clangd->spawn_connection_l("clangd", "--log=verbose", "--pch-storage=memory");
+      donloh();
+      dorapid();
+      dodumbrapid();
+}
 
-      auto fname_uri = lazy::filename_to_uri(util::recode<char>(lazy::fname_raw));
-      {
-            AUTOC init    = ipc::lsp::data::init_msg(fname_uri.get());
-            AUTOC content = util::slurp_file(lazy::fname_raw);
-            clangd->write_string(init);
-      }
 
-      clangd->waitpid();
+NOINLINE void foo10(char const *addr)
+{
+      using con_type   = ipc::connections::inet_socket;
+      using proto_type = ipc::protocols::Msgpack::connection<con_type>;
+
+      auto nvim  = proto_type::new_shared();
+      auto &impl = dynamic_cast<con_type::connection_impl_type &>(nvim->impl());
+      impl.should_open_listener(false);
+      impl.resolve(addr);
+      impl.connect();
+
+      util::eprint(FC("Connected to {}!\n"), addr);
+      nvim->close();
 }
 
 
 /****************************************************************************************/
-} // namespace testing01
+} // namespace testing
 } // namespace emlsp

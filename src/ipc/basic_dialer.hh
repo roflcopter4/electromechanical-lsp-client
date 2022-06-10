@@ -4,10 +4,81 @@
 
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
+#include "ipc/connection_interface.hh"
 
 inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
+
+
+#if 0
+class basic_dialer_interface
+{
+      using this_type  = basic_dialer_interface;
+
+    protected:
+      using procinfo_t = detail::procinfo_t;
+#ifdef _WIN32
+      using descriptor_t = intptr_t;
+#else
+      using descriptor_t = int;
+#endif
+
+    public:
+      basic_dialer_interface()          = default;
+      virtual ~basic_dialer_interface() = default;
+
+      DEFAULT_ALL_CTORS(basic_dialer_interface);
+
+      //--------------------------------------------------------------------------------
+
+      virtual void close()                       = 0;
+      virtual int  waitpid() noexcept            = 0;
+      ND virtual procinfo_t const &pid() const & = 0;
+
+      virtual void redirect_stderr_to_default()                          = 0;
+      virtual void redirect_stderr_to_devnull()                          = 0;
+      virtual void redirect_stderr_to_fd(descriptor_t fd)                = 0;
+      virtual void redirect_stderr_to_filename(std::string const &fname) = 0;
+      virtual procinfo_t spawn_connection(size_t argc, char **argv)      = 0;
+
+      virtual procinfo_t spawn_connection(char **const argv)
+      {
+            char **p = argv;
+            while (*p++)
+                  ;
+            return spawn_connection(util::ptr_diff(p, argv), argv);
+      }
+
+      virtual procinfo_t spawn_connection(std::vector<char const *> &&vec)
+      {
+            if (vec[vec.size() - 1] != nullptr)
+                  vec.emplace_back(nullptr);
+            return spawn_connection(vec.size() - 1, const_cast<char **>(vec.data()));
+      }
+
+      virtual procinfo_t spawn_connection(size_t argc, char const **argv) { return spawn_connection(argc, const_cast<char **>(argv)); }
+      virtual procinfo_t spawn_connection(char const **argv)              { return spawn_connection(const_cast<char **>(argv)); }
+      virtual procinfo_t spawn_connection(char const *const *argv)        { return spawn_connection(const_cast<char **>(argv)); }
+      virtual procinfo_t spawn_connection(std::vector<char *> &vec)       { return spawn_connection(reinterpret_cast<std::vector<char const *> &>(vec)); }
+      virtual procinfo_t spawn_connection(std::vector<char *> &&vec)      { return spawn_connection(reinterpret_cast<std::vector<char const *> &&>(vec)); }
+      virtual procinfo_t spawn_connection(std::vector<char const *> &vec) { return spawn_connection(std::forward<std::vector<char const *> &&>(vec)); }
+
+      /**
+       * \brief Spawn a process. This method is To be used much like execl. Unlike execl,
+       * no null pointer is required as a sentinel.
+       * \tparam Types Must be char const (&)[].
+       * \param args  All arguments must be string literals.
+       * \return Process id (either pid_t or PROCESS_INFORMATION).
+       */
+      template <util::concepts::StringLiteral ...Types>
+      procinfo_t spawn_connection_l(Types &&...args)
+      {
+            char const *const pack[] = {args..., nullptr};
+            constexpr size_t  argc   = (sizeof(pack) / sizeof(pack[0])) - SIZE_C(1);
+            return spawn_connection(argc, const_cast<char **>(pack));
+      }
+};
 
 
 template <typename ConnectionImpl>
@@ -22,31 +93,35 @@ class basic_dialer
       basic_dialer()          = default;
       virtual ~basic_dialer() = default;
 
-      DELETE_ALL_CTORS(basic_dialer);
+      DEFAULT_ALL_CTORS(basic_dialer);
 
       //--------------------------------------------------------------------------------
-
-      virtual void close() = 0;
 
       // FIXME This should probably be protected
       ND ConnectionImpl       &impl()       & { return impl_; }
       ND ConnectionImpl const &impl() const & { return impl_; }
 };
+#endif
 
 
 /*--------------------------------------------------------------------------------------*/
 
 
+#if 0
 template <typename ConnectionImpl>
-      REQUIRES (detail::ConnectionImplVariant<ConnectionImpl>)
-class spawn_dialer : public basic_dialer<ConnectionImpl>
+      REQUIRES (detail::ConnectionImplVariant<ConnectionImpl> && false)
+// class spawn_dialer : public basic_dialer<ConnectionImpl>
+// class spawn_dialer : public basic_dialer_interface, public connection_impl_wrapper<ConnectionImpl>
+class spawn_dialer : public connection_interface, public connection_impl_wrapper<ConnectionImpl>
 {
-      using procinfo_t = detail::procinfo_t;
+
+      using this_type      = spawn_dialer<ConnectionImpl>;
+      using base_type      = connection_impl_wrapper<ConnectionImpl>;
+      using base_interface = connection_interface;
 
     public:
-      using this_type            = spawn_dialer<ConnectionImpl>;
-      using base_type            = basic_dialer<ConnectionImpl>;
-      using connection_impl_type = typename base_type::connection_impl_type;
+      using connection_impl_type = ConnectionImpl;
+      // using base_type::impl;
 
     private:
       union {
@@ -54,6 +129,7 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             uv_process_t *libuv_process_handle_;
       };
       bool owns_process = true;
+
 #ifdef _WIN32
       std::unique_ptr<std::thread> process_watcher_ = nullptr;
 #endif
@@ -63,16 +139,16 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 
     public:
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init, hicpp-member-init)
-      spawn_dialer() : base_type()
+      spawn_dialer() : base_interface(), base_type()
       {
             if constexpr (is_uv_pipe_)
                   owns_process = false;
       }
 
-      virtual ~spawn_dialer() override
+      ~spawn_dialer() override
       {
             try {
-                  this->kill(true);
+                  this->kill();
             } catch (...) {}
       }
 
@@ -80,33 +156,20 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 
       //--------------------------------------------------------------------------------
 
-      void close() override
+      // ND ConnectionImpl       &this->impl() &       { return impl(); }
+      // ND ConnectionImpl const &this->impl() const & { return impl(); }
+
+      void close() final
       {
-            this->kill(false);
+            this->kill();
       }
 
-      template <typename T>
-      void set_stderr_fd(T const fd)
-      {
-            this->impl().set_stderr_fd(fd);
-      }
+      void redirect_stderr_to_default()                          final { this->impl().set_stderr_default(); }
+      void redirect_stderr_to_devnull()                          final { this->impl().set_stderr_devnull(); }
+      void redirect_stderr_to_fd(descriptor_t fd)                final { this->impl().set_stderr_fd(fd); }
+      void redirect_stderr_to_filename(std::string const &fname) final { this->impl().set_stderr_filename(fname); }
 
-      void set_stderr_default()
-      {
-            this->impl().set_stderr_default();
-      }
-
-      void set_stderr_devnull()
-      {
-            this->impl().set_stderr_devnull();
-      }
-
-      void set_stderr_filename(std::string const &fname)
-      {
-            this->impl().set_stderr_filename(fname);
-      }
-
-      virtual procinfo_t spawn_connection(size_t argc, char **argv)
+      procinfo_t spawn_connection(size_t argc, char **argv) final
       {
             if constexpr (is_uv_pipe_) {
                   std::ignore = this->impl().do_spawn_connection(argc, argv);
@@ -125,12 +188,13 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return pid_;
       }
 
-      procinfo_t spawn_connection(size_t const argc, char const **argv)
+#if 0
+      procinfo_t spawn_connection(size_t const argc, char const **argv) final
       {
             return spawn_connection(argc, const_cast<char **>(argv));
       }
 
-      procinfo_t spawn_connection(char **const argv)
+      procinfo_t spawn_connection(char **const argv) final
       {
             char **p = argv;
             while (*p++)
@@ -138,21 +202,21 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             return spawn_connection(util::ptr_diff(p, argv), argv);
       }
 
-      procinfo_t spawn_connection(char const **const argv)
+      procinfo_t spawn_connection(char const **const argv) final
       {
             return spawn_connection(const_cast<char **>(argv));
       }
 
-      procinfo_t spawn_connection(char const *const *const argv)
+      procinfo_t spawn_connection(char const *const *const argv) final
       {
             return spawn_connection(const_cast<char **>(argv));
       }
 
-      procinfo_t spawn_connection(std::vector<char *> &vec)       { return spawn_connection(reinterpret_cast<std::vector<char const *>  &>(vec)); }
-      procinfo_t spawn_connection(std::vector<char *> &&vec)      { return spawn_connection(reinterpret_cast<std::vector<char const *> &&>(vec)); }
-      procinfo_t spawn_connection(std::vector<char const *> &vec) { return spawn_connection(std::forward<std::vector<char const *> &&>(vec));     }
+      procinfo_t spawn_connection(std::vector<char *> &vec) final       { return spawn_connection(reinterpret_cast<std::vector<char const *>  &>(vec)); }
+      procinfo_t spawn_connection(std::vector<char *> &&vec) final      { return spawn_connection(reinterpret_cast<std::vector<char const *> &&>(vec)); }
+      procinfo_t spawn_connection(std::vector<char const *> &vec) final { return spawn_connection(std::forward<std::vector<char const *> &&>(vec));     }
 
-      procinfo_t spawn_connection(std::vector<char const *> &&vec)
+      procinfo_t spawn_connection(std::vector<char const *> &&vec) final
       {
             if (vec[vec.size() - 1] != nullptr)
                   vec.emplace_back(nullptr);
@@ -181,15 +245,16 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             constexpr size_t  argc   = (sizeof(pack) / sizeof(pack[0])) - SIZE_C(1);
             return spawn_connection(argc, const_cast<char **>(pack));
       }
+#endif
 
       //--------------------------------------------------------------------------------
 
-      ND procinfo_t const &pid() const &
+      ND procinfo_t const &pid() const & final
       {
             return pid_;
       }
 
-      int waitpid() noexcept
+      int waitpid() noexcept final
       {
             if constexpr (is_uv_pipe_) {
                   if (!libuv_process_handle_)
@@ -239,7 +304,7 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
 #endif
       }
 
-      void kill(bool const in_destructor)
+      void kill()
       {
 #ifdef _WIN32
             if (process_watcher_) {
@@ -257,11 +322,8 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
                         libuv_process_handle_ = nullptr;
                   }
             } else {
-                  if (proc_probably_exists(pid_)) {
+                  if (proc_probably_exists(pid_))
                         util::kill_process(pid_);
-                        if (!in_destructor)
-                              pid_ = {};
-                  }
             }
 
             this->impl().close();
@@ -278,6 +340,15 @@ class spawn_dialer : public basic_dialer<ConnectionImpl>
             });
 #endif
       }
+
+    protected:
+         ssize_t   raw_read(void *, size_t)              override {return 0;};
+         ssize_t   raw_read(void *, size_t, int)         override {return 0;};
+         ssize_t   raw_write(void const *, size_t)       override {return 0;};
+         ssize_t   raw_write(void const *, size_t, int)  override {return 0;};
+         ssize_t   raw_writev(void const *, size_t, int) override {return 0;};
+      ND size_t available() const                        override {return 0;};
+      ND intptr_t raw_descriptor() const             override {return 0;};
 };
 
 
@@ -303,21 +374,60 @@ spawn_dialer<detail::libuv_pipe_handle_impl>::pid() const &
       return libuv_process_handle_->pid;
 #endif
 }
+#endif
 
 
 /*--------------------------------------------------------------------------------------*/
 
 
 WHAT_THE_FUCK()
-class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
+template <typename ConnectionImpl>
+      REQUIRES ( std::same_as<ConnectionImpl, detail::fd_connection_impl> && false )
+class std_streams_dialer : public connection_interface,
+                           public connection_impl_wrapper<ConnectionImpl>
 {
+      procinfo_t parent_pid_;
+
     public:
-      using this_type = std_streams_dialer;
-      using base_type = basic_dialer<connection_impl_type>;
+      using connection_impl_type = ConnectionImpl;
+
+    private:
+      using this_type      = std_streams_dialer;
+      using base_type      = connection_impl_wrapper<connection_impl_type>;
+      using base_interface = connection_interface;
+
+    public:
+      // using base_type::impl;
+
+      using base_interface::raw_read;
+      using base_interface::raw_write;
+      using base_interface::raw_writev;
+      using base_interface::available;
+      using base_interface::raw_descriptor;
+      using base_interface::close;
+      using base_interface::waitpid;
+      using base_interface::redirect_stderr_to_default;
+      using base_interface::redirect_stderr_to_devnull;
+      using base_interface::redirect_stderr_to_fd;
+      using base_interface::redirect_stderr_to_filename;
+      using base_interface::spawn_connection;
+      using base_interface::pid;
 
       std_streams_dialer()
       {
-            impl().set_descriptors(0, 1);
+            this->impl().set_descriptors(0, 1);
+#ifdef _WIN32
+            static_assert(0);
+            memset(&parent_pid, 0, sizeof parent_pid_);
+            parent_pid_.dwProcessId = ::getppid();
+            parent_pid_.hProcess = OpenProcess(
+               SYNCHRONIZE | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+               FALSE, parent_pid_.dwProcessId);
+            parent_pid_.hThread = INVALID_HANDLE_VALUE;
+#else
+            //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+            parent_pid_ = ::getppid();
+#endif
       }
 
       ~std_streams_dialer() noexcept override = default;
@@ -326,13 +436,36 @@ class std_streams_dialer : public basic_dialer<detail::fd_connection_impl>
 
       //--------------------------------------------------------------------------------
 
-      void close() override {}
+      void close() final 
+      {
+            util::kill_process(parent_pid_);
+      };
+
+      int waitpid() noexcept final
+      {
+            return util::waitpid(parent_pid_);
+      };
+
+      ND procinfo_t const &pid() const & final
+      {
+            return parent_pid_;
+      };
+
+#if 0
+    private:
+      void redirect_stderr_to_default()                     final {};
+      void redirect_stderr_to_devnull()                     final {};
+      void redirect_stderr_to_fd(descriptor_t)              final {};
+      void redirect_stderr_to_filename(std::string const &) final {};
+      procinfo_t spawn_connection(size_t, char **)          final {return {};};
+#endif
 };
 
 
 /*--------------------------------------------------------------------------------------*/
 
 
+#if 0
 namespace dialers {
 using pipe              = spawn_dialer<detail::pipe_connection_impl>;
 using std_streams       = std_streams_dialer;
@@ -350,11 +483,13 @@ using win32_handle_pipe = spawn_dialer<detail::pipe_handle_connection_impl>;
 #endif
 
 } // namespace dialers
+#endif
 
 
 template <typename T>
 concept BasicDialerVariant =
-    std::derived_from<T, basic_dialer<typename T::connection_impl_type>>;
+    std::derived_from<T, connection_impl_wrapper<typename T::connection_impl_type>> &&
+    std::derived_from<T, connection_interface>;
 
 
 /****************************************************************************************/

@@ -6,6 +6,7 @@
 #include "Common.hh"
 #include "util/c_util.h"
 #include "util/concepts.hh"
+#include "util/deleters.hh"
 #include "util/exceptions.hh"
 #include "util/hackish_templates.hh"
 #include "util/strings.hh"
@@ -18,14 +19,19 @@ namespace util {
 
 
 namespace hacks {
-typedef std::filesystem::path path;
-typedef std::string_view      sview;
+typedef std::filesystem::path path;  //NOLINT
+typedef std::string_view      sview; //NOLINT
 } // namespace hacks
 
 
+namespace constants {
+extern const bool coloured_stderr;
+} // namespace constants
+
+
 extern hacks::path get_temporary_directory(char const *prefix = nullptr);
-extern hacks::path get_temporary_filename(char const *prefix = nullptr,
-                                          char const *suffix = nullptr);
+extern hacks::path get_temporary_filename(char const *__restrict prefix = nullptr,
+                                          char const *__restrict suffix = nullptr);
 
 
 extern std::string slurp_file(char const *fname, bool binary = false);
@@ -41,6 +47,7 @@ inline std::string slurp_file(hacks::sview const &fname, bool const binary = fal
 }
 
 
+ND extern uintmax_t   xatoi(char const *number, bool strict = true);
 ND extern std::string char_repr(char ch);
 ND extern std::string my_strerror(errno_t errval);
 using ::my_strerror;
@@ -54,7 +61,7 @@ ND extern std::string demangle(std::type_info const &id);
  * about possible null pointers. So I'll make an exception. Damn it Microsoft. */
 template <typename T>
 ND __forceinline T *
-xmalloc(size_t const size = sizeof(T)) noexcept(false)
+xmalloc(size_t const size = sizeof(T))  noexcept(false)
 {
       //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = malloc(size);
@@ -65,7 +72,8 @@ xmalloc(size_t const size = sizeof(T)) noexcept(false)
 
 template <typename T>
 ND __forceinline T *
-xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(false)
+xcalloc(size_t const nmemb = SIZE_C(1),
+        size_t const size  = sizeof(T))  noexcept(false)
 {
       //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = calloc(nmemb, size);
@@ -74,13 +82,27 @@ xcalloc(size_t const nmemb = SIZE_C(1), size_t const size = sizeof(T)) noexcept(
       return static_cast<T *>(ret);
 }
 
+
+constexpr void free_all() {}
+
+/* I can't lie; the primary reason this exists is to silence clang's whining about
+ * calling free. */
+template <typename T, typename ...Pack>
+      REQUIRES(util::concepts::GenericPointer<T>)
+constexpr void free_all(T arg, Pack ...pack)
+{
+      // NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
+      ::free(arg);
+      free_all(pack...);
+}
+
 /*--------------------------------------------------------------------------------------*/
 
 namespace detail {
-#if defined TIOCINQ
-constexpr uint64_t ioctl_size_available = TIOCINQ;
-#elif defined FIONREAD
+#if defined FIONREAD
 constexpr uint64_t ioctl_size_available = FIONREAD;
+#elif defined TIOCINQ
+constexpr uint64_t ioctl_size_available = TIOCINQ;
 #else
 # error "Neither TIOCINQ nor FIONREAD exist as ioctl parameters on this system."
 #endif
@@ -92,9 +114,11 @@ using procinfo_t = pid_t;
 } // namespace detail
 
 
-extern int  kill_process(detail::procinfo_t const &pid) noexcept;
+extern int  kill_process(detail::procinfo_t &pid) noexcept;
 extern void close_descriptor(int &fd) noexcept;
 extern void close_descriptor(intptr_t &fd) noexcept;
+
+extern int waitpid(detail::procinfo_t const &pid);
 
 #ifdef _WIN32
 
@@ -102,6 +126,7 @@ extern    void   close_descriptor(HANDLE &fd) noexcept;
 extern    void   close_descriptor(SOCKET &fd) noexcept;
 ND extern size_t available_in_fd (SOCKET s) noexcept(false);
 ND extern size_t available_in_fd (HANDLE s) noexcept(false);
+extern    int    waitpid(HANDLE pid);
 
 #endif
 
@@ -157,7 +182,8 @@ ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2) noexcept
 
 
 template <typename Elem, size_t N>
-size_t fwritel(Elem const (&buffer)[N], FILE *dst)
+__forceinline size_t
+fwritel(Elem const (&buffer)[N], FILE *dst)
 {
       return ::fwrite(buffer, sizeof(Elem), N - SIZE_C(1), dst);
 }
@@ -168,9 +194,18 @@ template <typename S, typename... Args>
 constexpr void
 eprint(S const &format_str, Args const &...args)
 {
-      fwritel("emlsp (warning):  ", stderr);
-      ::fmt::print(stderr, format_str, std::forward<Args const &>(args)...);
+      ::flockfile(stderr);
+      if (constants::coloured_stderr)
+            fmt::print(stderr, FC("{}\033[38;2;255;182;193m"),
+                       styled(MAIN_PROJECT_NAME " (warning):  ",
+                              fg(fmt::color::yellow) | fmt::emphasis::bold));
+      else
+            fwritel(MAIN_PROJECT_NAME " (warning):  ", stderr);
+      fmt::print(stderr, format_str, std::forward<Args const &>(args)...);
+      if (constants::coloured_stderr)
+            fwritel("\033[0m", stderr);
       ::fflush(stderr);
+      ::funlockfile(stderr);
 }
 
 
@@ -178,9 +213,15 @@ eprint(S const &format_str, Args const &...args)
 
 namespace ipc {
 
-extern ::socket_t  open_new_unix_socket  (char const *path,           int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
-extern ::socket_t  connect_to_unix_socket(char const *path,           int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
-extern ::socket_t  connect_to_unix_socket(::sockaddr_un const *addr,  int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0);
+#define SOCK_ARGS \
+      int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0
+
+extern ::socket_t open_new_unix_socket  (char const *path,          SOCK_ARGS);
+extern ::socket_t connect_to_unix_socket(char const *path,          SOCK_ARGS);
+extern ::socket_t connect_to_unix_socket(::sockaddr_un const *addr, SOCK_ARGS);
+
+#undef SOCK_ARGS
+
 extern ::addrinfo *resolve_addr(char const *server, char const *port, int type = SOCK_STREAM);
 
 } // namespace ipc

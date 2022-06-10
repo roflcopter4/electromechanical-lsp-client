@@ -32,7 +32,7 @@
 #define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (1<<23)
 // #define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (8)
 
-# include <assert.h>
+# include <assert.h> //NOLINT
 # include "pch.hh"
 
 inline namespace emlsp {
