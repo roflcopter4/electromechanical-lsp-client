@@ -38,8 +38,9 @@ set (lsp-thing_HEADERS
     "ipc/connection_impl.hh"
     "ipc/basic_connection.hh"
     "ipc/basic_dialer.hh"
-    "ipc/basic_io_connection.hh"
+    "ipc/basic_sync_thing.hh"
     "ipc/basic_protocol_connection.hh"
+    "ipc/ipc_connection.hh"
     "ipc/misc.hh"
 
     "ipc/io/basic_io_wrapper.hh"

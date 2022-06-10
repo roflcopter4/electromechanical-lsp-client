@@ -4,8 +4,8 @@
 /****************************************************************************************/
 #include "Common.hh"
 
-#include "ipc/basic_io_connection.hh"
 #include "ipc/ipc_connection.hh"
+#include "ipc/basic_sync_thing.hh"
 
 inline namespace emlsp {
 namespace ipc {
@@ -128,44 +128,17 @@ class transport_interface
 /*======================================================================================*/
 
 
-template <typename Connection, template <typename> class IOWrapper>
-      REQUIRES (BasicConnectionVariant<Connection> &&
-                io::WrapperVariant<IOWrapper<Connection>>)
-class basic_protocol_connection : public basic_io_connection<Connection, IOWrapper>
+class basic_protocol_interface
+      : public basic_sync_thing
 {
-      using this_type = basic_protocol_connection<Connection, IOWrapper>;
-      using base_type = basic_io_connection<Connection, IOWrapper>;
-
-      std::atomic_uint64_t request_id_ = 0;
-
     protected:
       bool want_close_ = false;
 
     public:
-      using connection_type = Connection;
-      using io_wrapper_type = IOWrapper<Connection>;
-      using value_type      = typename io_wrapper_type::value_type;
+      basic_protocol_interface()            = default;
+       ~basic_protocol_interface() override = default;
 
-      //using connection_type::raw_read;
-      //using connection_type::raw_write;
-      //using connection_type::raw_writev;
-      //using connection_type::available;
-      //using connection_type::raw_descriptor;
-      //using connection_type::close;
-      //using connection_type::redirect_stderr_to_default;
-      //using connection_type::redirect_stderr_to_devnull;
-      //using connection_type::redirect_stderr_to_fd;
-      //using connection_type::redirect_stderr_to_filename;
-      //using connection_type::spawn_connection;
-      //using connection_type::pid;
-
-      basic_protocol_connection() = default;
-      virtual ~basic_protocol_connection() override = default;
-
-      basic_protocol_connection(basic_protocol_connection const &)                = delete;
-      basic_protocol_connection(basic_protocol_connection &&) noexcept            = default;
-      basic_protocol_connection &operator=(basic_protocol_connection const &)     = delete;
-      basic_protocol_connection &operator=(basic_protocol_connection &&) noexcept = default;
+      DELETE_ALL_CTORS(basic_protocol_interface);
 
       /*------------------------------------------------------------------------------*/
 
@@ -183,10 +156,28 @@ class basic_protocol_connection : public basic_io_connection<Connection, IOWrapp
 
 
 template <typename T>
-concept BasicProtocolConnectionVariant = requires {
-      requires BasicConnectionVariant<T>;
-      requires io::WrapperVariant<T>;
-      requires std::derived_from<T, typename T::base_type>;
+concept BasicProtocolConnectionVariant = std::derived_from<T, basic_protocol_interface>;
+
+
+template <typename Connection, template <class> typename IOWrapper>
+class basic_protocol_connection
+      : public Connection,
+        public IOWrapper<Connection>,
+        public basic_protocol_interface
+{
+      using this_type = basic_protocol_connection<Connection, IOWrapper>;
+
+    public:
+      using connection_type = Connection;
+      using io_wrapper_type = IOWrapper<Connection>;
+
+      basic_protocol_connection()
+            : Connection(), io_wrapper_type(dynamic_cast<Connection *>(this))
+      {}
+
+      ~basic_protocol_connection() override = default;
+
+      DELETE_ALL_CTORS(basic_protocol_connection);
 };
 
 

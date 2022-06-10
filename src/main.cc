@@ -91,9 +91,9 @@ do_main(int argc, char *argv[])
 
       testing::foo02();
       testing::foo04();
-      testing::foo05();
+      // testing::foo05();
       testing::foo06();
-      testing::foo10(argv[1]);
+      // testing::foo10(argv[1]);
 
       return 0;
 }

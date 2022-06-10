@@ -248,6 +248,14 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
         -fdebug-types-section
         -gdescribe-dies
         -fconcepts-diagnostics-depth=100
+
+        # -fsanitize=undefined -fsanitize=bounds -fsanitize=bool
+        # -fsanitize=address
+        # -fsanitize-address-use-after-scope
+        # -fsanitize=thread
+        # -fsanitize=alignment
+        # -fsanitize=null -fsanitize=return
+
         # -fanalyzer
     )
 

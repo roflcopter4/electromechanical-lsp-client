@@ -188,7 +188,7 @@ add_subdirectory(src)
 
 # if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
 
-if (FALSE AND NOT (MINGW AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
+if (TRUE AND NOT (MINGW AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
   target_precompile_headers(lsp-thing
       PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>

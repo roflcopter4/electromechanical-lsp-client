@@ -14,7 +14,7 @@ namespace ipc::io {
 
 
 template <typename Connection>
-      //REQUIRES (BasicConnectionVariant<Connection>)
+      REQUIRES (BasicConnectionVariant<Connection>)
 class ms_jsonrpc_wrapper;
 
 namespace detail {
@@ -26,7 +26,7 @@ using iovec_size_type = size_t;
 #endif
 
 template <typename Connection>
-      //REQUIRES (BasicConnectionVariant<Connection>)
+      REQUIRES (BasicConnectionVariant<Connection>)
 class ms_jsonrpc_packer
 {
       std::condition_variable &cond_;
@@ -75,8 +75,11 @@ class ms_jsonrpc_packer
 } // namespace detail
 
 
+/****************************************************************************************/
+
+
 template <typename Connection>
-      //REQUIRES(BasicConnectionVariant<Connection>)
+      REQUIRES(BasicConnectionVariant<Connection>)
 class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
                                                 detail::ms_jsonrpc_packer<Connection>,
                                                 rapidjson::Document>
@@ -331,8 +334,8 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             auto doc = std::make_unique<rapidjson::Document>();
 
             doc->Parse</*rapidjson::kParseStopWhenDoneFlag |*/
-                       rapidjson::kParseDefaultFlags |
-                       rapidjson::kParseFullPrecisionFlag>(msg, len);
+                       rapidjson::kParseDefaultFlags /*|
+                       rapidjson::kParseFullPrecisionFlag*/>(msg, len);
 
             msg     += len;
             msg_len -= len;

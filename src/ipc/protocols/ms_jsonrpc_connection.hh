@@ -18,11 +18,13 @@ namespace ipc::protocols::MsJsonrpc {
 
 
 namespace detail {
-class read_buffer
+class read_buffer final
 {
       static constexpr size_t default_buffer_size = SIZE_C(1) << 23;
 
-      char  *buf_;
+      char            *buf_;
+      std::align_val_t buf_align_;
+
       size_t max_;
       size_t used_{};
       size_t offset_{};
@@ -31,14 +33,15 @@ class read_buffer
       explicit read_buffer(size_t const size      = default_buffer_size,
                            size_t const alignment = 4096)
           : buf_(new (std::align_val_t{alignment}) char[size]),
+            buf_align_(std::align_val_t{alignment}),
             max_(size)
       {
             memset(buf_, 0, size);
       }
 
-      ~read_buffer() noexcept
+      ~read_buffer()
       {
-            delete[] buf_;
+            operator delete[](buf_, max_, buf_align_);
       }
 
       read_buffer(read_buffer const &)                = delete;
@@ -48,28 +51,28 @@ class read_buffer
 
       //--------------------------------------------------------------------------
 
-      ND char const *raw_buf() const { return buf_; }
-      ND size_t      max()     const { return max_; }
+      ND constexpr char const *raw_buf() const { return buf_; }
+      ND constexpr size_t      max()     const { return max_; }
 
-      ND char *end() const __attribute__((__pure__))
+      ND constexpr char *end() const __attribute__((__pure__))
       {
             assert(used_ < max_);
             return buf_ + used_;
       }
 
-      ND size_t avail() const __attribute__((__pure__))
+      ND constexpr size_t avail() const __attribute__((__pure__))
       {
             assert(max_ >= used_);
             return max_ - used_;
       }
 
-      ND char *unparsed_start() const __attribute__((__pure__))
+      ND constexpr char *unparsed_start() const __attribute__((__pure__))
       {
             assert(max_ >= offset_);
             return buf_ + offset_;
       }
 
-      ND size_t unparsed_size() const __attribute__((__pure__))
+      ND constexpr size_t unparsed_size() const __attribute__((__pure__))
       {
             assert(used_ >= offset_);
             return used_ - offset_;
@@ -96,9 +99,10 @@ class read_buffer
       void reserve(size_t const delta)
       {
             if (used_ + delta < max_) {
-                  char *tmp = new char[max_ += delta];
+                  size_t const oldmax = max_;
+                  char        *tmp    = new (buf_align_) char[max_ += delta];
                   memcpy(tmp, buf_, used_);
-                  delete[] buf_;
+                  operator delete[](buf_, oldmax, buf_align_);
                   buf_ = tmp;
             }
       }
@@ -106,46 +110,35 @@ class read_buffer
 } // namespace detail
 
 
+/****************************************************************************************/
+
+
 template <typename Connection>
       REQUIRES(ipc::BasicConnectionVariant<Connection>)
 class alignas(4096) connection final
-    : public ipc::basic_protocol_connection<Connection,
-                                            ipc::io::ms_jsonrpc_wrapper>
+    : public ipc::basic_protocol_connection<Connection, ipc::io::ms_jsonrpc_wrapper>
+// : public Connection,
+//   public ipc::basic_io_wrapper<Connection, ipc::io::ms_jsonrpc_wrapper>,
+//   public ipc::basic_protocol_interface
 {
       std::string key_name{};
 
     public:
       using this_type = connection<Connection>;
-      using base_type = ipc::basic_protocol_connection<Connection,
-                                                  ipc::io::ms_jsonrpc_wrapper>;
+      using base_type = ipc::basic_protocol_interface;
 
       using connection_type = Connection;
       using io_wrapper_type = ipc::io::ms_jsonrpc_wrapper<Connection>;
-      using value_type      = typename base_type::value_type;
+      using value_type      = typename io_wrapper_type::value_type;
 
       using io_wrapper_type::read_object;
       using io_wrapper_type::parse_buffer;
-      // using connection_type::raw_descriptor;
 
     protected:
       connection() = default;
 
     public:
-      // using connection_type::raw_read;
-      // using connection_type::raw_write;
-      // using connection_type::raw_writev;
-      // using connection_type::available;
-      // using connection_type::raw_descriptor;
-      // using connection_type::close;
-      // using connection_type::redirect_stderr_to_default;
-      // using connection_type::redirect_stderr_to_devnull;
-      // using connection_type::redirect_stderr_to_fd;
-      // using connection_type::redirect_stderr_to_filename;
-      // using connection_type::spawn_connection;
-      // using connection_type::pid;
-
-
-      ~connection() override = default;
+      virtual ~connection() override = default;
 
       connection(connection const &)                = delete;
       connection(connection &&) noexcept            = delete;
@@ -232,9 +225,8 @@ class alignas(4096) connection final
             // disconnect:
 
                   util::eprint(
-                      FC("({}): Got disconnect signal, status {}, for fd [UNKNOWN], within {} -- ignoring\n"),
-                      this->raw_descriptor(), status,
-                      util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
+                      FC("({}): Got disconnect signal, status {}, for fd [UNKNOWN], within  -- ignoring\n"),
+                      this->raw_descriptor(), status);
 
                   //throw ipc::except::connection_closed();
 
@@ -247,9 +239,8 @@ class alignas(4096) connection final
 
             } else if (events & UV_READABLE) {
                   util::eprint(
-                      FC("({}): Descriptor {} is readable from within {}\n"),
-                      this->raw_descriptor(), "[NO FUCKING CLUE]",
-                      util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
+                      FC("({}): Descriptor {} is readable from within real_poll_callback\n"),
+                      this->raw_descriptor(), "[NO FUCKING CLUE]");
 
                   std::unique_ptr<rapidjson::Document> doc;
 

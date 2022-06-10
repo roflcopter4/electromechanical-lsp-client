@@ -13,20 +13,22 @@ namespace ipc::protocols::Msgpack {
 
 
 template <typename Connection>
-      REQUIRES (ipc::BasicConnectionVariant<Connection>)
+      REQUIRES(ipc::BasicConnectionVariant<Connection>)
 class alignas(4096) connection final
     : public ipc::basic_protocol_connection<Connection, ipc::io::msgpack_wrapper>
+    //: public Connection,
+    //  public ipc::io_sync_wrapper<Connection, ipc::io::msgpack_wrapper>,
+    //  public ipc::basic_protocol_interface
 {
       std::string key_name{};
 
     public:
       using this_type = connection<Connection>;
-      using base_type = ipc::basic_protocol_connection<Connection,
-                                                       ipc::io::msgpack_wrapper>;
+      using base_type = ipc::basic_protocol_interface;
 
       using connection_type = Connection;
       using io_wrapper_type = ipc::io::msgpack_wrapper<Connection>;
-      using value_type      = typename base_type::value_type;
+      using value_type      = typename io_wrapper_type::value_type;
 
       using io_wrapper_type::read_object;
       using io_wrapper_type::get_unpacker;
@@ -35,7 +37,7 @@ class alignas(4096) connection final
       connection() = default;
 
     public:
-      ~connection() override = default;
+      virtual ~connection() override = default;
 
       connection(connection const &)                = delete;
       connection(connection &&) noexcept            = delete;

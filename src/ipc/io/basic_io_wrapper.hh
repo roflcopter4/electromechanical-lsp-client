@@ -12,7 +12,7 @@ namespace ipc::io {
 
 
 template <typename Connection, typename Packer, typename Unpacker>
-      // REQUIRES (BasicConnectionVariant<Connection>)
+      REQUIRES (BasicConnectionVariant<Connection>)
 class basic_wrapper
 {
       using this_type       = basic_wrapper;
@@ -124,6 +124,8 @@ class basic_wrapper
       std::condition_variable packing_cond_ = {};
 
 #define PACK packer_type{packing_cond_}
+      std::array<packer_type, 4> packs_ = std::array<packer_type, 4>{PACK, PACK, PACK, PACK};
+#if 0
       std::array<packer_type, 64> packs_ = std::array<packer_type, 64>{
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
@@ -134,6 +136,7 @@ class basic_wrapper
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,
       };
+#endif
 #undef PACK
 };
 

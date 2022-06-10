@@ -51,7 +51,7 @@ constexpr auto invalid_socket = static_cast<socket_t>(-1);
  * TODO: Document
  */
 // template <typename DescriptorType>
-class base_connection_interface
+class base_connection_impl_interface
 {
 #ifdef _WIN32
       using err_descriptor_type = HANDLE;
@@ -85,17 +85,17 @@ class base_connection_interface
       bool    open_listener_ : 1 = true;
 
     public:
-      base_connection_interface() = default;
+      base_connection_impl_interface() = default;
 
-      virtual ~base_connection_interface()
+      virtual ~base_connection_impl_interface()
       {
             if (err_sink_type_ == sink_type::FILENAME)
                   util::close_descriptor(err_fd_);
       }
 
-      DELETE_ALL_CTORS(base_connection_interface);
+      DELETE_ALL_CTORS(base_connection_impl_interface);
 
-      using this_type       = base_connection_interface;
+      using this_type       = base_connection_impl_interface;
       using descriptor_type = DescriptorType;
 
       //--------------------------------------------------------------------------------
@@ -199,7 +199,7 @@ class base_connection_interface
 
 template <typename T>
 concept ConnectionImplVariant =
-    std::derived_from<T, base_connection_interface>;
+    std::derived_from<T, base_connection_impl_interface>;
 
 
 /****************************************************************************************/
@@ -227,10 +227,10 @@ concept ConnectionImplVariant =
 
 // template <typename AddrType>
 class socket_connection_base_impl
-      : public base_connection_interface
+      : public base_connection_impl_interface
 {
       using this_type = socket_connection_base_impl;
-      using base_type = base_connection_interface;
+      using base_type = base_connection_impl_interface;
       // using AddrType  = sockaddr_storage;
 
 #ifdef _WIN32
@@ -633,10 +633,10 @@ class fd_connection_impl;
 /*
  * For regular pipes.
  */
-class pipe_connection_impl : public base_connection_interface
+class pipe_connection_impl : public base_connection_impl_interface
 {
       using this_type = pipe_connection_impl;
-      using base_type = base_connection_interface;
+      using base_type = base_connection_impl_interface;
       friend class fd_connection_impl;
 
       int volatile read_  = (-1);
@@ -839,7 +839,7 @@ class win32_named_pipe_impl final : public base_connection_interface<int>
 
 
 class libuv_pipe_handle_impl final
-    : public base_connection_interface
+    : public base_connection_impl_interface
 {
       using this_type = libuv_pipe_handle_impl;
 
@@ -946,8 +946,8 @@ base_connection_interface<DescriptorType>::get_err_handle()
 
 #else
 
-inline base_connection_interface::err_descriptor_type
-base_connection_interface::get_err_handle()
+inline base_connection_impl_interface::err_descriptor_type
+base_connection_impl_interface::get_err_handle()
 {
       int fd;
 
