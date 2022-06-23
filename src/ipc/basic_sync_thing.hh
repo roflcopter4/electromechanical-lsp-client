@@ -4,9 +4,6 @@
 /****************************************************************************************/
 #include "Common.hh"
 
-#include "ipc/basic_connection.hh"
-#include "ipc/basic_dialer.hh"
-
 #include "ipc/io/basic_io_wrapper.hh"
 #include "ipc/io/ms_jsonrpc_io_wrapper.hh"
 #include "ipc/io/msgpack_io_wrapper.hh"

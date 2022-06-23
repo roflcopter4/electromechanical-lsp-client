@@ -2,6 +2,7 @@
 #ifndef HGUARD__IPC__PROTOCOLS__MSGPACK_CONNECTION_HH_
 #define HGUARD__IPC__PROTOCOLS__MSGPACK_CONNECTION_HH_ // NOLINT
 /****************************************************************************************/
+
 #include "Common.hh"
 #include "ipc/basic_protocol_connection.hh"
 

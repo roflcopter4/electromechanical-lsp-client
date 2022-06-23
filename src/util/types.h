@@ -15,18 +15,17 @@ typedef P99_PASTE_3(int, __WORDSIZE, _t) ssize_t;
 typedef int socket_t;   //NOLINT(modernize-use-using)
 typedef int errno_t;    //NOLINT(modernize-use-using)
 typedef int error_t;    //NOLINT(modernize-use-using)
+/* It makes life just a little easier to have this type defined. */
 typedef uint32_t DWORD; //NOLINT(modernize-use-using)
 #endif
 
 typedef float  float32_t;
 typedef double float64_t;
-//#ifdef __GNUC__
-//typedef   signed __int128  int128_t;
-//typedef unsigned __int128 uint128_t;
-//typedef __float128 float128_t;
-//#endif
-#if __DBL_MANT_DIG__ != __LDBL_MANT_DIG__
+#if __DBL_MANT_DIG__ != __LDBL_MANT_DIG__ && __LDBL_MANT_DIG__ != 113
 typedef long double float80_t;
+#endif
+#ifdef __GNUC__
+typedef __float128 float128_t;
 #endif
 
 

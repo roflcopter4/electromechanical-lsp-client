@@ -4,8 +4,8 @@
 /****************************************************************************************/
 #include "Common.hh"
 
-#include "ipc/ipc_connection.hh"
 #include "ipc/basic_sync_thing.hh"
+#include "ipc/ipc_connection.hh"
 
 inline namespace emlsp {
 namespace ipc {

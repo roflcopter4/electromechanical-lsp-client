@@ -3,7 +3,6 @@
 #define HGUARD__IPC__BASIC_WRAPPER_HH_ //NOLINT
 
 #include "Common.hh"
-#include "ipc/basic_connection.hh"
 #include "ipc/ipc_connection.hh"
 
 inline namespace emlsp {

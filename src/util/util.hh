@@ -13,6 +13,8 @@
 
 #include "util/recode/recode.hh"
 
+#define BARE_DECLTYPE(obj) std::remove_cvref_t<decltype(obj)>
+
 inline namespace emlsp {
 namespace util {
 /****************************************************************************************/

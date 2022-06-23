@@ -6,6 +6,12 @@
 #include "ipc/connection_impl.hh"
 #include "ipc/connection_interface.hh"
 
+#ifdef __TAG_HIGHLIGHT__
+# define TYPENAME typename
+#else
+# define TYPENAME util::concepts::StringLiteral 
+#endif
+
 inline namespace emlsp {
 namespace ipc {
 /****************************************************************************************/
@@ -213,7 +219,7 @@ class spawner_connection : public base_connection
        * \param args  All arguments must be string literals.
        * \return Process id (either pid_t or PROCESS_INFORMATION).
        */
-      template <util::concepts::StringLiteral ...Types>
+      template <TYPENAME ...Types>
       procinfo_t spawn_connection_l(Types &&...args)
       {
             char const *const pack[] = {args..., nullptr};
@@ -478,6 +484,7 @@ using Default           = libuv_pipe_handle;
 } // namespace connections
 
 
+#undef TYPENAME
 
 /****************************************************************************************/
 } // namespace ipc

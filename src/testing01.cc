@@ -59,7 +59,7 @@ NOINLINE void foo02()
 # endif
 #endif
 
-      clangd->redirect_stderr_to_filename("niggerfaggot");
+      clangd->redirect_stderr_to_devnull();
 
 #if 1
       nvim->spawn_connection_l(

@@ -4,13 +4,7 @@
 /****************************************************************************************/
 
 #include "Common.hh"
-
-// #include "ipc/basic_io_connection.hh"
 #include "ipc/basic_protocol_connection.hh"
-
-#include "ipc/ipc_connection.hh"
-
-#include <new>
 
 inline namespace emlsp {
 namespace ipc::protocols::MsJsonrpc {
@@ -135,9 +129,9 @@ class alignas(4096) connection final
       using io_wrapper_type::parse_buffer;
 
     protected:
-      connection() = default;
 
     public:
+      connection() = default;
       virtual ~connection() override = default;
 
       connection(connection const &)                = delete;
@@ -147,8 +141,8 @@ class alignas(4096) connection final
 
       //-------------------------------------------------------------------------------
 
-      NOINLINE static auto new_unique() { return std::unique_ptr<this_type>(new this_type()); }
-      NOINLINE static auto new_shared() { return std::shared_ptr<this_type>(new this_type()); }
+      NOINLINE static std::unique_ptr<connection<Connection>> new_unique() { return std::unique_ptr<connection<Connection>>(new connection<Connection>()); }
+      NOINLINE static std::shared_ptr<connection<Connection>> new_shared() { return std::shared_ptr<connection<Connection>>(new connection<Connection>()); }
 
       //-------------------------------------------------------------------------------
 

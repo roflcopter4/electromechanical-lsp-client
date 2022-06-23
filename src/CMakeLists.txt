@@ -6,7 +6,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 set (lsp-thing_SOURCES
     "main.cc"
     "testing01.cc"
-    fuckwad.cc
+    "testing02.cc"
 
     "mpack/format.cc"
     "msgpack/dumper.cc"
@@ -36,8 +36,6 @@ set (lsp-thing_HEADERS
     "msgpack/dumper.hh"
 
     "ipc/connection_impl.hh"
-    "ipc/basic_connection.hh"
-    "ipc/basic_dialer.hh"
     "ipc/basic_sync_thing.hh"
     "ipc/basic_protocol_connection.hh"
     "ipc/ipc_connection.hh"

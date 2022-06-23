@@ -3,7 +3,6 @@
 #define HGUARD__IPC__CONNECTION_INTERFACE_HH_ //NOLINT
 
 #include "Common.hh"
-// #include "ipc/basic_dialer.hh"
 #include "ipc/connection_impl.hh"
 
 inline namespace emlsp {
