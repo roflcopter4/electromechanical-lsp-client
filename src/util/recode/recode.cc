@@ -28,7 +28,7 @@ namespace detail {
 
 
 NORETURN static void
-conversion_error(errno_t const e, int const from, int const to) noexcept(false)
+conversion_error(errno_t const e, int const from, int const to)
 {
       char errbuf[128];
       auto const *eptr = my_strerror(e, errbuf, sizeof errbuf);
@@ -47,14 +47,14 @@ conversion_error(errno_t const e, int const from, int const to) noexcept(false)
 struct use_win32_errcode_tag {};
 
 NORETURN static void
-conversion_error(use_win32_errcode_tag, int const from, int const to) noexcept(false)
+conversion_error(use_win32_errcode_tag, int const from, int const to)
 {
       auto const e = GetLastError();
       auto const ecode = std::error_code{static_cast<int>(e),
                                          std::system_category()};
 
 #ifndef NDEBUG
-      PSNIP_TRAP();
+      //PSNIP_TRAP();
 #endif
       /* This ought to be evaluated to a constant string at compile time. */
       throw std::runtime_error(
@@ -86,7 +86,7 @@ std::u##TO##string char##FROM##_to_char##TO(char##FROM##_t const *ws, size_t con
 /*--------------------------------------------------------------------------------------*/
 
 std::u16string
-char8_to_char16(char8_t const *ws, size_t const len) noexcept(false)
+char8_to_char16(char8_t const *ws, size_t const len)
 {
       std::u16string str;
       size_t         resultlen = len + SIZE_C(1);
@@ -103,7 +103,7 @@ char8_to_char16(char8_t const *ws, size_t const len) noexcept(false)
 }
 
 std::u32string
-char8_to_char32(char8_t const *ws, size_t const len) noexcept(false)
+char8_to_char32(char8_t const *ws, size_t const len)
 {
       std::u32string str;
       size_t         resultlen = len + SIZE_C(1);
@@ -120,16 +120,23 @@ char8_to_char32(char8_t const *ws, size_t const len) noexcept(false)
 }
 
 std::u8string
-char16_to_char8(char16_t const *ws, size_t const len) noexcept(false)
+char16_to_char8(char16_t const *ws, size_t const len)
 {
       std::u8string str;
       size_t        resultlen = (len + SIZE_C(1)) * SIZE_C(2);
-      str.reserve(resultlen);
+      errno = 0;
 
-      AUTOC *result = u16_to_u8(reinterpret_cast<uint16_t const *>(ws), len,
-                                reinterpret_cast<uint8_t *>(str.data()), &resultlen);
-      if (!result)
-            conversion_error(errno, 16, 8);
+      for (bool again = true; again;) {
+            str.reserve(resultlen + SIZE_C(1));
+            size_t true_resultlen = resultlen;
+            AUTOC *result = u16_to_u8(reinterpret_cast<uint16_t const *>(ws), len,
+                                      reinterpret_cast<uint8_t *>(str.data()), &true_resultlen);
+            if (!result || errno)
+                  conversion_error(errno, 16, 8);
+            if (resultlen >= true_resultlen)
+                  again = false;
+            resultlen = true_resultlen;
+      }
 
       str.data()[resultlen] = 0;
       resize_string_hack(str, resultlen);
@@ -137,7 +144,7 @@ char16_to_char8(char16_t const *ws, size_t const len) noexcept(false)
 }
 
 std::u32string
-char16_to_char32(char16_t const *ws, size_t const len) noexcept(false)
+char16_to_char32(char16_t const *ws, size_t const len)
 {
       std::u32string str;
       size_t         resultlen = (len + SIZE_C(1));
@@ -154,16 +161,23 @@ char16_to_char32(char16_t const *ws, size_t const len) noexcept(false)
 }
 
 std::u8string
-char32_to_char8(char32_t const *ws, size_t const len) noexcept(false)
+char32_to_char8(char32_t const *ws, size_t const len)
 {
       std::u8string str;
       size_t        resultlen = (len + SIZE_C(1)) * SIZE_C(4);
-      str.reserve(resultlen);
+      errno = 0;
 
-      AUTOC *result = u32_to_u8(reinterpret_cast<uint32_t const *>(ws), len,
-                                reinterpret_cast<uint8_t *>(str.data()), &resultlen);
-      if (!result)
-            conversion_error(errno, 32, 8);
+      for (bool again = true; again;) {
+            str.reserve(resultlen + SIZE_C(1));
+            size_t true_resultlen = resultlen;
+            AUTOC *result = u32_to_u8(reinterpret_cast<uint32_t const *>(ws), len,
+                                      reinterpret_cast<uint8_t *>(str.data()), &true_resultlen);
+            if (!result || errno)
+                  conversion_error(errno, 32, 8);
+            if (resultlen >= true_resultlen)
+                  again = false;
+            resultlen = true_resultlen;
+      }
 
       str.data()[resultlen] = 0;
       resize_string_hack(str, resultlen);
@@ -172,7 +186,7 @@ char32_to_char8(char32_t const *ws, size_t const len) noexcept(false)
 }
 
 std::u16string
-char32_to_char16(char32_t const *ws, size_t const len) noexcept(false)
+char32_to_char16(char32_t const *ws, size_t const len)
 {
       std::u16string str;
       size_t         resultlen = (len + SIZE_C(1)) * SIZE_C(2);
@@ -192,23 +206,32 @@ char32_to_char16(char32_t const *ws, size_t const len) noexcept(false)
 /*--------------------------------------------------------------------------------------*/
 
 std::string
-char16_to_char(char16_t const *ws, size_t const len) noexcept(false)
+char16_to_char(char16_t const *ws, size_t const len)
 {
       std::string str;
       size_t      resultlen = (len + SIZE_C(1)) * SIZE_C(2);
-      str.reserve(resultlen);
 
 #if defined _WIN32 && defined EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
+      static_assert(false);
       resultlen = WideCharToMultiByte(CP_UTF8, 0, reinterpret_cast<LPCWSTR>(ws),
                                       static_cast<int>(len), str.data(),
                                       static_cast<int>(resultlen), nullptr, nullptr);
       if (resultlen == 0)
             conversion_error(use_win32_errcode_tag{}, 8, 16);
 #else
-      AUTOC *result = u16_to_u8(reinterpret_cast<uint16_t const *>(ws), len,
-                                reinterpret_cast<uint8_t *>(str.data()), &resultlen);
-      if (!result)
-            conversion_error(errno, 16, 8);
+      errno = 0;
+      for (bool again = true; again;) {
+            str.reserve(resultlen + SIZE_C(1));
+            size_t true_resultlen = resultlen;
+            AUTOC *result = u16_to_u8(reinterpret_cast<uint16_t const *>(ws), len,
+                                      reinterpret_cast<uint8_t *>(str.data()),
+                                      &true_resultlen);
+            if (!result || errno)
+                  conversion_error(errno, 16, 8);
+            if (resultlen >= true_resultlen)
+                  again = false;
+            resultlen = true_resultlen;
+      }
 #endif
 
       str.data()[resultlen] = 0;
@@ -217,16 +240,24 @@ char16_to_char(char16_t const *ws, size_t const len) noexcept(false)
 }
 
 std::string
-char32_to_char(char32_t const *ws, size_t const len) noexcept(false)
+char32_to_char(char32_t const *ws, size_t const len)
 {
       std::string str;
       size_t      resultlen = (len + SIZE_C(1)) * SIZE_C(4);
-      str.reserve(resultlen);
 
-      AUTOC *result = u32_to_u8(reinterpret_cast<uint32_t const *>(ws), len,
-                                reinterpret_cast<uint8_t *>(str.data()), &resultlen);
-      if (!result)
-            conversion_error(errno, 32, 8);
+      errno = 0;
+      for (bool again = true; again;) {
+            str.reserve(resultlen + SIZE_C(1));
+            size_t true_resultlen = resultlen;
+            AUTOC *result = u32_to_u8(reinterpret_cast<uint32_t const *>(ws), len,
+                                      reinterpret_cast<uint8_t *>(str.data()),
+                                      &true_resultlen);
+            if (!result || errno)
+                  conversion_error(errno, 32, 8);
+            if (resultlen >= true_resultlen)
+                  again = false;
+            resultlen = true_resultlen;
+      }
 
       str.data()[resultlen] = 0;
       resize_string_hack(str, resultlen);
@@ -234,7 +265,7 @@ char32_to_char(char32_t const *ws, size_t const len) noexcept(false)
 }
 
 std::wstring
-char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
+char8_to_wide(char8_t const *ws, size_t const len)
 {
 #if defined WCHAR_IS_U16
 # ifndef EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
@@ -271,7 +302,7 @@ char8_to_wide(char8_t const *ws, size_t const len) noexcept(false)
 }
 
 std::wstring
-char16_to_wide(char16_t const *ws, size_t const len) noexcept(false)
+char16_to_wide(char16_t const *ws, size_t const len)
 {
 #if defined WCHAR_IS_U16
       return {reinterpret_cast<wchar_t const *>(ws), len};
@@ -294,7 +325,7 @@ char16_to_wide(char16_t const *ws, size_t const len) noexcept(false)
 }
 
 std::wstring
-char32_to_wide(char32_t const *ws, size_t const len) noexcept(false)
+char32_to_wide(char32_t const *ws, size_t const len)
 {
 #if defined WCHAR_IS_U32
       return {reinterpret_cast<wchar_t const *>(ws), len};
@@ -328,7 +359,7 @@ char32_to_wide(char32_t const *ws, size_t const len) noexcept(false)
 /* The fundamental types: char and wchar_t. */
 
 template <> std::string
-recode<char, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
+recode<char, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char(reinterpret_cast<char16_t const *>(orig), length);
@@ -338,7 +369,7 @@ recode<char, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
 }
 
 template <> std::wstring
-recode<wchar_t, char>(char const *orig, size_t const length) noexcept(false)
+recode<wchar_t, char>(char const *orig, size_t const length)
 {
       return detail::char8_to_wide(reinterpret_cast<char8_t const *>(orig), length);
 }
@@ -347,37 +378,37 @@ recode<wchar_t, char>(char const *orig, size_t const length) noexcept(false)
 /* Conversions to and from char (excluding wchar_t). */
 
 template <> std::string
-recode<char, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
+recode<char, char8_t>(char8_t const *orig, size_t const length)
 {
       return std::string{reinterpret_cast<char const *>(orig), length};
 }
 
 template <> std::string
-recode<char, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
+recode<char, char16_t>(char16_t const *orig, size_t const length)
 {
       return detail::char16_to_char(orig, length);
 }
 
 template <> std::string
-recode<char, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
+recode<char, char32_t>(char32_t const *orig, size_t const length)
 {
       return detail::char32_to_char(orig, length);
 }
 
 template <> std::u8string
-recode<char8_t, char>(char const *orig, size_t const length) noexcept(false)
+recode<char8_t, char>(char const *orig, size_t const length)
 {
       return std::u8string{reinterpret_cast<char8_t const *>(orig), length};
 }
 
 template <> std::u16string
-recode<char16_t, char>(char const *orig, size_t const length) noexcept(false)
+recode<char16_t, char>(char const *orig, size_t const length)
 {
       return detail::char8_to_char16(reinterpret_cast<char8_t const *>(orig), length);
 }
 
 template <> std::u32string
-recode<char32_t, char>(char const *orig, size_t const length) noexcept(false)
+recode<char32_t, char>(char const *orig, size_t const length)
 {
       return detail::char8_to_char32(reinterpret_cast<char8_t const *>(orig), length);
 }
@@ -386,25 +417,25 @@ recode<char32_t, char>(char const *orig, size_t const length) noexcept(false)
 /* Conversions to and from wchar_t (excluding char). */
 
 template <> std::wstring
-recode<wchar_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
+recode<wchar_t, char8_t>(char8_t const *orig, size_t const length)
 {
       return detail::char8_to_wide(orig, length);
 }
 
 template <> std::wstring
-recode<wchar_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
+recode<wchar_t, char16_t>(char16_t const *orig, size_t const length)
 {
       return detail::char16_to_wide(orig, length);
 }
 
 template <> std::wstring
-recode<wchar_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
+recode<wchar_t, char32_t>(char32_t const *orig, size_t const length)
 {
       return detail::char32_to_wide(orig, length);
 }
 
 template <> std::u8string
-recode<char8_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
+recode<char8_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char8(reinterpret_cast<char16_t const *>(orig), length);
@@ -414,7 +445,7 @@ recode<char8_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(fals
 }
 
 template <> std::u16string
-recode<char16_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
+recode<char16_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
       return std::u16string{reinterpret_cast<char16_t const *>(orig), length};
@@ -424,7 +455,7 @@ recode<char16_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(fal
 }
 
 template <> std::u32string
-recode<char32_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
+recode<char32_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
 #ifdef WCHAR_IS_U16
       return detail::char16_to_char32(reinterpret_cast<char16_t const *>(orig), length);
@@ -437,37 +468,37 @@ recode<char32_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(fal
 /* The rest. */
 
 template <> std::u16string
-recode<char16_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
+recode<char16_t, char8_t>(char8_t const *orig, size_t const length)
 {
       return detail::char8_to_char16(orig, length);
 }
 
 template <> std::u32string
-recode<char32_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
+recode<char32_t, char8_t>(char8_t const *orig, size_t const length)
 {
       return detail::char8_to_char32(orig, length);
 }
 
 template <> std::u8string
-recode<char8_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
+recode<char8_t, char16_t>(char16_t const *orig, size_t const length)
 {
       return detail::char16_to_char8(orig, length);
 }
 
 template <> std::u32string
-recode<char32_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
+recode<char32_t, char16_t>(char16_t const *orig, size_t const length)
 {
       return detail::char16_to_char32(orig, length);
 }
 
 template <> std::u16string
-recode<char16_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
+recode<char16_t, char32_t>(char32_t const *orig, size_t const length)
 {
       return detail::char32_to_char16(orig, length);
 }
 
 template <> std::u8string
-recode<char8_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
+recode<char8_t, char32_t>(char32_t const *orig, size_t const length)
 {
       return detail::char32_to_char8(orig, length);
 }
@@ -476,31 +507,31 @@ recode<char8_t, char32_t>(char32_t const *orig, size_t const length) noexcept(fa
 /* What the hell; why not. */
 
 template <> std::string
-recode<char, char>(char const *orig, size_t const length) noexcept(false)
+recode<char, char>(char const *orig, size_t const length)
 {
       return std::string{orig, length};
 }
 
 template <> std::wstring
-recode<wchar_t, wchar_t>(wchar_t const *orig, size_t const length) noexcept(false)
+recode<wchar_t, wchar_t>(wchar_t const *orig, size_t const length)
 {
       return std::wstring{orig, length};
 }
 
 template <> std::u8string
-recode<char8_t, char8_t>(char8_t const *orig, size_t const length) noexcept(false)
+recode<char8_t, char8_t>(char8_t const *orig, size_t const length)
 {
       return std::u8string{orig, length};
 }
 
 template <> std::u16string
-recode<char16_t, char16_t>(char16_t const *orig, size_t const length) noexcept(false)
+recode<char16_t, char16_t>(char16_t const *orig, size_t const length)
 {
       return std::u16string{orig, length};
 }
 
 template <> std::u32string
-recode<char32_t, char32_t>(char32_t const *orig, size_t const length) noexcept(false)
+recode<char32_t, char32_t>(char32_t const *orig, size_t const length)
 {
       return std::u32string{orig, length};
 }

@@ -4,6 +4,8 @@
 inline namespace emlsp {
 namespace util::mpack {
 
+using namespace std::string_view_literals;
+
 void dumper::put_nl()
 {
       if (put_nl_)
@@ -20,61 +22,52 @@ void dumper::put_indent()
       put_indent_ = true;
 }
 
-void dumper::dump_object(msgpack::object const *val)
+void dumper::dump(msgpack::object const *val)
 {
+      put_indent();
+
       switch (val->type) {
       case msgpack::type::NIL:
-            put_indent();
             strm_ << "nil"sv;
-            put_nl();
             break;
       case msgpack::type::POSITIVE_INTEGER:
-            put_indent();
             strm_ << val->via.u64;
-            put_nl();
             break;
       case msgpack::type::NEGATIVE_INTEGER:
-            put_indent();
             strm_ << val->via.i64;
-            put_nl();
             break;
-      case msgpack::type::FLOAT:
-            put_indent();
+      case msgpack::type::FLOAT64:
+      case msgpack::type::FLOAT32:
             strm_ << val->via.f64;
-            put_nl();
             break;
       case msgpack::type::BOOLEAN:
-            put_indent();
             strm_ << (val->via.boolean ? "true"sv : "false"sv);
-            put_nl();
             break;
       case msgpack::type::STR:
-            put_indent();
             strm_ << '"' << std::string_view{val->via.str.ptr, val->via.str.size} << '"';
-            put_nl();
             break;
       case msgpack::type::ARRAY:
-            put_indent();
-            dump_array(&val->via.array);
-            put_nl();
+            dump(&val->via.array);
             break;
       case msgpack::type::MAP:
-            put_indent();
-            dump_dict(&val->via.map);
-            put_nl();
+            dump(&val->via.map);
             break;
+      case msgpack::type::BIN:
+      case msgpack::type::EXT:
       default:
             throw util::except::not_implemented(std::to_string(val->type));
       }
+
+      put_nl();
 }
 
-void dumper::dump_array(msgpack::object_array const *arr)
+void dumper::dump(msgpack::object_array const *arr)
 {
       if (arr->size > 0) {
             strm_ << "[\n"sv;
             ++depth_;
             for (unsigned i = 0; i < arr->size; ++i)
-                  dump_object(arr->ptr + i);
+                  dump(arr->ptr + i);
             --depth_;
             put_indent();
             strm_ << ']';
@@ -83,7 +76,7 @@ void dumper::dump_array(msgpack::object_array const *arr)
       }
 }
 
-void dumper::dump_dict(msgpack::object_map const *dict)
+void dumper::dump(msgpack::object_map const *dict)
 {
       if (dict->size > 0) {
             strm_ << "{\n";
@@ -91,11 +84,10 @@ void dumper::dump_dict(msgpack::object_map const *dict)
             for (unsigned i = 0; i < dict->size; ++i) {
                   auto const *ptr = dict->ptr + i;
                   put_nl_ = false;
-                  dump_object(&ptr->key);
+                  dump(&ptr->key);
                   strm_ << ":  "sv;
-                  put_indent_ = put_nl_ = false;
-                  dump_object(&ptr->val);
-                  std::cout << ",\n"sv;
+                  put_indent_ = false;
+                  dump(&ptr->val);
             }
             --depth_;
             put_indent();

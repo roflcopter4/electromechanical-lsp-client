@@ -12,11 +12,10 @@
 // # define _GLIBCXX_PARALLEL 1
 // # define _GLIBCXX_PARALLEL_ASSERTIONS 1
 # undef NDEBUG
-#else
-// # error "wtf?"
 #endif
 
 #define __PTW32_CLEANUP_C 1
+//#define __PTW32_CLEANUP_CXX 1
 
 // #include "all_the_clang.hh"
 
@@ -97,9 +96,6 @@
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN 1
 #  endif
-#  ifndef C_ASSERT
-#    define C_ASSERT(x) __mingw_assert(x)
-#  endif
 #  include <sal.h>
 #  include <Windows.h>
 #  include <WinSock2.h>
@@ -109,6 +105,7 @@
 #  include <direct.h>
 #  include <io.h>
 #  include <process.h>
+#  include <processthreadsapi.h>
 #  include <detours/detours.h>
 #else
 #  include <netdb.h>
@@ -127,7 +124,9 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-#include <pthread.h>
+#ifndef _MSC_VER
+# include <pthread.h>
+#endif
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -151,32 +150,14 @@
 
 #include "rapid.hh"
 
-
 #include <msgpack.hpp>
-
-#include <event2/event.h>
 #include <uv.h>
-
-#include <event2/buffer.h>
-#include <event2/bufferevent.h>
-#include <event2/dns.h>
-#include <event2/http.h>
-#include <event2/listener.h>
-#include <event2/thread.h>
-
-//#include <boost/asio.hpp>
-//#include <boost/system.hpp>
-
 
 #include <glib.h> //NOLINT
 #include <gio/gio.h>
 // clang-format on
 
 #include "util/my_glib.hh"
-
-// #include <mpi.h>
-
-// #include <uvw.hpp>
 
 #if 0
 #ifdef NDEBUG
@@ -192,6 +173,14 @@
             }                                                    \
       } while (0)
 #endif
+#endif
+
+#ifdef __MINGW64__
+extern "C" __declspec(dllimport) HRESULT __stdcall
+SetThreadDescription (
+    _In_ HANDLE hThread,
+    _In_ PCWSTR lpThreadDescription
+);
 #endif
 
 // #include <rapidjson/rapidjson.h>

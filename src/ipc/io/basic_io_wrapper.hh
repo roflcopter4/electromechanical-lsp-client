@@ -22,8 +22,15 @@ class basic_wrapper
 
       friend Packer;
 
+      connection_type &con_;
+
     public:
-      explicit basic_wrapper(connection_type *con) : con_(con) {}
+      explicit basic_wrapper(connection_type &con) : con_(con)
+      {
+            //if (!con || reinterpret_cast<intptr_t>(con) == -1)
+            //      throw std::invalid_argument("Mandatory pointer con is null or invalid");
+            //con_ = con;
+      }
       virtual ~basic_wrapper() = default;
 
       basic_wrapper(basic_wrapper const &)                = delete;
@@ -92,7 +99,7 @@ class basic_wrapper
             }
       }
 
-      ND connection_type *con() { return con_; }
+      ND connection_type &con() { return con_; }
 
     /*----------------------------------------------------------------------------------*/
 
@@ -113,8 +120,6 @@ class basic_wrapper
     /*----------------------------------------------------------------------------------*/
 
     protected:
-      connection_type *con_;
-
       unpacker_type           unpacker_     = {};
       std::recursive_mutex    io_mtx_       = {};
       std::recursive_mutex    write_mtx_    = {};
@@ -123,7 +128,9 @@ class basic_wrapper
       std::condition_variable packing_cond_ = {};
 
 #define PACK packer_type{packing_cond_}
-      std::array<packer_type, 4> packs_ = std::array<packer_type, 4>{PACK, PACK, PACK, PACK};
+      std::array<packer_type, 8> packs_ = std::array<packer_type, 8>{
+            PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK
+      };
 #if 0
       std::array<packer_type, 64> packs_ = std::array<packer_type, 64>{
           PACK, PACK, PACK, PACK, PACK, PACK, PACK, PACK,

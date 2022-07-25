@@ -4,18 +4,16 @@
 #define MINOF(a, b) (((a) < (b)) ? (a) : (b))
 #define MAXOF(a, b) (((a) > (b)) ? (a) : (b))
 
+/****************************************************************************************/
+
 #ifndef HAVE_ASPRINTF
-# if !defined __MINGW32__ && !defined __MINGW64__ && defined vsnprintf
+# if defined vsnprintf && !defined __MINGW32__ && !defined __MINGW64__
 #  undef vsnprintf
 # endif
 
-/*
- * Laziest possible asprintf implementation. But it works, assuming (v)snprintf
- * conforms to C99. Microsoft's current one is supposed to so I won't bother checking.
- */
 int
-asprintf(_Notnull_ _Outptr_result_z_ char **destp,
-         _Notnull_ _In_ _Printf_format_string_ char const *__restrict fmt,
+asprintf(_Outptr_result_z_             char      **restrict destp,
+         _In_z_ _Printf_format_string_ char const *restrict fmt,
          ...)
 {
       int     len;
@@ -31,7 +29,7 @@ asprintf(_Notnull_ _Outptr_result_z_ char **destp,
 
       *destp = malloc(len + SIZE_C(1));
       if (!*destp)
-            err("malloc");
+            err("malloc()");
       vsprintf(*destp, fmt, ap1);
       va_end(ap1);
 
@@ -39,6 +37,7 @@ asprintf(_Notnull_ _Outptr_result_z_ char **destp,
 }
 #endif
 
+/****************************************************************************************/
 
 #if defined __GNUC__
   /* This also works with clang. */
@@ -76,11 +75,13 @@ my_strerror(_In_                 errno_t errval,
 
 DIAG_POP()
 
+/****************************************************************************************/
 
 #ifndef HAVE_STRLCPY
-extern size_t emlsp_strlcpy(_Out_z_cap_(size) char       *restrict dst,
-                            _In_z_            char const *restrict src,
-                            _In_              size_t const         size)
+size_t
+emlsp_strlcpy(_Out_writes_z_(size) char       *restrict dst,
+              _In_z_               char const *restrict src,
+              _In_                 size_t const         size)
 {
       /* Do it the stupid way. It's, frankly, probably faster anyway. */
       size_t const slen = strlen(src);
@@ -95,46 +96,78 @@ extern size_t emlsp_strlcpy(_Out_z_cap_(size) char       *restrict dst,
 }
 #endif
 
+/****************************************************************************************/
+
+#ifndef HAVE_DPRINTF
+
+int
+vdprintf(_In_ int const fd,
+         _In_z_ _Printf_format_string_
+         char const *const __restrict format,
+         _In_ va_list ap)
+{
+      FILE     *fp  = fdopen(fd, "wb");
+      int const ret = vfprintf(fp, format, ap);
+      fclose(fp);
+      return ret;
+}
+
+int
+dprintf(_In_ int const fd,
+        _In_z_ _Printf_format_string_
+        char const *const __restrict format,
+        ...)
+{
+      va_list ap;
+      va_start(ap, format);
+      int const ret = vdprintf(fd, format, ap);
+      va_end(ap);
+      return ret;
+}
+
+#endif
+
+/****************************************************************************************/
 
 #ifdef _WIN32
 /*
  * Credit: https://gist.github.com/mattn/253013/d47b90159cf8ffa4d92448614b748aa1d235ebe4
  */
 
-# include <windows.h>
-# include <tlhelp32.h>
+# include <Windows.h>
+# include <TlHelp32.h>
 
-DWORD
-getppid()
+_Check_return_
+DWORD getppid(void)
 {
-      HANDLE         hSnapshot;
       PROCESSENTRY32 pe32;
-      DWORD          ppid = 0;
-      DWORD          pid  = GetCurrentProcessId();
+      DWORD          ppid      = 0;
+      DWORD const    pid       = GetCurrentProcessId();
+      void *const    hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-      hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+      if (hSnapshot == INVALID_HANDLE_VALUE)
+            goto fail;
 
-      __try {
-            if (hSnapshot == INVALID_HANDLE_VALUE)
-                  __leave;
+      memset(&pe32, 0, sizeof pe32);
+      pe32.dwSize = sizeof pe32;
 
-            ZeroMemory(&pe32, sizeof(pe32));
-            pe32.dwSize = sizeof(pe32);
-            if (!Process32First(hSnapshot, &pe32))
-                  __leave;
+      if (!Process32First(hSnapshot, &pe32))
+            goto fail;
 
-            do {
-                  if (pe32.th32ProcessID == pid) {
-                        ppid = pe32.th32ParentProcessID;
-                        break;
-                  }
-            } while (Process32Next(hSnapshot, &pe32));
+      do {
+            if (pe32.th32ProcessID == pid) {
+                  ppid = pe32.th32ParentProcessID;
+                  break;
+            }
+      } while (Process32Next(hSnapshot, &pe32));
 
-      } __finally {
-            if (hSnapshot != INVALID_HANDLE_VALUE)
-                  CloseHandle(hSnapshot);
-      }
+      if (hSnapshot && hSnapshot != INVALID_HANDLE_VALUE)
+            CloseHandle(hSnapshot);
 
       return ppid;
+
+fail:
+      err("getppid() failed to find parent id. This function *must* always succeed so "
+          "this error is fatal.");
 }
 #endif

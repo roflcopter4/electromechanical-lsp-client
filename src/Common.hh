@@ -23,7 +23,9 @@
 #  define _Outptr_
 #  define _Outptr_result_z_
 #  define _Printf_format_string_
+#  define _Post_z_
 #endif
+//#define __USE_MINGW_ANSI_STDIO 0
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -64,7 +66,7 @@ using namespace fmt::literals;
 #  define WIN32_LEAN_AND_MEAN 1
 #  include <sal.h>
 #  include <Windows.h>
-#  include <winsock2.h>
+#  include <WinSock2.h>
 
 #  include <afunix.h>
 #  include <direct.h>

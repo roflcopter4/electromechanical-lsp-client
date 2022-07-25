@@ -131,12 +131,19 @@ class transport_interface
 class basic_protocol_interface
       : public basic_sync_thing
 {
-    protected:
-      bool want_close_ = false;
+      using procinfo_t = util::detail::procinfo_t;
+
+      base_connection            &con_;
+      detail::spawner_connection *spawner_;
 
     public:
-      basic_protocol_interface()            = default;
-       ~basic_protocol_interface() override = default;
+      explicit basic_protocol_interface(base_connection &connection)
+          : con_(connection)
+      {
+            spawner_ = dynamic_cast<detail::spawner_connection *>(&con_);
+      }
+
+      ~basic_protocol_interface() override = default;
 
       DELETE_ALL_CTORS(basic_protocol_interface);
 
@@ -147,19 +154,95 @@ class basic_protocol_interface
       virtual int response()       = 0;
       virtual int error_response() = 0;
 
-      ND virtual uv_poll_cb  poll_callback() const       = 0;
-      ND virtual uv_timer_cb timer_callback() const      = 0;
-      ND virtual uv_alloc_cb pipe_alloc_callback() const = 0;
-      ND virtual uv_read_cb  pipe_read_callback() const  = 0;
-      ND virtual void       *data()                      = 0;
+      ND virtual constexpr uv_poll_cb         poll_callback() const       = 0;
+      ND virtual constexpr uv_alloc_cb        pipe_alloc_callback() const = 0;
+      ND virtual constexpr uv_read_cb         pipe_read_callback() const  = 0;
+      ND virtual constexpr uv_timer_cb        timer_callback() const      = 0;
+      ND virtual constexpr void const        *data() const                = 0;
+      ND virtual constexpr void              *data()                      = 0;
+      ND virtual constexpr std::string const &get_key() const &           = 0;
+         virtual           void               set_key(std::string key)    = 0;
+
+      /*------------------------------------------------------------------------------*/
+
+      ND procinfo_t const &pid() const & { return con_.pid(); }
+      int  waitpid() const noexcept { return con_.waitpid(); }
+      void close()   const          { con_.close(); }
+      void kill()    const          { con_.kill(); }
+
+      ND detail::base::base_connection_impl_interface       &impl()       & { return con_.impl(); }
+      ND detail::base::base_connection_impl_interface const &impl() const & { return con_.impl(); }
+
+      /*------------------------------------------------------------------------------*/
+
+      ssize_t raw_write(std::string const &buf)                 const { return con_.raw_write(buf); }
+      ssize_t raw_write(std::string const &buf, int flags)      const { return con_.raw_write(buf, flags); }
+      ssize_t raw_write(std::string_view const &buf)            const { return con_.raw_write(buf); }
+      ssize_t raw_write(std::string_view const &buf, int flags) const { return con_.raw_write(buf, flags); }
+
+      ssize_t raw_read(void *buf, size_t const nbytes) const
+      {
+            return con_.raw_read(buf, nbytes);
+      }
+
+      ssize_t raw_read(void *buf, size_t const nbytes, int const flags) const
+      {
+            return con_.raw_read(buf, nbytes, flags);
+      }
+
+      ssize_t raw_write(void const *buf, size_t const nbytes) const
+      {
+            return con_.raw_write(buf, nbytes);
+      }
+
+      ssize_t raw_write(void const *buf, size_t const nbytes, int const flags) const
+      {
+            return con_.raw_write(buf, nbytes, flags);
+      }
+
+      ssize_t raw_writev(void *buf, size_t const nbytes, int const flags) const
+      {
+            return con_.raw_writev(buf, nbytes, flags);
+      }
+
+      /*------------------------------------------------------------------------------*/
+
+      ND size_t   available()      const { return con_.available(); }
+      ND intptr_t raw_descriptor() const { return con_.raw_descriptor(); }
+
+      ND constexpr detail::base::socket_connection_base_impl *impl_socket()
+      {
+            assert(spawner_ != nullptr);
+            return spawner_->impl_socket();
+      }
+
+      ND constexpr detail::base::socket_connection_base_impl const *impl_socket() const
+      {
+            assert(spawner_ != nullptr);
+            return spawner_->impl_socket();
+      }
+
+      ND constexpr detail::base::libuv_pipe_handle_impl *impl_libuv()
+      {
+            assert(spawner_ != nullptr);
+            return spawner_->impl_libuv();
+      }
+
+      ND constexpr detail::base::libuv_pipe_handle_impl const *impl_libuv() const
+      {
+            assert(spawner_ != nullptr);
+            return spawner_->impl_libuv();
+      }
 };
 
 
 template <typename T>
-concept BasicProtocolConnectionVariant = std::derived_from<T, basic_protocol_interface>;
+concept ProtocolConnectionVariant = std::derived_from<T, basic_protocol_interface>;
 
 
 template <typename Connection, template <class> typename IOWrapper>
+      REQUIRES (BasicConnectionVariant<Connection> &&
+                io::WrapperVariant<IOWrapper<Connection>>)
 class basic_protocol_connection
       : public Connection,
         public IOWrapper<Connection>,
@@ -167,17 +250,48 @@ class basic_protocol_connection
 {
       using this_type = basic_protocol_connection<Connection, IOWrapper>;
 
+      std::string key_name_;
+
     public:
       using connection_type = Connection;
       using io_wrapper_type = IOWrapper<Connection>;
 
       basic_protocol_connection()
-            : Connection(), io_wrapper_type(dynamic_cast<Connection *>(this))
+          : Connection(),
+            io_wrapper_type(dynamic_cast<Connection &>(*this)),
+            basic_protocol_interface(dynamic_cast<base_connection &>(*this))
       {}
 
       ~basic_protocol_connection() override = default;
 
       DELETE_ALL_CTORS(basic_protocol_connection);
+
+      /*------------------------------------------------------------------------------*/
+
+      /* Doing this to skirt around multiple inheritance feels filthy somehow. */
+      using connection_type::available;
+      using connection_type::close;
+      using connection_type::impl;
+      using connection_type::pid;
+      using connection_type::raw_descriptor;
+      using connection_type::raw_read;
+      using connection_type::raw_write;
+      using connection_type::raw_writev;
+      using connection_type::waitpid;
+      using basic_protocol_interface::impl_socket;
+      using basic_protocol_interface::impl_libuv;
+
+      /*------------------------------------------------------------------------------*/
+
+      void set_key(std::string key) final
+      {
+            key_name_ = std::move(key);
+      }
+
+      ND constexpr std::string const &get_key() const & final
+      {
+            return key_name_;
+      }
 };
 
 

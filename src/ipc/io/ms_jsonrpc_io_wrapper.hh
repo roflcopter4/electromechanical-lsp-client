@@ -19,12 +19,6 @@ class ms_jsonrpc_wrapper;
 
 namespace detail {
 
-#ifdef _WIN32
-using iovec_size_type = DWORD;
-#else
-using iovec_size_type = size_t;
-#endif
-
 template <typename Connection>
       REQUIRES (BasicConnectionVariant<Connection>)
 class ms_jsonrpc_packer
@@ -97,7 +91,7 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
       using value_type      = std::unique_ptr<rapidjson::Document>;
       using marshaller_type = ipc::json::rapid_doc<>;
 
-      explicit ms_jsonrpc_wrapper(connection_type *con) : base_type(con)
+      explicit ms_jsonrpc_wrapper(connection_type &con) : base_type(con)
       {}
 
       ~ms_jsonrpc_wrapper() override = default;
@@ -108,9 +102,6 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
       ms_jsonrpc_wrapper &operator=(ms_jsonrpc_wrapper &&) noexcept = default;
 
     private:
-      using base_type::unpacker_;
-      using base_type::con_;
-
       ND size_t get_content_length()
       {
             /* Exactly 64 bytes assuming an 8 byte pointer size. Three cheers for
@@ -119,14 +110,14 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             char   *ptr = buf;
             uint8_t ch;
 
-            con_->raw_read(buf, 16, MSG_WAITALL); // Discard
+            this->con().raw_read(buf, 16, MSG_WAITALL); // Discard
             assert(memcmp(buf, "Content-Length: ", 16) == 0 &&
                    "Invalid JSON-RPC: 'Content-Length' field not found.");
-            con_->raw_read(&ch, 1, MSG_WAITALL);
+            this->con().raw_read(&ch, 1, MSG_WAITALL);
 
             while (::isdigit(ch)) {
                   *ptr++ = static_cast<char>(ch);
-                  con_->raw_read(&ch, 1, MSG_WAITALL);
+                  this->con().raw_read(&ch, 1, MSG_WAITALL);
             }
 
             *ptr       = '\0';
@@ -141,19 +132,19 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             for (;;) {
                   while (ch != '\r') [[unlikely]] {
                   fail:
-                        con_->raw_read(&ch, 1, MSG_WAITALL);
+                        this->con().raw_read(&ch, 1, MSG_WAITALL);
                   }
                   while (ch == '\r')
-                        con_->raw_read(&ch, 1, MSG_WAITALL);
+                        this->con().raw_read(&ch, 1, MSG_WAITALL);
                   if (ch != '\n') [[unlikely]]
                         goto fail;  //NOLINT
 
                   uint16_t crlf;
-                  con_->raw_read(&crlf, 2, MSG_WAITALL);
+                  this->con().raw_read(&crlf, 2, MSG_WAITALL);
                   if (::memcmp(&crlf, "\r\n", 2) == 0) [[likely]]
                         break;
                   if (::memcmp(&crlf, "\r\r", 2) == 0) {
-                        con_->raw_read(&ch, 1, MSG_WAITALL);
+                        this->con().raw_read(&ch, 1, MSG_WAITALL);
                         if (ch == '\n')
                               break;
                   }
@@ -224,7 +215,7 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             char *endp   = fmt::format_to(buf, FC("Content-Length: {}\r\n\r\n"), len);
             AUTOC buflen = endp - static_cast<char const *>(buf);
             *endp        = '\0';
-            return con_->raw_write(buf, static_cast<size_t>(buflen));
+            return this->con().raw_write(buf, static_cast<size_t>(buflen));
       }
 
 #if 0
@@ -252,10 +243,10 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             *endp       = '\0';
 
             ipc::detail::iovec vec[2];
-            ipc::detail::init_iovec(vec[0], hbuf, static_cast<detail::iovec_size_type>(hlen));
-            ipc::detail::init_iovec(vec[1], tmp, static_cast<detail::iovec_size_type>(size));
+            ipc::detail::init_iovec(vec[0], hbuf, static_cast<ipc::detail::iovec_size_type>(hlen));
+            ipc::detail::init_iovec(vec[1], tmp, static_cast<ipc::detail::iovec_size_type>(size));
 
-            return con_->impl().writev(vec, 2);
+            return this->con().raw_writev(vec, 2);
       }
 
     public:
@@ -303,7 +294,7 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
             assert(len > 0);
             AUTOC msg = std::make_unique<char[]>(len + 1);
 
-            UNUSED auto const nread = con_->raw_read(msg.get(), len, MSG_WAITALL);
+            UNUSED auto const nread = this->con().raw_read(msg.get(), len, MSG_WAITALL);
             assert(static_cast<size_t>(nread) == len);
 
             msg[len] = '\0';

@@ -2,8 +2,8 @@
 #include "ipc/connection_impl.hh"
 
 #if defined _WIN32 && defined _MSC_VER
-# include <Shlwapi.h>
-// #include <vld.h>
+//# include <Shlwapi.h>
+//# include <vld.h>
 #endif
 
 /****************************************************************************************/
@@ -19,6 +19,13 @@ inline namespace emlsp {
   NOINLINE void foo10(char const *);
  } // namespace testing
 
+ namespace window1 {
+  NOINLINE extern int windowmain(HINSTANCE hInst);
+ } // namespace window1
+ namespace window2 {
+  NOINLINE extern int windowmain(HINSTANCE hInst);
+ } // namespace window2
+
 } // namespace emlsp
 
 /****************************************************************************************/
@@ -26,17 +33,22 @@ inline namespace emlsp {
 static void init_locale() noexcept
 {
       // FIXME: Change this at some point. Obviously.
-      static constexpr char const locale_name[] = "en_US.UTF8";
+      static constexpr char    locale_name[] = "en_US.UTF8";
 
       ::setlocale(LC_ALL,      locale_name);
       ::setlocale(LC_COLLATE,  locale_name);
       ::setlocale(LC_CTYPE,    locale_name);
-      ::setlocale(LC_MESSAGES, locale_name);
       ::setlocale(LC_MONETARY, locale_name);
       ::setlocale(LC_NUMERIC,  locale_name);
       ::setlocale(LC_TIME,     locale_name);
+#ifdef LC_MESSAGES
+      ::setlocale(LC_MESSAGES, locale_name);
+#endif
 
-      std::locale::global(std::locale(locale_name));
+#ifndef __MINGW64__
+      std::locale const locale(locale_name);
+      std::locale::global(locale);
+#endif
 }
 
 #ifdef _WIN32
@@ -54,24 +66,44 @@ static void init_wsa()
             util::win32::error_exit_explicit(L"Bad WinSock dll", e);
       }
 }
+
+static void init_crt_debugging()
+{
+#if 0
+      _CrtSetReportMode(_CRT_WARN,   _CRTDBG_MODE_FILE);
+      _CrtSetReportMode(_CRT_ERROR,  _CRTDBG_MODE_FILE);
+      _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+      _CrtSetReportFile(_CRT_WARN,   _CRTDBG_FILE_STDOUT);
+      _CrtSetReportFile(_CRT_ERROR,  _CRTDBG_FILE_STDOUT);
+      _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDOUT);
+
+      int const flag = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
+      _CrtSetDbgFlag(flag | _CRTDBG_DELAY_FREE_MEM_DF | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
-static void
+      //VLDRefreshModules();
+      //auto const opts = VLDGetOptions();
+      //util::eprint(FC("{:b}\n"), opts);
+}
+#endif
+
+NOINLINE static void
 call_initializers(UU int &argc, UU char **&argv)
 {
       init_locale();
+      //init_crt_debugging();
       // MPI::Init(argc, argv);
 
 #ifdef _WIN32
       init_wsa();
-      atexit(::WSACleanup);
+      atexit([] { (void)::WSACleanup(); });
       if (_setmode(0, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(0)");
       if (_setmode(1, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(1)");
-      if (_setmode(2, _O_BINARY) == (-1))
+      if (_setmode(2, _O_TEXT) == (-1))
             util::win32::error_exit(L"_setmode(2)");
-      if (!::SetConsoleCtrlHandler(util::win32::myCtrlHandler, true))
+      if (!::SetConsoleCtrlHandler(&util::win32::myCtrlHandler, true))
             util::win32::error_exit(L"SetConsoleCtrlHandler");
 #endif
 }
@@ -84,23 +116,26 @@ do_main(int argc, char *argv[])
       call_initializers(argc, argv);
 
       if (argc < 2)
-            errx_nothrow("ERROR: Missing paramater.\n");
+            errx_nothrow("ERROR: Missing parameter.\n");
       if (argc > 2)
-            errx_nothrow("ERROR: Too many paramaters.\n");
+            errx_nothrow("ERROR: Too many parameters.\n");
 
+      // util::win32::warning_box_explicit("Die in fire:", WSAENOTSOCK);
+      // util::win32::warning_box_explicit("Die in fire:", WSAECONNREFUSED);
+      // util::win32::warning_box_explicit("Die in fire:", WSAEADDRINUSE);
+      // util::win32::error_exit_explicit("Foo. Bar. Baz.", ENOENT);
 
       testing::foo02();
-      testing::foo04();
+      // testing::foo04();
       // testing::foo05();
-      testing::foo06();
+      // testing::foo06();
       // testing::foo10(argv[1]);
 
       return 0;
 }
 
-
 int
-main(int const argc, char *argv[])
+main(int argc, char *argv[])
 {
       int r = 1;
 
@@ -108,6 +143,8 @@ main(int const argc, char *argv[])
             r = do_main(argc, argv);
       } catch (std::exception const &e) {
             DUMP_EXCEPTION(e);
+      } catch (...) {
+            eprintf("We really shouldn't have been able to get here. Like, really really shouldn't.\n");
       }
 
       return r;

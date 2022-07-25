@@ -7,6 +7,7 @@ set (lsp-thing_SOURCES
     "main.cc"
     "testing01.cc"
     "testing02.cc"
+    "testing03.cc"
 
     "mpack/format.cc"
     "msgpack/dumper.cc"
@@ -31,15 +32,18 @@ set (lsp-thing_HEADERS
     "Common.hh"
     "pch.hh"
     "rapid.hh"
-    "toploop.hh"
+    "lazy.hh"
 
     "msgpack/dumper.hh"
+    
+    "ipc/toploop.hh"
 
     "ipc/connection_impl.hh"
     "ipc/basic_sync_thing.hh"
     "ipc/basic_protocol_connection.hh"
     "ipc/ipc_connection.hh"
     "ipc/misc.hh"
+    "ipc/connection_interface.hh"
 
     "ipc/io/basic_io_wrapper.hh"
     "ipc/io/msgpack_io_wrapper.hh"

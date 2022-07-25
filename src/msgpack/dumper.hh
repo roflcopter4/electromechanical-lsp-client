@@ -8,6 +8,14 @@
 inline namespace emlsp {
 namespace util::mpack {
 
+namespace concepts {
+template <typename T>
+concept ValidMsgpack =
+    std::same_as<std::remove_cvref_t<T>, msgpack::object> ||
+    std::same_as<std::remove_cvref_t<T>, msgpack::object_map> ||
+    std::same_as<std::remove_cvref_t<T>, msgpack::object_array>;
+}
+
 class dumper
 {
       static constexpr unsigned width = 4;
@@ -20,20 +28,28 @@ class dumper
       void put_nl();
       void put_indent();
 
+      //void dump_object(msgpack::object const *val);
+      //void dump_array(msgpack::object_array const *arr);
+      //void dump_dict(msgpack::object_map const *dict);
+
+      void dump(msgpack::object const *val);
+      void dump(msgpack::object_array const *arr);
+      void dump(msgpack::object_map const *dict);
+
     public:
-      explicit dumper(msgpack::object const *val, std::ostream &out = std::cout)
-          : strm_(out)
+      template <typename Object> REQUIRES(concepts::ValidMsgpack<Object>)
+      explicit dumper(Object const *value, std::ostream &out = std::cout)
+            : strm_(out)
       {
-            dump_object(val);
+            dump(value);
       }
 
-      explicit dumper(msgpack::object const &val, std::ostream &out = std::cout)
-          : dumper(&val, out)
-      {}
-
-      void dump_object(msgpack::object const *val);
-      void dump_array(msgpack::object_array const *arr);
-      void dump_dict(msgpack::object_map const *dict);
+      template <typename Object> REQUIRES(concepts::ValidMsgpack<Object>)
+      explicit dumper(Object const &value, std::ostream &out = std::cout)
+            : strm_(out)
+      {
+            dump(&value);
+      }
 };
 
 } // namespace util::mpack

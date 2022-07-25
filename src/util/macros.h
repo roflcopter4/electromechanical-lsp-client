@@ -21,7 +21,7 @@
 #ifndef __has_include
 # define __has_include(x)
 #endif
-#if defined __GNUC__ && (!defined __clang__ || (__clang_major__ >= 14 && __has_attribute(__error__)))
+#if defined __GNUC__ && (defined __clang_major__ && __clang_major__ >= 14)
 # define __attribute_error__(x) __attribute__((__error__(x)))
 #else
 # define __attribute_error__(x) DEPRECATED_MSG(x)
@@ -38,14 +38,16 @@
 
 #define HELPER_EXPAND_MACRO(macro) macro
 
-#if (defined __cplusplus && (CXX_LANG_VER >= 201700L)) || (defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L)
+#if (defined __cplusplus      && __cplusplus >= 201703L)  || \
+    (defined CXX_LANG_VER     && CXX_LANG_VER >= 201703L) || \
+    (defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L)
 # define UNUSED            [[maybe_unused]]
 # define NODISCARD         [[nodiscard]]
 # define FALLTHROUGH       [[fallthrough]]
 # define NORETURN          [[noreturn]]
 # define DEPRECATED        [[deprecated]]
 # define DEPRECATED_MSG(x) [[deprecated(x)]]
-#elif defined __GNUC__
+#elif defined __GNUC__ || defined __clang__
 # define UNUSED            __attribute__((__unused__))
 # define NODISCARD         __attribute__((__warn_unused_result__))
 # define FALLTHROUGH       __attribute__((__fallthrough__))
@@ -97,10 +99,10 @@
 #define DUMP_EXCEPTION(e)                                                                \
       do {                                                                               \
             fflush(stderr);                                                              \
-            fmt::print(                                                                  \
+            fprintf(                                                                  \
                 stderr,                                                                  \
-                FC("\nCaught exception in function '{}', at line {} "                    \
-                   "'{}'\n\033[1;32mWhat <<_EOF_\033[0m\n{}\n\033[1;32m_EOF_\033[0m\n"), \
+                "\nCaught exception in function '%s', at line %d "                    \
+                "'%s'\n\033[1;32mWhat <<_EOF_\033[0m\n%s\n\033[1;32m_EOF_\033[0m\n", \
                 FUNCTION_NAME, __LINE__, __FILE__, (e).what());                          \
             fflush(stderr);                                                              \
       } while (0)
@@ -118,10 +120,10 @@
 #else // not defined __cplusplus
 
 # ifndef thread_local
-#  if defined(_MSC_VER)
-#   define thread_local __declspec(thread)
-#  elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#  if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 #   define thread_local _Thread_local
+#  elif defined(_MSC_VER)
+#   define thread_local __declspec(thread)
 #  elif defined(__GNUC__)
 #   define thread_local __thread
 #  else
@@ -129,27 +131,29 @@
 #  endif
 # endif
 
-# define STATIC_ASSERT_EXPR(cond) ((void)((char [(-1) + (2 * (cond))]){}))
+# define C_STATIC_ASSERT_EXPR_(cond) ((void)((char [(-1) + (2 * (cond))]){}))
 
 # ifndef static_assert
 #  if (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L) || defined(_MSC_VER)
 #   define static_assert(...) _Static_assert(__VA_ARGS__)
 #  else
-#   define static_assert(cond, ...) STATIC_ASSERT_EXPR(cond)
+#   define static_assert(cond, ...) C_STATIC_ASSERT_EXPR_(cond)
 #  endif
 # endif
 
-# if defined __GNUC__ || defined __clang__
-#  define NORETURN __attribute__((__noreturn__))
-# elif defined _MSC_VER
-#  ifdef noreturn
-#   undef noreturn
+# ifndef NORETURN
+#  if defined __GNUC__ || defined __clang__
+#   define NORETURN __attribute__((__noreturn__))
+#  elif defined _MSC_VER
+#   ifdef noreturn
+#    undef noreturn
+#   endif
+#   define NORETURN __declspec(noreturn)
+#  elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+#   define NORETURN _Noreturn
+#  else
+#   define NORETURN
 #  endif
-#  define NORETURN __declspec(noreturn)
-# elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#  define NORETURN _Noreturn
-# else
-#  define NORETURN
 # endif
 
 #endif // defined __cplusplus
@@ -205,17 +209,23 @@
 #define P99_PASTE_8(_1, _2, _3, _4, _5, _6, _7, _8) P99_PASTE_2(P99_PASTE_7(_1, _2, _3, _4, _5, _6, _7), _8)
 #define P99_PASTE_9(_1, _2, _3, _4, _5, _6, _7, _8, _9) P99_PASTE_2(P99_PASTE_8(_1, _2, _3, _4, _5, _6, _7, _8), _9)
 #define P99_PASTE_10(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10) P99_PASTE_2(P99_PASTE_9(_1, _2, _3, _4, _5, _6, _7, _8, _9), _10)
+#define P99_PASTE_11(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11) P99_PASTE_2(P99_PASTE_10(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10), _11)
+#define P99_PASTE_12(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12) P99_PASTE_2(P99_PASTE_11(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11), _12)
+#define P99_PASTE_13(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13) P99_PASTE_2(P99_PASTE_12(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12), _13)
+#define P99_PASTE_14(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14) P99_PASTE_2(P99_PASTE_13(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13), _14)
+#define P99_PASTE_15(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15) P99_PASTE_2(P99_PASTE_14(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14), _15)
 
-#define P00_NUM_ARGS_b(_0a, _0b, _2, _3, _4, _5, _6, _7, _8, _9, _10, ...) _10
-#define P00_NUM_ARGS_a(...) P00_NUM_ARGS_b(__VA_ARGS__, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0, 0)
+#define P00_NUM_ARGS_b(_0a, _0b, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, ...) _15
+#define P00_NUM_ARGS_a(...) P00_NUM_ARGS_b(__VA_ARGS__, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 0, 0)
 #define P00_NUM_ARGS(...)   P00_NUM_ARGS_a(__VA_ARGS__)
 #define P00_PASTE_a(n)      P99_CAT2(P99_PASTE_, n)
 #define P00_PASTE(...)      P00_PASTE_a(P00_NUM_ARGS(__VA_ARGS__))
 
 #define P99_PASTE(...) P00_PASTE(__VA_ARGS__)(__VA_ARGS__)
 
-#define P00_PASTE_TEST_1(a, b, c, ...) P99_PASTE(a, b, c, __VA_ARGS__)
-#if P99_PASTE(0, x, A, F, 5, 1, 0, U, L, L) != 0xAF510ULL || P00_PASTE_TEST_1(0, x, F, F, 0, 0, U) != 0xFF00U
+#define P00_PASTE_TEST_2(a, b, c, d, ...) P99_PASTE(a, b, c, d, __VA_ARGS__)
+#define P00_PASTE_TEST_1(a, b, c, ...)    P00_PASTE_TEST_2(a, b, c, __VA_ARGS__)
+#if P99_PASTE(0, x, A, F, 5, 1, 0, U, L, L) != 0xAF510ULL || P00_PASTE_TEST_1(0, x, 9, B, 7, F, A, 3, F, F, 0, 0, U, L, L) != 0x9B7FA3FF00ULL
 # error "Your C pre-processor is broken or non-conformant. Cannot continue."
 #endif
 #undef P00_PASTE_TEST_1
@@ -258,13 +268,13 @@
 #ifdef _WIN32
 # define SETERRNO(x) SetLastError(x)
 #else
-# define SETERRNO(x) (errno = (x))
+# define SETERRNO(x) ((void)(errno = (x)))
 #endif
 
 /*--------------------------------------------------------------------------------------*/
 
-#define USEC2SECOND UINTMAX_C(1000000)    /*     1,000,000 - one million */
-#define NSEC2SECOND UINTMAX_C(1000000000) /* 1,000,000,000 - one billion */
+#define USECS_IN_SECOND 1000000ULL  /* 1,000,000 - One Million */
+#define NSECS_IN_SECOND 1000000000ULL  /* 1,000,000,000 - One Billion */
 
 
 /****************************************************************************************/

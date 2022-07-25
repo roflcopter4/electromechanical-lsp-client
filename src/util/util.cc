@@ -6,11 +6,6 @@
 #include "util/myerr.h"
 #include "util/util.hh"
 
-#include <backtrace.h>
-#include <charconv>
-
-#include <boost/stacktrace.hpp>
-
 #define AUTOC auto const
 
 #if defined HAVE_EXECINFO_H
@@ -34,6 +29,7 @@
 #  define FATAL_ERROR(msg) win32::error_exit_wsa(L ## msg)
 #  define FILESEP_CHR  '\\'
 #  define FILESEP_STR  "\\"
+#  include <strsafe.h>
 #else
 #  define FILESEP_CHR  '/'
 #  define FILESEP_STR  "/"
@@ -61,20 +57,22 @@ void cleanup_sighandler(int signum);
 
 class cleanup_c
 {
-      std::filesystem::path             tmp_path_{};
-      std::stack<std::filesystem::path> delete_list_{};
-      std::recursive_mutex              mtx_{};
+      using path = std::filesystem::path;
+
+      path                 tmp_path_{};
+      std::stack<path>     delete_list_{};
+      std::recursive_mutex mtx_{};
 
       template <typename ...Types>
       static constexpr void dbg_log(UNUSED Types &&...args)
       {
 #ifndef NDEBUG
-            fmt::print(stderr, std::forward<Types &&>(args)...);
+            fmt::print(stderr, std::forward<Types>(args)...);
 #endif
       }
 
     public:
-      void push(std::filesystem::path const &path_arg)
+      void push(path const &path_arg)
       {
             std::lock_guard lock(mtx_);
             if (tmp_path_.empty())
@@ -83,10 +81,10 @@ class cleanup_c
                   delete_list_.emplace(path_arg);
       }
 
-      std::filesystem::path const &get_path() &
+      path const &get_path() &
       {
             std::lock_guard lock(mtx_);
-            if (tmp_path_ == L"")
+            if (tmp_path_.empty())
                   push(get_temporary_directory(MAIN_PROJECT_NAME "."));
             return tmp_path_;
       }
@@ -109,32 +107,19 @@ class cleanup_c
             }
 
             fflush(stderr);
-            tmp_path_ = std::filesystem::path{};
-      }
-
-      ~cleanup_c() noexcept
-      {
-            try {
-                  do_cleanup();
-            } catch (std::exception &e) {
-                  try {
-                        std::cerr << "Caught exception:\n    " << e.what()
-                                  << "\nwhen cleaning temporary files.\n";
-                        std::cerr.flush();
-                  } catch (...) {}
-            }
+            tmp_path_ = path{};
       }
 
       cleanup_c() noexcept
       {
 #ifdef _WIN32
-            signal(SIGABRT,  cleanup_sighandler);
-            signal(SIGBREAK, cleanup_sighandler);
-            signal(SIGFPE,   cleanup_sighandler);
-            signal(SIGILL,   cleanup_sighandler);
-            signal(SIGINT,   cleanup_sighandler);
-            signal(SIGSEGV,  cleanup_sighandler);
-            signal(SIGTERM,  cleanup_sighandler);
+            ::signal(SIGABRT,  cleanup_sighandler);
+            ::signal(SIGBREAK, cleanup_sighandler);
+            ::signal(SIGFPE,   cleanup_sighandler);
+            ::signal(SIGILL,   cleanup_sighandler);
+            ::signal(SIGINT,   cleanup_sighandler);
+            ::signal(SIGSEGV,  cleanup_sighandler);
+            ::signal(SIGTERM,  cleanup_sighandler);
 #else
             struct sigaction act{};
             act.sa_handler = cleanup_sighandler;
@@ -148,6 +133,19 @@ class cleanup_c
             sigaction(SIGTERM, &act, nullptr);
             sigaction(SIGPIPE, &act, nullptr);
 #endif
+      }
+
+      ~cleanup_c() noexcept
+      {
+            try {
+                  do_cleanup();
+            } catch (std::exception &e) {
+                  try {
+                        std::cerr << "Caught exception:\n    " << e.what()
+                                  << "\nwhen cleaning temporary files.\n";
+                        std::cerr.flush();
+                  } catch (...) {}
+            }
       }
 
       DELETE_COPY_CTORS(cleanup_c);
@@ -318,10 +316,15 @@ resolve_addr(char const *server, char const *port, int const type)
       hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
       hints.ai_socktype = type;
 
-      int rc = getaddrinfo(server, port, &hints, &res);
+      int rc = ::getaddrinfo(server, port, &hints, &res);
       if (rc != 0)
+#ifdef _WIN32
+            errx("Host not found for ('%s') and ('%s') --> %ls",
+                 server, port, ::gai_strerrorW(rc));
+#else
             errx("Host not found for ('%s') and ('%s') --> %s",
                  server, port, gai_strerror(rc));
+#endif
 
       return res;
 }
@@ -334,26 +337,26 @@ resolve_addr(char const *server, char const *port, int const type)
 /* RNG helper utils for C code */
 
 
-extern "C" unsigned
+extern "C" _Check_return_ unsigned
 cxx_random_device_get_random_val(void)
 {
       static std::random_device rand_device;
       return rand_device();
 }
 
-extern "C" uint32_t
+extern "C" _Check_return_ uint32_t
 cxx_random_engine_get_random_val_32(void)
 {
       static std::mt19937 rand_engine_32(cxx_random_device_get_random_val());
       return rand_engine_32();
 }
 
-extern "C" uint64_t
+extern "C" _Check_return_ uint64_t
 cxx_random_engine_get_random_val_64(void)
 {
       static std::mt19937_64 rand_engine_64(
           (static_cast<uint64_t>(cxx_random_device_get_random_val()) << 32) |
-          static_cast<uint64_t>(cxx_random_device_get_random_val()));
+           static_cast<uint64_t>(cxx_random_device_get_random_val()));
 
       return rand_engine_64();
 }
@@ -402,7 +405,8 @@ my_err_throw(_In_    bool const           print_err,
 
       if (print_err)
             buf += fmt::format(FC("`  (errno {}: `{}')"), e,
-                               std::error_code(e, std::system_category()).message());
+                               std::error_code(e, std::system_category())
+                                    .message());
 
       add_backtrace(buf);
       throw std::runtime_error(buf);
@@ -486,7 +490,7 @@ add_backtrace(std::string &buf)
 {
       void *stack[256];
       AUTOC process = ::GetCurrentProcess();
-      SymInitialize(process, nullptr, true);
+      ::SymInitialize(process, nullptr, true);
 
       AUTOC frames = ::CaptureStackBackTrace(0, 256, stack, nullptr);
       auto *symbol = xmalloc<SYMBOL_INFO>(sizeof(SYMBOL_INFO) + (SIZE_C(1024) * sizeof(char)));
@@ -514,27 +518,30 @@ static void add_backtrace(std::string const &) {}
 #endif
 
 
+//---------------------------------------------------------------------------------------
+
+
 #ifdef _WIN32
-# include <strsafe.h>
 namespace win32 {
 
+#if 0
 NORETURN void
 error_exit_explicit(wchar_t const *msg, DWORD const errval)
 {
       WCHAR *msg_buf = nullptr;
 
       // Retrieve the system error message for the last-error code
-      FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                     nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                     reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
+      ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                       nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPWSTR>(&msg_buf), 0, nullptr);
 
       auto *display_buf = static_cast<LPWSTR>(
-            LocalAlloc(LMEM_ZEROINIT, (wcslen(msg) + wcslen(msg_buf) + SIZE_C(40)) * sizeof(WCHAR)));
+            ::LocalAlloc(LMEM_ZEROINIT, (wcslen(msg) + wcslen(msg_buf) + SIZE_C(40)) * sizeof(WCHAR)));
       assert(display_buf != nullptr);
 
-      StringCchPrintfW(display_buf, LocalSize(display_buf) / sizeof(WCHAR),
-                       L"%s failed with error %u: %s",
-                       msg, errval, msg_buf);
+      ::StringCchPrintfW(display_buf, ::LocalSize(display_buf) / sizeof(WCHAR),
+                         L"%s failed with error %u: %s",
+                         msg, errval, msg_buf);
 
       ::MessageBoxW(nullptr, display_buf, L"Error", MB_OK);
       ::LocalFree(msg_buf);
@@ -549,39 +556,100 @@ error_exit_explicit(char const *msg, DWORD const errval)
       char *msg_buf = nullptr;
 
       // Retrieve the system error message for the last-error code
-      FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-                     nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                     reinterpret_cast<LPSTR>(&msg_buf), 0, nullptr);
+      ::FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                       nullptr, errval, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPSTR>(&msg_buf), 0, nullptr);
 
       auto *display_buf = static_cast<char *>(
-            LocalAlloc(LMEM_ZEROINIT, strlen(msg) + strlen(msg_buf) + 40));
+            ::LocalAlloc(LMEM_ZEROINIT, strlen(msg) + strlen(msg_buf) + 40));
       assert(display_buf != nullptr);
 
-      StringCchPrintfA(display_buf, LocalSize(display_buf),
-                       "%s failed with error %u: %s",
-                       msg, errval, msg_buf);
+      ::StringCchPrintfA(display_buf, ::LocalSize(display_buf),
+                         "%s failed with error %u: %s",
+                         msg, errval, msg_buf);
 
       ::MessageBoxA(nullptr, display_buf, "Error", MB_OK);
       ::LocalFree(msg_buf);
       ::LocalFree(display_buf);
       ::exit(errval);
 }
+#endif
 
+
+static constexpr size_t error_buffer_size = 2048;
+
+/*
+ * UNSPEAKABLY EVIL MACRO EVERYONE PANIC AND SCREAM
+ */
+#define GET_ERROR_BUFFER(FDIR, SUFFIX)                                   \
+      do {                                                               \
+            auto const code = std::error_code{static_cast<int>(errval),  \
+                                              std::system_category()};   \
+            swprintf_s(buf, std::size(buf),                              \
+                       L"\"" FDIR L"\" failed with error %d:\n"          \
+                       L"\u2002\u2002\u2002\u2002%hs" SUFFIX,            \
+                       msg, errval, code.message().c_str());             \
+      } while (0)
+
+void
+warning_box_explicit(_In_z_ wchar_t const *msg, _In_ DWORD const errval)
+{
+      wchar_t buf[error_buffer_size];
+      GET_ERROR_BUFFER(L"%s", L"\nAttempting to continue...");
+      warning_box_message(buf);
+}
+
+void
+warning_box_explicit(_In_z_ char const *msg, _In_ DWORD const errval)
+{
+      wchar_t buf[error_buffer_size];
+      GET_ERROR_BUFFER(L"%hs", L"\nAttempting to continue...");
+      warning_box_message(buf);
+}
+
+void
+warning_box_message(_In_z_ wchar_t const *msg)
+{
+      ::MessageBoxW(nullptr, msg, L"Non-Fatal Error", MB_OK);
+}
+
+void
+warning_box_message(_In_z_ char const *msg)
+{
+      ::MessageBoxA(nullptr, msg, "Non-Fatal Error", MB_OK);
+}
 
 NORETURN void
-error_exit_message(wchar_t const *msg)
+error_exit_explicit(_In_z_ wchar_t const *msg, _In_ DWORD const errval)
+{
+      wchar_t buf[error_buffer_size];
+      GET_ERROR_BUFFER(L"%s", L"\nCannot continue. Press OK to exit.");
+      error_exit_message(buf);
+}
+
+NORETURN void
+error_exit_explicit(_In_z_ char const *msg, _In_ DWORD const errval)
+{
+      wchar_t buf[error_buffer_size];
+      GET_ERROR_BUFFER(L"%hs", L"\nCannot continue. Press OK to exit.");
+      error_exit_message(buf);
+}
+
+NORETURN void
+error_exit_message(_In_z_ wchar_t const *msg)
 {
       ::MessageBoxW(nullptr, msg, L"Error", MB_OK);
       ::exit(EXIT_FAILURE);
 }
 
-
 NORETURN void
-error_exit_message(char const *msg)
+error_exit_message(_In_z_ char const *msg)
 {
       ::MessageBoxA(nullptr, msg, "Error", MB_OK);
       ::exit(EXIT_FAILURE);
 }
+
+#undef GET_ERROR_BUFFER
 
 } // namespace win32
 #endif
@@ -615,6 +683,23 @@ slurp_file(char const *const fname, bool const binary)
       buf.data()[nread] = '\0';  //NOLINT(readability-simplify-subscript-expr)
       return buf;
 }
+
+std::string slurp_file(std::string const &fname, bool const binary)
+{
+      return slurp_file(fname.c_str(), binary);
+}
+
+std::string slurp_file(hacks::path const &fname, bool const binary)
+{
+      return slurp_file(fname.string().c_str(), binary);
+}
+
+std::string slurp_file(hacks::sview const &fname, bool const binary)
+{
+      return slurp_file(fname.data(), binary);
+}
+
+//---------------------------------------------------------------------------------------
 
 std::string char_repr(char const ch)
 {
@@ -651,11 +736,12 @@ xatoi(char const *const number, bool const strict)
 /****************************************************************************************/
 
 #ifdef _WIN32
+
 void
 close_descriptor(HANDLE &fd) noexcept
 {
-      if (reinterpret_cast<intptr_t>(fd) > 0 && fd != GetStdHandle(STD_ERROR_HANDLE))
-            CloseHandle(fd);
+      if (reinterpret_cast<intptr_t>(fd) > 0 && fd != ::GetStdHandle(STD_ERROR_HANDLE))
+            ::CloseHandle(fd);
       fd = reinterpret_cast<HANDLE>(-1);
 }
 
@@ -663,7 +749,7 @@ void
 close_descriptor(SOCKET &fd) noexcept
 {
       if (static_cast<intptr_t>(fd) > 0)
-            closesocket(fd);
+            ::closesocket(fd);
       fd = static_cast<SOCKET>(-1);
 }
 
@@ -671,29 +757,36 @@ void
 close_descriptor(intptr_t &fd) noexcept
 {
       if (fd > 0)
-            closesocket(fd);
+            ::closesocket(fd);
       fd = -1;
 }
 
 size_t
-available_in_fd(SOCKET const s) noexcept(false)
+available_in_fd(SOCKET const s)
 {
       unsigned long value  = 0;
       int const     result = ::ioctlsocket(s, detail::ioctl_size_available, &value);
       if (result < 0)
-            throw std::system_error(
-                std::error_code{WSAGetLastError(), std::system_category()});
+            return 0;
+            //win32::error_exit_wsa(L"ioctlsocket");
       return value;
 }
 
 size_t
-available_in_fd(HANDLE const s) noexcept(false)
+available_in_fd(HANDLE const s)
 {
       DWORD avail;
-      if (!PeekNamedPipe(s, nullptr, 0, nullptr, &avail, nullptr))
+      if (!::PeekNamedPipe(s, nullptr, 0, nullptr, &avail, nullptr))
             throw std::system_error(
-                std::error_code{WSAGetLastError(), std::system_category()});
+                std::error_code{::WSAGetLastError(), std::system_category()});
       return avail;
+}
+
+size_t available_in_fd(int const s)
+{
+      auto const hand = reinterpret_cast<HANDLE>(::_get_osfhandle(s));
+      assert(hand != nullptr);
+      return available_in_fd(hand);
 }
 
 #else
@@ -705,6 +798,18 @@ close_descriptor(intptr_t &fd) noexcept
             close(static_cast<int>(fd));
       fd = static_cast<int>(-1);
 }
+
+size_t available_in_fd(int const s)
+{
+      int value  = 0;
+      int result = ::ioctl(s, detail::ioctl_size_available, &value);
+      if (result < 0)
+            throw std::system_error(
+                std::error_code{errno, std::system_category()});
+
+      return static_cast<size_t>(value);
+}
+
 #endif
 
 void
@@ -716,83 +821,79 @@ close_descriptor(int &fd) noexcept
 }
 
 
-/*--------------------------------------------------------------------------------------*/
+/****************************************************************************************/
 
 
-size_t available_in_fd(int const s) noexcept(false)
-{
 #ifdef _WIN32
-      HANDLE hand = _get_osfhandle(s);
-      return available_in_fd(hand);
-#else
-      int value  = 0;
-      int result = ::ioctl(s, detail::ioctl_size_available, &value);
-      if (result < 0)
-            throw std::system_error(
-                std::error_code{errno, std::system_category()});
 
-      return static_cast<size_t>(value);
-#endif
-}
-
-
-int
-kill_process(detail::procinfo_t &pid) noexcept
+int kill_process(detail::procinfo_t &pid) noexcept
 {
       int status = 0;
 
-#ifdef _WIN32
       if (pid.hProcess && pid.hProcess != INVALID_HANDLE_VALUE) {
-            ::TerminateProcess(pid.hProcess, 0);
-            ::WaitForSingleObject(pid.hProcess, INFINITE);
-            ::GetExitCodeProcess(pid.hProcess, reinterpret_cast<DWORD *>(&status));
-            if (pid.hThread && pid.hThread != INVALID_HANDLE_VALUE)
-                  ::CloseHandle(pid.hThread);
-            ::CloseHandle(pid.hProcess);
+            if (::TerminateProcess(pid.hProcess, 0) &&
+                ::WaitForSingleObject(pid.hProcess, INFINITE) == 0)
+            {
+                  ::GetExitCodeProcess(pid.hProcess, reinterpret_cast<DWORD *>(&status));
+                  if (pid.hThread && pid.hThread != INVALID_HANDLE_VALUE)
+                        ::CloseHandle(pid.hThread);
+                  ::CloseHandle(pid.hProcess);
+            }
 
             memset(&pid, 0, sizeof(pid));
-            pid.hProcess = pid.hThread = HANDLE(-1);
+            pid.hProcess = pid.hThread = INVALID_HANDLE_VALUE;
       }
+
+      return status;
+}
+
+int waitpid(HANDLE proc_hand)
+{
+      DWORD status;
+      ::WaitForSingleObject(proc_hand, INFINITE);
+      ::GetExitCodeProcess (proc_hand, &status);
+      return static_cast<int>(status);
+}
+
+constexpr int wExitStatus(int const status)
+{
+      return (status & 0xff00) >> 8;
+}
+
+int waitpid(detail::procinfo_t const &pid)
+{
+      int const status = waitpid(pid.hProcess);
+      return wExitStatus(status);
+}
+
 #else
+
+int kill_process(detail::procinfo_t &pid) noexcept
+{
+      int status = 0;
+
       if (pid) {
             ::kill(pid, SIGTERM);
             ::waitpid(pid, &status, 0);
-            status = WEXITSTATUS(status);
+            status = wExitStatus(status);
             pid    = 0;
       }
-#endif
 
       return status;
 }
 
-
-#ifdef _WIN32
-int
-waitpid(HANDLE proc_hand)
-{
-      DWORD status;
-      WaitForSingleObject(proc_hand, INFINITE);
-      GetExitCodeProcess (proc_hand, &status);
-      return static_cast<int>(status);
-}
-#endif
-
-
-int
-waitpid(detail::procinfo_t const &pid)
+int waitpid(detail::procinfo_t const &pid)
 {
       int status;
-#ifdef _WIN32
-      status = waitpid(pid.hProcess);
-#else
       ::waitpid(pid, &status, 0);
-      status = WEXITSTATUS(status);
-#endif
+      status = wExitStatus(status);
       return status;
 }
 
+#endif
 
-/*--------------------------------------------------------------------------------------*/
+
+/****************************************************************************************/
 /* Win32 CtrlHandler BS */
 
 

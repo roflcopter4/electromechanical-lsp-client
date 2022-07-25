@@ -1,6 +1,12 @@
 #include "Common.hh"
 #include "ipc/rpc/lsp/static-data.hh"
 
+#ifdef _WIN32
+# define GETPID_() (static_cast<int>(::GetCurrentProcessId()))
+#else
+# define GETPID_() ::getpid()
+#endif
+
 inline namespace emlsp {
 namespace ipc::lsp::data {
 
@@ -70,8 +76,8 @@ init_msg(char const *root)
 {
       char buf[4096];
       buf[0] = 0;
-      int const len = snprintf(buf, sizeof buf, initialization_message, getpid(), root);
-      return std::string{buf, static_cast<size_t>(len)};
+      int const len = snprintf(buf, std::size(buf), initialization_message, GETPID_(), root);
+      return {buf, static_cast<size_t>(len)};
 }
 
 

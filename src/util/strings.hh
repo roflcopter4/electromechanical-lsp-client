@@ -19,9 +19,11 @@ class string_ref : public std::basic_string_view<Elem, Traits<Elem>>
       {}
       explicit string_ref(std::string const &str) noexcept : std::string_view(str.data(), str.size())
       {}
-      explicit string_ref(std::string_view str) noexcept : std::string_view(std::move(str))
+      explicit string_ref(std::string_view str) noexcept : std::string_view(str)
       {}
       explicit string_ref(char const *str) noexcept : std::string_view(str, __builtin_strlen(str))
+      {}
+      explicit string_ref(char const *str, size_t len) noexcept : std::string_view(str, len)
       {}
 };
 

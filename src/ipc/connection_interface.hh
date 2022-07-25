@@ -10,6 +10,7 @@ namespace ipc {
 /****************************************************************************************/
 
 
+#if 0
 namespace detail {
 #ifdef _WIN32
 using descriptor_type = intptr_t;
@@ -35,13 +36,13 @@ class connection_interface
 
       //--------------------------------------------------------------------------------
 
-      virtual ssize_t   raw_read(void *buf, size_t nbytes)                    = 0;
-      virtual ssize_t   raw_read(void *buf, size_t nbytes, int flags)         = 0;
-      virtual ssize_t   raw_write(void const *buf, size_t nbytes)             = 0;
-      virtual ssize_t   raw_write(void const *buf, size_t nbytes, int flags)  = 0;
-      virtual ssize_t   raw_writev(void const *buf, size_t nbytes, int flags) = 0;
-      ND virtual size_t available() const                                     = 0;
-      ND virtual intptr_t raw_descriptor() const                          = 0;
+      virtual ssize_t     raw_read(void *buf, size_t nbytes)                    = 0;
+      virtual ssize_t     raw_read(void *buf, size_t nbytes, int flags)         = 0;
+      virtual ssize_t     raw_write(void const *buf, size_t nbytes)             = 0;
+      virtual ssize_t     raw_write(void const *buf, size_t nbytes, int flags)  = 0;
+      virtual ssize_t     raw_writev(void const *buf, size_t nbytes, int flags) = 0;
+      ND virtual size_t   available() const                                     = 0;
+      ND virtual intptr_t raw_descriptor() const                                = 0;
 
       virtual ssize_t raw_write(std::string const &buf)                 { return raw_write(buf.data(), buf.size()); }
       virtual ssize_t raw_write(std::string const &buf, int flags)      { return raw_write(buf.data(), buf.size(), flags); }
@@ -79,7 +80,7 @@ class connection_interface
       virtual procinfo_t spawn_connection(char const *const *argv)        { return spawn_connection(const_cast<char **>(argv)); }
       virtual procinfo_t spawn_connection(std::vector<char *> &vec)       { return spawn_connection(reinterpret_cast<std::vector<char const *> &>(vec)); }
       virtual procinfo_t spawn_connection(std::vector<char *> &&vec)      { return spawn_connection(reinterpret_cast<std::vector<char const *> &&>(vec)); }
-      virtual procinfo_t spawn_connection(std::vector<char const *> &vec) { return spawn_connection(std::forward<std::vector<char const *> &&>(vec)); }
+      virtual procinfo_t spawn_connection(std::vector<char const *> &vec) { return spawn_connection(std::forward<std::vector<char const *>>(vec)); }
 
       /**
        * \brief Spawn a process. This method is To be used much like execl. Unlike execl,
@@ -96,28 +97,7 @@ class connection_interface
             return spawn_connection(argc, const_cast<char **>(pack));
       }
 };
-
-
-template <typename ConnectionImpl>
-      REQUIRES (detail::ConnectionImplVariant<ConnectionImpl>)
-class connection_impl_wrapper
-{
-      ConnectionImpl impl_;
-
-    public:
-      using connection_impl_type = ConnectionImpl;
-
-      connection_impl_wrapper()          = default;
-      virtual ~connection_impl_wrapper() = default;
-
-      DEFAULT_ALL_CTORS(connection_impl_wrapper);
-
-      //--------------------------------------------------------------------------------
-
-      // FIXME This should probably be protected
-      ND virtual ConnectionImpl       &impl()       & { return impl_; }
-      ND virtual ConnectionImpl const &impl() const & { return impl_; }
-};
+#endif
 
 
 /****************************************************************************************/

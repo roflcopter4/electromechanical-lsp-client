@@ -1,3 +1,4 @@
+// ReSharper disable CppFinalFunctionInFinalClass
 #pragma once
 #ifndef HGUARD__IPC__IPC_CONNECTION_HH_
 #define HGUARD__IPC__IPC_CONNECTION_HH_ //NOLINT
@@ -9,7 +10,7 @@
 #ifdef __TAG_HIGHLIGHT__
 # define TYPENAME typename
 #else
-# define TYPENAME util::concepts::StringLiteral 
+# define TYPENAME util::concepts::StringLiteral
 #endif
 
 inline namespace emlsp {
@@ -20,16 +21,19 @@ namespace ipc {
 class base_connection
 {
       using this_type = base_connection;
+      using iovec = detail::iovec;
+      using intc = int const;
 
     protected:
-      ND virtual detail::base_connection_impl_interface       &impl()       & = 0;
-      ND virtual detail::base_connection_impl_interface const &impl() const & = 0;
-
       using procinfo_t   = util::detail::procinfo_t;
       using descriptor_t = detail::descriptor_type;
+      using err_descriptor_type =
+          detail::base::base_connection_impl_interface::err_descriptor_type;
 
     public:
-      base_connection()          = default;     
+      //--------------------------------------------------------------------------------
+
+      base_connection()          = default;
       virtual ~base_connection() = default;
 
       DELETE_ALL_CTORS(base_connection);
@@ -43,7 +47,13 @@ class base_connection
 
       ND virtual procinfo_t const &pid() const & = 0;
       virtual void close()                       = 0;
-      virtual int waitpid() noexcept             = 0;
+      virtual void kill()                        = 0;
+      virtual int  waitpid() noexcept            = 0;
+
+      //--------------------------------------------------------------------------------
+
+      ND virtual detail::base::base_connection_impl_interface       &impl()       & = 0;
+      ND virtual detail::base::base_connection_impl_interface const &impl() const & = 0;
 
       //--------------------------------------------------------------------------------
 
@@ -90,22 +100,24 @@ class base_connection
 
       //--------------------------------------------------------------------------------
 
-      virtual ssize_t raw_write(std::string const &buf)                 { return raw_write(buf.data(), buf.size()); }
-      virtual ssize_t raw_write(std::string const &buf, int flags)      { return raw_write(buf.data(), buf.size(), flags); }
-      virtual ssize_t raw_write(std::string_view const &buf)            { return raw_write(buf.data(), buf.size()); }
-      virtual ssize_t raw_write(std::string_view const &buf, int flags) { return raw_write(buf.data(), buf.size(), flags); }
+      __forceinline ssize_t raw_write(std::string const &buf)                 { return raw_write(buf.data(), buf.size());        }
+      __forceinline ssize_t raw_write(std::string const &buf, int flags)      { return raw_write(buf.data(), buf.size(), flags); }
+      __forceinline ssize_t raw_write(std::string_view const &buf)            { return raw_write(buf.data(), buf.size());        }
+      __forceinline ssize_t raw_write(std::string_view const &buf, int flags) { return raw_write(buf.data(), buf.size(), flags); }
+      __forceinline ssize_t raw_writev(void  *buf, size_t nbytes)             { return raw_writev(buf, nbytes, 0);               }
+      __forceinline ssize_t raw_writev(iovec *buf, size_t nbytes)             { return raw_writev(buf, nbytes, 0);               }
 
-      virtual ssize_t raw_read(void *buf, size_t const nbytes)
+      ssize_t raw_read(void *buf, size_t nbytes)
       {
             return impl().read(buf, static_cast<ssize_t>(nbytes));
       }
 
-      virtual ssize_t raw_read(void *buf, size_t const nbytes, int const flags)
+      ssize_t raw_read(void *buf, size_t nbytes, int flags)
       {
             return impl().read(buf, static_cast<ssize_t>(nbytes), flags);
       }
 
-      virtual ssize_t raw_write(void const *buf, size_t const nbytes)
+      ssize_t raw_write(void const *buf, size_t nbytes)
       {
             util::eprint(FC("\033[1;33mwriting {} bytes "
                             "<<'_EOF_'\n\033[0;32m{}\033[1;33m\n_EOF_\033[0m\n"),
@@ -114,34 +126,32 @@ class base_connection
             return impl().write(buf, static_cast<ssize_t>(nbytes));
       }
 
-      virtual ssize_t raw_write(void const *buf, size_t const nbytes, int const flags)
+      ssize_t raw_write(void const *buf, size_t nbytes, int flags)
       {
             return impl().write(buf, static_cast<ssize_t>(nbytes), flags);
       }
 
-      virtual ssize_t raw_writev(void const *buf, size_t const nbytes, int const flags)
+      ssize_t raw_writev(void *buf, size_t nbytes, int flags)
       {
-            return impl().write(buf, static_cast<ssize_t>(nbytes), flags);
+            return impl().writev(static_cast<iovec *>(buf),
+                                 static_cast<ssize_t>(nbytes), flags);
+      }
+
+      ssize_t raw_writev(iovec *buf, size_t nbytes, int flags)
+      {
+            return impl().writev(buf, static_cast<ssize_t>(nbytes), flags);
       }
 
       //--------------------------------------------------------------------------------
 
-      ND virtual size_t available() const
+      ND size_t available() const
       {
             return impl().available();
       }
 
-      ND virtual intptr_t raw_descriptor() const
+      ND intptr_t raw_descriptor() const
       {
-            auto const fd = impl().fd();
-#ifdef _WIN32
-            if constexpr (std::is_integral_v<decltype(fd)>)
-                  return static_cast<descriptor_type>(impl().fd());
-            else
-                  return reinterpret_cast<descriptor_type>(impl().fd());
-#else
-            return fd;
-#endif
+            return impl().fd();
       }
 };
 
@@ -153,8 +163,6 @@ class base_connection
 namespace detail {
 
 
-// template <typename ConnectionImpl>
-//       REQUIRES(detail::ConnectionImplVariant<ConnectionImpl>)
 class spawner_connection : public base_connection
 {
       using this_type = spawner_connection;
@@ -168,30 +176,88 @@ class spawner_connection : public base_connection
 
       //--------------------------------------------------------------------------------
 
-      virtual void redirect_stderr_to_default()
+      void redirect_stderr_to_default()
       {
             impl().set_stderr_default();
       }
 
-      virtual void redirect_stderr_to_devnull()
+      void redirect_stderr_to_devnull()
       {
             impl().set_stderr_devnull();
       }
 
-      virtual void redirect_stderr_to_fd(descriptor_t fd)
+      void redirect_stderr_to_fd(err_descriptor_type const fd)
       {
             impl().set_stderr_fd(fd);
       }
 
-      virtual void redirect_stderr_to_filename(std::string const &fname)
+      void redirect_stderr_to_filename(std::string const &fname)
       {
             impl().set_stderr_filename(fname);
       }
 
       //--------------------------------------------------------------------------------
 
+      ND virtual constexpr base::socket_connection_base_impl       *impl_socket()       = 0;
+      ND virtual constexpr base::socket_connection_base_impl const *impl_socket() const = 0;
+      ND virtual constexpr base::libuv_pipe_handle_impl            *impl_libuv()        = 0;
+      ND virtual constexpr base::libuv_pipe_handle_impl      const *impl_libuv() const  = 0;
+
+#if 0
+      /**
+       * \brief Get the base implementation as a generic socket interface rather than the
+       * fully generic interface. Caution: uses dynamic_cast and therefore has significant
+       * overhead. Store the result if you intend to use it more than once to avoid
+       * unnecessary duplication of effort. Throws on bad cast.
+       * \return impl() dynamically casted to socket_connection_base_impl
+       */
+      ND constexpr base::socket_connection_base_impl &impl_socket() &
+      {
+            return dynamic_cast<base::socket_connection_base_impl &>(impl());
+      }
+
+      /**
+       * \brief Get the base implementation as a generic socket interface rather than the
+       * fully generic interface. Caution: uses dynamic_cast and therefore has significant
+       * overhead. Store the result if you intend to use it more than once to avoid
+       * unnecessary duplication of effort. Throws on bad cast.
+       * \return impl() dynamically casted to socket_connection_base_impl
+       */
+      ND constexpr base::socket_connection_base_impl const &impl_socket() const &
+      {
+            return dynamic_cast<base::socket_connection_base_impl const &>(impl());
+      }
+
+      /**
+       * \brief Get the base implementation as a the libuv implenentation type. Caution:
+       * uses dynamic_cast and therefore has significant overhead. Store the result if you
+       * intend to use it more than once to avoid unnecessary duplication of effort.
+       * Throws on bad cast.
+       * \return impl() dynamically casted to libuv_pipe_handle_impl
+       */
+      ND constexpr base::libuv_pipe_handle_impl &impl_libuv() &
+      {
+            return dynamic_cast<base::libuv_pipe_handle_impl &>(impl());
+      }
+
+      /**
+       * \brief Get the base implementation as a the libuv implenentation type. Caution:
+       * uses dynamic_cast and therefore has significant overhead. Store the result if you
+       * intend to use it more than once to avoid unnecessary duplication of effort.
+       * Throws on bad cast.
+       * \return impl() dynamically casted to libuv_pipe_handle_impl
+       */
+      ND constexpr base::libuv_pipe_handle_impl const &impl_libuv() const &
+      {
+            return dynamic_cast<base::libuv_pipe_handle_impl const &>(impl());
+      }
+#endif
+
+      //--------------------------------------------------------------------------------
+
       virtual procinfo_t spawn_connection(char **const argv)
       {
+            assert(*argv);
             char **p = argv;
             while (*p++)
                   ;
@@ -200,7 +266,8 @@ class spawner_connection : public base_connection
 
       virtual procinfo_t spawn_connection(std::vector<char const *> &&vec)
       {
-            if (vec[vec.size() - 1] != nullptr)
+            assert(!vec.empty());
+            if (vec.back() != nullptr)
                   vec.emplace_back(nullptr);
             return spawn_connection(vec.size() - 1, const_cast<char **>(vec.data()));
       }
@@ -228,7 +295,6 @@ class spawner_connection : public base_connection
       }
 
       virtual procinfo_t spawn_connection(size_t argc, char **argv) = 0;
-      virtual void kill() = 0;
 
     protected:
       static bool proc_probably_exists(procinfo_t const &pid)
@@ -248,23 +314,31 @@ class spawner_connection : public base_connection
 namespace impl {
 
 template <typename ConnectionImpl>
-      REQUIRES(ConnectionImplVariant<ConnectionImpl>)
-class spawner_connection : public ipc::detail::spawner_connection
+      REQUIRES(detail::base::ConnectionImplVariant<ConnectionImpl>)
+class spawner_connection : public detail::spawner_connection
 {
       ConnectionImpl impl_;
 
       union {
             procinfo_t    pid_;
             uv_process_t *libuv_process_handle_;
-      } process{};
+      } process_{};
+
+      base::socket_connection_base_impl *socket_impl_;
+      base::libuv_pipe_handle_impl      *libuv_impl_;
 
       bool owns_process = true;
 
       static constexpr bool is_uv_pipe_ =
-          std::is_same_v<ConnectionImpl, detail::libuv_pipe_handle_impl>;
+          std::is_same_v<ConnectionImpl, base::libuv_pipe_handle_impl>;
 
     public:
-      spawner_connection() = default;
+      spawner_connection()
+      {
+            socket_impl_ = dynamic_cast<base::socket_connection_base_impl *>(&impl_);
+            libuv_impl_  = dynamic_cast<base::libuv_pipe_handle_impl *>(&impl_);
+      }
+
       ~spawner_connection() override
       {
             close();
@@ -276,45 +350,43 @@ class spawner_connection : public ipc::detail::spawner_connection
 
       //--------------------------------------------------------------------------------
 
-      ND detail::base_connection_impl_interface       &impl()       & final { return impl_; }
-      ND detail::base_connection_impl_interface const &impl() const & final { return impl_; }
+      ND base::base_connection_impl_interface       &impl()       & final { return impl_; }
+      ND base::base_connection_impl_interface const &impl() const & final { return impl_; }
 
       //--------------------------------------------------------------------------------
 
-
-      procinfo_t spawn_connection(size_t argc, char **argv) override
+      procinfo_t spawn_connection(size_t argc, char **argv) final
       {
             if constexpr (is_uv_pipe_) {
-                  auto &hand = dynamic_cast<ipc::detail::libuv_pipe_handle_impl &>(impl());
+                  auto &hand = dynamic_cast<base::libuv_pipe_handle_impl &>(impl());
                   std::ignore = hand.do_spawn_connection(argc, argv);
-                  process.libuv_process_handle_ = hand.get_uv_process_handle();
+                  process_.libuv_process_handle_ = hand.get_uv_process_handle();
             } else {
-                  process.pid_ = this->impl().do_spawn_connection(argc, argv);
+                  process_.pid_ = this->impl().do_spawn_connection(argc, argv);
             }
 
-            return process.pid_;
+            return process_.pid_;
       }
 
-      void close() override
+      void close() final
       {
             kill();
       }
 
-      void kill() override
+      void kill() final
       {
             if constexpr (is_uv_pipe_) {
-                  if (process.libuv_process_handle_) {
-                        ::uv_process_kill(process.libuv_process_handle_, SIGTERM);
-                        process.libuv_process_handle_ = nullptr;
+                  if (process_.libuv_process_handle_) {
+                        ::uv_process_kill(process_.libuv_process_handle_, SIGTERM);
+                        process_.libuv_process_handle_ = nullptr;
                   }
             } else {
-                  if (proc_probably_exists(process.pid_))
-                        util::kill_process(process.pid_);
+                  if (proc_probably_exists(process_.pid_))
+                        util::kill_process(process_.pid_);
             }
 
             impl().close();
       }
-
 
       ND procinfo_t const &pid() const & final
       {
@@ -327,28 +399,28 @@ class spawner_connection : public ipc::detail::spawner_connection
                   std::lock_guard lock(mtx);
 
                   if (!flg.test_and_set(std::memory_order::relaxed)) {
-                        pinfo.hProcess    = libuv_process_handle_->process_handle;
+                        pinfo.hProcess    = process_.libuv_process_handle_->process_handle;
                         pinfo.hThread     = nullptr;
-                        pinfo.dwProcessId = libuv_process_handle_->pid;
+                        pinfo.dwProcessId = process_.libuv_process_handle_->pid;
                         pinfo.dwThreadId  = 0;
                   }
 
-                  return process.pinfo;
+                  return pinfo;
 #else
-                  return process.libuv_process_handle_->pid;
+                  return process_.libuv_process_handle_->pid;
 #endif
             } else {
-                  return process.pid_;
+                  return process_.pid_;
             }
       }
 
       int waitpid() noexcept final
       {
             if constexpr (is_uv_pipe_) {
-                  if (!process.libuv_process_handle_)
+                  if (!process_.libuv_process_handle_)
                         return -1;
             } else {
-                  if (!proc_probably_exists(process.pid_))
+                  if (!proc_probably_exists(process_.pid_))
                         return -1;
             }
             int status = 0;
@@ -356,29 +428,49 @@ class spawner_connection : public ipc::detail::spawner_connection
 #ifdef _WIN32
             HANDLE proc_hand;
             if constexpr (is_uv_pipe_)
-                  proc_hand = process.libuv_process_handle_->process_handle;
+                  proc_hand = process_.libuv_process_handle_->process_handle;
             else
-                  proc_hand = process.pid_.hProcess;
+                  proc_hand = process_.pid_.hProcess;
 
             WaitForSingleObject(proc_hand, INFINITE);
             GetExitCodeProcess (proc_hand, reinterpret_cast<LPDWORD>(&status));
 
             if (owns_process) {
-                  CloseHandle(process.pid_.hThread);
-                  CloseHandle(process.pid_.hProcess);
+                  CloseHandle(process_.pid_.hThread);
+                  CloseHandle(process_.pid_.hProcess);
             }
 #else
             pid_t proc_id;
             if constexpr (is_uv_pipe_)
-                  proc_id = process.libuv_process_handle_->pid;
+                  proc_id = process_.libuv_process_handle_->pid;
             else
-                  proc_id = process.pid_;
+                  proc_id = process_.pid_;
 
             ::waitpid(proc_id, reinterpret_cast<int *>(&status), 0);
 #endif
 
-            process.pid_ = {};
+            process_.pid_ = {};
             return status;
+      }
+
+      ND constexpr base::socket_connection_base_impl *impl_socket() final
+      {
+            return socket_impl_;
+      }
+
+      ND constexpr base::socket_connection_base_impl const *impl_socket() const final
+      {
+            return socket_impl_;
+      }
+
+      ND constexpr base::libuv_pipe_handle_impl *impl_libuv() final
+      {
+            return libuv_impl_;
+      }
+
+      ND constexpr base::libuv_pipe_handle_impl const *impl_libuv() const final
+      {
+            return libuv_impl_;
       }
 };
 
@@ -392,10 +484,10 @@ class spawner_connection : public ipc::detail::spawner_connection
 class stdio_connection : public base_connection
 {
       using this_type      = stdio_connection;
-      using ConnectionImpl = detail::fd_connection_impl;
+      using ConnectionImpl = base::fd_connection_impl;
 
       ConnectionImpl impl_;
-      procinfo_t     parent_pid_;
+      procinfo_t     parent_pid_{};
 
 
     public:
@@ -406,13 +498,13 @@ class stdio_connection : public base_connection
             impl_.set_descriptors(0, 1);
 
 #ifdef _WIN32
-            static_assert(0);
-            memset(&parent_pid, 0, sizeof parent_pid_);
             parent_pid_.dwProcessId = ::getppid();
-            parent_pid_.hProcess = OpenProcess(
+            parent_pid_.hThread     = INVALID_HANDLE_VALUE;
+            parent_pid_.hProcess    = ::OpenProcess(
                SYNCHRONIZE | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-               FALSE, parent_pid_.dwProcessId);
-            parent_pid_.hThread = INVALID_HANDLE_VALUE;
+               false, parent_pid_.dwProcessId
+            );
+            assert(parent_pid_.hProcess != INVALID_HANDLE_VALUE);
 #else
             //NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
             parent_pid_ = ::getppid();
@@ -425,8 +517,8 @@ class stdio_connection : public base_connection
 
       //--------------------------------------------------------------------------------
 
-      ND detail::base_connection_impl_interface       &impl()       & final { return impl_; }
-      ND detail::base_connection_impl_interface const &impl() const & final { return impl_; }
+      ND base::base_connection_impl_interface        &impl()        & final { return impl_; }
+      ND base::base_connection_impl_interface const  &impl() const  & final { return impl_; }
 
       void close() final
       {
@@ -440,7 +532,7 @@ class stdio_connection : public base_connection
       }
 
     protected:
-      void kill()
+      void kill() final
       {
             util::kill_process(parent_pid_);
       }
@@ -466,15 +558,15 @@ concept BasicConnectionVariant = std::derived_from<T, base_connection>;
 namespace connections {
 
 using std_streams       = detail::stdio_connection;
-using pipe              = detail::impl::spawner_connection<detail::pipe_connection_impl>;
-using unix_socket       = detail::impl::spawner_connection<detail::unix_socket_connection_impl>;
-using inet_ipv4_socket  = detail::impl::spawner_connection<detail::inet_ipv4_socket_connection_impl>;
-using inet_ipv6_socket  = detail::impl::spawner_connection<detail::inet_ipv6_socket_connection_impl>;
-using inet_socket       = detail::impl::spawner_connection<detail::inet_any_socket_connection_impl>;
-using libuv_pipe_handle = detail::impl::spawner_connection<detail::libuv_pipe_handle_impl>;
+using pipe              = detail::impl::spawner_connection<detail::base::pipe_connection_impl>;
+using unix_socket       = detail::impl::spawner_connection<detail::base::unix_socket_connection_impl>;
+using inet_ipv4_socket  = detail::impl::spawner_connection<detail::base::inet_ipv4_socket_connection_impl>;
+using inet_ipv6_socket  = detail::impl::spawner_connection<detail::base::inet_ipv6_socket_connection_impl>;
+using inet_socket       = detail::impl::spawner_connection<detail::base::inet_any_socket_connection_impl>;
+using libuv_pipe_handle = detail::impl::spawner_connection<detail::base::libuv_pipe_handle_impl>;
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
-using win32_named_pipe  = detail::impl::spawner_connection<dialers::win32_named_pipe>;
-using win32_handle_pipe = detail::impl::spawner_connection<dialers::win32_handle_pipe>;
+using win32_handle_pipe = detail::impl::spawner_connection<detail::base::pipe_handle_connection_impl>;
+using win32_named_pipe  = detail::impl::spawner_connection<detail::base::win32_named_pipe_impl>;
 #endif
 #ifdef HAVE_SOCKETPAIR
 using socketpair        = detail::impl::spawner_connection<detail::socketpair_connection_impl>;

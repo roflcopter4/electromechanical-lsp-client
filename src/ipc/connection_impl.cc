@@ -30,7 +30,7 @@
 using intc = int const;
 
 inline namespace emlsp {
-namespace ipc::detail {
+namespace ipc::detail::base {
 /****************************************************************************************/
 
 namespace {
@@ -110,8 +110,8 @@ create_process_normal(wchar_t const       *args,
                       PROCESS_INFORMATION *pi)
 {
       static constexpr DWORD flags = CREATE_DEFAULT_ERROR_MODE;
-      return CreateProcessW(nullptr, const_cast<PWSTR>(args), nullptr, nullptr,
-                            true, flags, nullptr, nullptr, start_info, pi);
+      return ::CreateProcessW(nullptr, const_cast<LPWSTR>(args), nullptr, nullptr,
+                              true, flags, nullptr, nullptr, start_info, pi);
 }
 
 static __forceinline bool
@@ -131,7 +131,7 @@ create_process_detours(wchar_t const       *args,
       };
 #endif
 
-      return DetourCreateProcessWithDllsW(
+      return ::DetourCreateProcessWithDllsW(
             nullptr,
             const_cast<LPWSTR>(args),
             nullptr, nullptr, true,
@@ -200,19 +200,20 @@ spawn_connection_common_detours(HANDLE const        err_fd,
                                 bool         const  dual,
                                 uint16_t     const  hport = 0U)
 {
-      static std::mutex mtx;
+      static constexpr wchar_t devnull[] = L"NUL";
+      static std::mutex        mtx;
 
       PROCESS_INFORMATION pid{};
       SECURITY_ATTRIBUTES sec_attr = {
-          .nLength              = sizeof(SECURITY_ATTRIBUTES),
+          .nLength              = sizeof(::SECURITY_ATTRIBUTES),
           .lpSecurityDescriptor = nullptr,
           .bInheritHandle       = true,
       };
 
-      AUTOC tmphand_in  = CreateFileW(L"NUL", GENERIC_READ, 0, &sec_attr, CREATE_ALWAYS,
-                                      FILE_ATTRIBUTE_NORMAL, nullptr);
-      AUTOC tmphand_out = CreateFileW(L"NUL", GENERIC_WRITE, 0, &sec_attr, CREATE_ALWAYS,
-                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+      AUTOC tmphand_in  = ::CreateFileW(devnull, GENERIC_READ, 0, &sec_attr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+      AUTOC tmphand_out = ::CreateFileW(devnull, GENERIC_WRITE, 0, &sec_attr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
 
       AUTOC        safe_argv = protect_argv(static_cast<int>(argc), argv);
       STARTUPINFOW startinfo = {};
@@ -227,20 +228,20 @@ spawn_connection_common_detours(HANDLE const        err_fd,
 
       std::lock_guard lock(mtx);
 
-      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_TYPE", stype.c_str()))
+      if (!::SetEnvironmentVariableW(L"EMLSP_SERVER_TYPE", stype.c_str()))
             util::win32::error_exit(L"SetEnvironmentVariableW");
-      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_NAME", sname.c_str()))
+      if (!::SetEnvironmentVariableW(L"EMLSP_SERVER_NAME", sname.c_str()))
             util::win32::error_exit(L"SetEnvironmentVariableW");
-      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_PORT", std::to_wstring(hport).c_str()))
+      if (!::SetEnvironmentVariableW(L"EMLSP_SERVER_PORT", fmt::to_wstring(hport).c_str()))
             util::win32::error_exit(L"SetEnvironmentVariableW");
-      if (!SetEnvironmentVariableW(L"EMLSP_SERVER_DUAL", dual ? L"1" : L"0"))
+      if (!::SetEnvironmentVariableW(L"EMLSP_SERVER_DUAL", dual ? L"1" : L"0"))
             util::win32::error_exit(L"SetEnvironmentVariableW");
 
       if (!create_process_detours(safe_argv.c_str(), &startinfo, &pid))
             util::win32::error_exit(L"create_process_detours()");
 
-      CloseHandle(tmphand_in);
-      CloseHandle(tmphand_out);
+      ::CloseHandle(tmphand_in);
+      ::CloseHandle(tmphand_out);
 
       return pid;
 }
@@ -274,7 +275,6 @@ spawn_connection_common(socket_t const   stdin_sock,
 
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
-
       if (!create_process_normal(safe_argv.c_str(), &startinfo, &pid))
             util::win32::error_exit(L"CreateProcessW()");
 
@@ -290,7 +290,7 @@ spawn_connection_shim(std::wstring const &addr,
 {
       static constexpr wchar_t shim_proc[] = LR"(D:\ass\VisualStudio\Repos\CreateProcessShim\x64\Debug\CreateProcessShim.exe)";
       PROCESS_INFORMATION pid;
-      SecureZeroMemory(&pid, sizeof pid);
+      ZeroMemory(&pid, sizeof pid);
 
       auto const   safe_argv = protect_argv(static_cast<int>(argc), argv);
       STARTUPINFOW startinfo = {};
@@ -307,7 +307,6 @@ spawn_connection_shim(std::wstring const &addr,
 
       if (!::SetHandleInformation(startinfo.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
-
       if (!create_process_normal(true_argv.c_str(), &startinfo, &pid))
             util::win32::error_exit(L"CreateProcessW()");
 
@@ -330,16 +329,16 @@ start_process_with_pipe(UNUSED char const   *exe,
           .bInheritHandle       = true,
       };
 
-      ZeroMemory(pi, sizeof(PROCESS_INFORMATION));
+      memset(pi, 0, sizeof(PROCESS_INFORMATION));
 
-      if (!CreatePipe(&handles[INPUT_PIPE][READ_FD], &handles[INPUT_PIPE][WRITE_FD], &sec_attr, 0))
+      if (!::CreatePipe(&handles[INPUT_PIPE][READ_FD], &handles[INPUT_PIPE][WRITE_FD], &sec_attr, 0))
             util::win32::error_exit(L"Stdin CreatePipe()");
-      if (!SetHandleInformation(handles[INPUT_PIPE][WRITE_FD], HANDLE_FLAG_INHERIT, 0))
+      if (!::SetHandleInformation(handles[INPUT_PIPE][WRITE_FD], HANDLE_FLAG_INHERIT, 0))
             util::win32::error_exit(L"Stdin SetHandleInformation() (write end)");
 
-      if (!CreatePipe(&handles[OUTPUT_PIPE][READ_FD], &handles[OUTPUT_PIPE][WRITE_FD], &sec_attr, 0))
+      if (!::CreatePipe(&handles[OUTPUT_PIPE][READ_FD], &handles[OUTPUT_PIPE][WRITE_FD], &sec_attr, 0))
             util::win32::error_exit(L"Stdout CreatePipe()");
-      if (!SetHandleInformation(handles[OUTPUT_PIPE][READ_FD], HANDLE_FLAG_INHERIT, 0))
+      if (!::SetHandleInformation(handles[OUTPUT_PIPE][READ_FD], HANDLE_FLAG_INHERIT, 0))
             util::win32::error_exit(L"Stdout SetHandleInformation() (read end)");
 
       start_info.cb         = sizeof start_info;
@@ -347,9 +346,9 @@ start_process_with_pipe(UNUSED char const   *exe,
       start_info.hStdInput  = handles[INPUT_PIPE][READ_FD];
       start_info.hStdOutput = handles[OUTPUT_PIPE][WRITE_FD];
       start_info.hStdError  = const_cast<HANDLE>(err_handle ? err_handle
-                                                            : GetStdHandle(STD_ERROR_HANDLE));
+                                                            : ::GetStdHandle(STD_ERROR_HANDLE));
 
-      if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
+      if (!::SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
       pipefds[WRITE_FD] = handles[INPUT_PIPE][WRITE_FD];
@@ -358,8 +357,8 @@ start_process_with_pipe(UNUSED char const   *exe,
       if (!create_process_normal(argv, &start_info, pi))
             util::win32::error_exit(L"CreateProcess() failed");
 
-      CloseHandle(handles[INPUT_PIPE][READ_FD]);
-      CloseHandle(handles[OUTPUT_PIPE][WRITE_FD]);
+      ::CloseHandle(handles[INPUT_PIPE][READ_FD]);
+      ::CloseHandle(handles[OUTPUT_PIPE][WRITE_FD]);
 
       return 0;
 }
@@ -400,15 +399,10 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
                                      pipefds, err_handle, &pid);
 
       if (err_sink_type_ != sink_type::DEFAULT)
-            CloseHandle(err_handle);
+            ::CloseHandle(err_handle);
 
-      read_  = _open_osfhandle(intptr_t(pipefds[0]), _O_RDONLY | _O_BINARY);
-      write_ = _open_osfhandle(intptr_t(pipefds[1]), _O_WRONLY | _O_BINARY);
-
-      //if (_setmode(read_, _O_BINARY) == (-1))
-      //      util::win32::error_exit(fmt::format((L"_setmode({})"), read_));
-      //if (_setmode(write_, _O_BINARY) == (-1))
-      //      util::win32::error_exit(fmt::format((L"_setmode({})"), read_));
+      read_  = ::_open_osfhandle(intptr_t(pipefds[0]), _O_RDONLY | _O_BINARY);
+      write_ = ::_open_osfhandle(intptr_t(pipefds[1]), _O_WRONLY | _O_BINARY);
 
       set_initialized();
       return pid;
@@ -416,7 +410,7 @@ pipe_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 
 
 ssize_t
-pipe_connection_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+pipe_connection_impl::writev(iovec *vec, size_t const nbufs, intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
@@ -437,10 +431,10 @@ fd_connection_impl::fd_connection_impl(intc readfd, intc writefd)
 
 fd_connection_impl::fd_connection_impl(HANDLE readfd, HANDLE writefd)
 {
-      set_descriptors(_open_osfhandle(reinterpret_cast<intptr_t>(readfd),
-                                      _O_RDONLY | _O_BINARY),
-                      _open_osfhandle(reinterpret_cast<intptr_t>(writefd),
-                                      _O_WRONLY | _O_BINARY));
+      set_descriptors(::_open_osfhandle(reinterpret_cast<intptr_t>(readfd),
+                                        _O_RDONLY | _O_BINARY),
+                      ::_open_osfhandle(reinterpret_cast<intptr_t>(writefd),
+                                        _O_WRONLY | _O_BINARY));
       set_initialized();
 }
 
@@ -460,10 +454,10 @@ fd_connection_impl::set_descriptors(intc readfd, intc writefd)
 void
 pipe_handle_connection_impl::close() noexcept
 {
-      if (read_ != INVALID_HANDLE_VALUE && read_ != GetStdHandle(STD_INPUT_HANDLE))
+      if (read_ != INVALID_HANDLE_VALUE && read_ != ::GetStdHandle(STD_INPUT_HANDLE))
             ::CloseHandle(read_);
       read_ = INVALID_HANDLE_VALUE;
-      if (write_ != INVALID_HANDLE_VALUE && write_ != GetStdHandle(STD_OUTPUT_HANDLE))
+      if (write_ != INVALID_HANDLE_VALUE && write_ != ::GetStdHandle(STD_OUTPUT_HANDLE))
             ::CloseHandle(write_);
       write_ = INVALID_HANDLE_VALUE;
 }
@@ -483,7 +477,7 @@ pipe_handle_connection_impl::do_spawn_connection(size_t const argc, char **argv)
                                      pipefds, err_handle, &pid);
 
       if (err_sink_type_ != sink_type::DEFAULT)
-            CloseHandle(err_handle);
+            ::CloseHandle(err_handle);
 
       read_  = pipefds[0];
       write_ = pipefds[1];
@@ -542,7 +536,7 @@ pipe_handle_connection_impl::write(void const *buf, ssize_t const nbytes, UNUSED
 
 
 ssize_t
-pipe_handle_connection_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+pipe_handle_connection_impl::writev(iovec *vec, size_t const nbufs, intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
@@ -569,14 +563,14 @@ named_pipe_spawn_connection_helper(HANDLE const         err_handle,
       SECURITY_ATTRIBUTES sec_attr = {
           .nLength              = sizeof(SECURITY_ATTRIBUTES),
           .lpSecurityDescriptor = nullptr,
-          .bInheritHandle       = TRUE,
+          .bInheritHandle       = true,
       };
 
       //if (!SetHandleInformation(pipe, HANDLE_FLAG_INHERIT, 0))
       //      util::win32::error_exit(L"Named pipe SetHandleInformation");
 
-      HANDLE client_pipe = CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
-                                       &sec_attr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+      HANDLE client_pipe = ::CreateFileW(pipe_path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                                         &sec_attr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
 
       if (client_pipe == INVALID_HANDLE_VALUE)
             util::win32::error_exit(L"CreateFileW");
@@ -587,11 +581,11 @@ named_pipe_spawn_connection_helper(HANDLE const         err_handle,
       start_info.dwFlags      = STARTF_USESTDHANDLES;
       start_info.hStdInput    = client_pipe;
       start_info.hStdOutput   = client_pipe;
-      start_info.hStdError    = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
+      start_info.hStdError    = err_handle ? err_handle : ::GetStdHandle(STD_ERROR_HANDLE);
 
-      if (!SetHandleInformation(client_pipe, HANDLE_FLAG_INHERIT, 1))
+      if (!::SetHandleInformation(client_pipe, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Named Pipe SetHandleInformation");
-      if (!SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
+      if (!::SetHandleInformation(start_info.hStdError, HANDLE_FLAG_INHERIT, 1))
             util::win32::error_exit(L"Stderr SetHandleInformation");
 
       if (!win32::create_process_normal(argv.c_str(), &start_info, pi))
@@ -731,7 +725,7 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
       PROCESS_INFORMATION pi;
       auto const safe_argv  = win32::protect_argv(static_cast<int>(argc), argv);
       HANDLE     err_handle = get_err_handle();
-      err_handle            = err_handle ? err_handle : GetStdHandle(STD_ERROR_HANDLE);
+      err_handle            = err_handle ? err_handle : ::GetStdHandle(STD_ERROR_HANDLE);
 
       //uv_connect_t con{};
       //uv_pipe_connect(&con, &uvchildhandle_,
@@ -745,7 +739,7 @@ win32_named_pipe_impl::do_spawn_connection(size_t const argc, char **argv)
       //uv_pipe_open(&read_handle_, crt_fd_);
 
       if (err_sink_type_ != sink_type::DEFAULT && err_handle)
-            CloseHandle(err_handle);
+            ::CloseHandle(err_handle);
 
       set_initialized(2);
       return pi;
@@ -786,7 +780,10 @@ struct win32_cb_data {
       ssize_t num_bytes;
       ssize_t num_written;
 
-      win32_cb_data(win32_named_pipe_impl *self, ssize_t nb, ssize_t nw = 0) : self(self), num_bytes(nb), num_written(nw) {}
+      win32_cb_data(win32_named_pipe_impl *self, ssize_t nb, ssize_t nw = 0)
+          : self(self), num_bytes(nb), num_written(nw)
+      {
+      }
 };
 
 void __stdcall
@@ -823,9 +820,7 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED intc 
       if (pipe_ == INVALID_HANDLE_VALUE) [[unlikely]]
             throw except::connection_closed();
 
-      bool b = ::WriteFileEx(pipe_, buf, static_cast<DWORD>(nbytes),
-                             &ov, write_callback);
-      if (!b)
+      if (!::WriteFileEx(pipe_, buf, static_cast<DWORD>(nbytes), &ov, write_callback))
             util::win32::error_exit(L"ReadFileEx()");
 
       lock.unlock();
@@ -836,7 +831,7 @@ win32_named_pipe_impl::write(void const *buf, ssize_t const nbytes, UNUSED intc 
 }
 
 ssize_t
-win32_named_pipe_impl::writev(iovec const *vec, size_t const nbufs, intc flags)
+win32_named_pipe_impl::writev(iovec *vec, size_t const nbufs, intc flags)
 {
       auto    lock  = std::lock_guard{write_mtx_};
       ssize_t total = 0;
@@ -1065,7 +1060,7 @@ pipe_connection_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 
 
 ssize_t
-pipe_connection_impl::writev(iovec const *vec, size_t const nbufs, UU intc flags)
+pipe_connection_impl::writev(iovec *vec, size_t const nbufs, UU intc flags)
 {
       auto    lock   = std::lock_guard{write_mtx_};
       ssize_t nbytes = 0;
@@ -1100,9 +1095,6 @@ pipe_connection_impl::read(void *buf, ssize_t const nbytes, intc flags)
 {
       auto    lock  = std::lock_guard{read_mtx_};
       ssize_t total = 0;
-
-      // unsigned file_flags = ::fcntl(read_, F_GETFL);
-      // ::fcntl(read_, F_SETFL, file_flags & static_cast<unsigned>(~O_NONBLOCK));
 
       if (flags & MSG_WAITALL) {
             ssize_t n;
@@ -1182,8 +1174,8 @@ unix_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 #ifdef _WIN32
       procinfo_t pid;
       if (listener_ == invalid_socket)
-            pid = win32::spawn_connection_common(invalid_socket, invalid_socket,
-                                                 err_fd_, argc, argv);
+            pid = spawn_connection_common(invalid_socket, invalid_socket,
+                                          err_fd_, argc, argv);
       else
             pid = win32::spawn_connection_common_detours(err_fd_, argc, argv, L"unix"s,
                                                          util::recode<wchar_t>(path_),
@@ -1202,11 +1194,13 @@ unix_socket_connection_impl::do_spawn_connection(size_t const argc, char **argv)
 socket_t
 unix_socket_connection_impl::open_new_socket()
 {
+#ifndef _WIN32
       if (path_.length() + 1 > sizeof(addr_.sun_path))
             throw std::logic_error(
                 fmt::format(FC("The file path \"{}\" (len: {}) is too large to "
                                "fit into a UNIX socket address (size: {})"),
                             path_, path_.size()+1, sizeof(addr_.sun_path)));
+#endif
 
       memcpy(addr_.sun_path, path_.c_str(), path_.length() + 1);
       addr_.sun_family = AF_UNIX;
@@ -1215,6 +1209,40 @@ unix_socket_connection_impl::open_new_socket()
 
       if (should_open_listener()) {
             listener = call_socket_listener(AF_UNIX, unix_socket_connection_type_arg, 0);
+
+//#ifdef _WIN32
+//            {
+//                  // ReSharper disable once CppJoinDeclarationAndAssignment
+//                  int   ret;
+//                  DWORD bytes_returned = 0;
+//                  auto const apath  = std::filesystem::path{R"(\\?\)" + path_};
+//                  auto const parent = apath.parent_path().string();
+//                  auto const base   = apath.filename().string();
+//
+//                  ret = WSAIoctl(listener, SIO_AF_UNIX_SETBINDPARENTPATH,
+//                                 (LPVOID)parent.c_str(), parent.size(), nullptr, 0,
+//                                 &bytes_returned, nullptr, nullptr);
+//                  if (ret)
+//                        util::win32::error_exit_wsa(
+//                            L"WSAIoctl() (" + std::to_wstring(bytes_returned) + L")");
+//
+//                  //bytes_returned = 0;
+//                  //ret = WSAIoctl(listener, SIO_AF_UNIX_SETCONNPARENTPATH,
+//                  //               (LPVOID)parent.c_str(), parent.size(), nullptr, 0,
+//                  //               &bytes_returned, nullptr, nullptr);
+//                  //if (ret)
+//                  //      util::win32::error_exit_wsa(
+//                  //          L"WSAIoctl() (" + std::to_wstring(bytes_returned) + L")");
+//
+//                  if (base.length() + 1 > sizeof(addr_.sun_path))
+//                        throw std::logic_error(fmt::format(
+//                            FC("The file path \"{}\" (len: {}) is too large to "
+//                               "fit into a UNIX socket address (size: {})"),
+//                            base, base.size() + 1, sizeof(addr_.sun_path)));
+//
+//                  memcpy(addr_.sun_path, base.data(), base.size() + SIZE_C(1));
+//            }
+//#endif
 
             if (listener == invalid_socket)
                   err("socket");
@@ -1295,7 +1323,7 @@ unix_socket_connection_impl::accept()
       //       util::win32::error_exit_wsa(L"setsockopt for receive buffer");
       // if (setsockopt(acc_read_, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<char const *>(&buffer_size), sizeof(buffer_size)))
       //       util::win32::error_exit_wsa(L"setsockopt for send buffer");
-      if (ioctlsocket(acc_read_, FIONBIO, &blocking_io))
+      if (::ioctlsocket(acc_read_, FIONBIO, &blocking_io))
             util::win32::error_exit_wsa(L"ioctl for blocking io");
 #else
       // unsigned blocking_io = 1;
@@ -1307,7 +1335,7 @@ unix_socket_connection_impl::accept()
             if (acc_write_ == invalid_socket)
                   ERR("accept()");
 #ifdef _WIN32
-            if (ioctlsocket(acc_write_, FIONBIO, &blocking_io))
+            if (::ioctlsocket(acc_write_, FIONBIO, &blocking_io))
                   util::win32::error_exit_wsa(L"ioctl for blocking io");
 #endif
       } else {
@@ -1326,7 +1354,7 @@ static int
 lazy_getsockname(socket_t const listener, sockaddr *addr, socklen_t const size)
 {
       socklen_t size_local = size;
-      intc ret        = ::getsockname(listener, addr, &size_local);
+      int const ret        = ::getsockname(listener, addr, &size_local);
       if (ret != 0 || size != size_local)
             ERR("getsockname()");
       return 0;
@@ -1417,23 +1445,19 @@ inet_any_socket_connection_impl::do_spawn_connection(size_t const argc, char **a
       err_fd_ = get_err_handle();
 
 #ifdef _WIN32
-      if (listener_ == invalid_socket)
-            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
-      else
-            ret = win32::spawn_connection_common_detours(
-                err_fd_, argc, argv,
-                  type_ == AF_INET  ? L"ipv4"s
-                : type_ == AF_INET6 ? L"ipv6"s
-                                    : L""s,
-                util::recode<wchar_t>(addr_string_),
-                use_dual_sockets(),
-                hport_);
+      ret = listener_ == invalid_socket
+                ? spawn_connection_common(invalid_socket, invalid_socket, err_fd_,
+                                          argc, argv)
+                : win32::spawn_connection_common_detours(
+                      err_fd_, argc, argv,
+                        type_ == AF_INET  ? L"ipv4"s
+                      : type_ == AF_INET6 ? L"ipv6"s
+                                          : L""s,
+                      util::recode<wchar_t>(addr_string_), use_dual_sockets(), hport_
+                );
 #else
       ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
 #endif
-
-      //util::close_descriptor(con_read_);
-      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
@@ -1446,11 +1470,11 @@ inet_any_socket_connection_impl::init_strings()
             char buf[128];
             if (type_ == AF_INET) {
                   auto const *a = reinterpret_cast<sockaddr_in *>(addr_);
-                  inet_ntop(AF_INET, &a->sin_addr, buf, sizeof buf);
+                  ::inet_ntop(AF_INET, &a->sin_addr, buf, sizeof buf);
                   addr_string_ = buf;
             } else if (type_ == AF_INET6) {
                   auto const *a = reinterpret_cast<sockaddr_in6 *>(addr_);
-                  inet_ntop(AF_INET6, &a->sin6_addr, buf, sizeof buf);
+                  ::inet_ntop(AF_INET6, &a->sin6_addr, buf, sizeof buf);
                   addr_string_ = buf;
             } else {
                   errx("Invalid family %d", type_);
@@ -1483,7 +1507,7 @@ inet_any_socket_connection_impl::open_new_socket()
             addr_init_       = true;
 
             char buf[32];
-            inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof buf);
+            ::inet_ntop(AF_INET, &addr->sin_addr, buf, sizeof buf);
             addr_string_ = buf;
       }
 
@@ -1534,7 +1558,7 @@ inet_any_socket_connection_impl::connect_internally()
 void inet_any_socket_connection_impl::assign_from_addrinfo(addrinfo const *info)
 {
       if (addr_)
-            free(addr_); //NOLINT
+            ::free(addr_); //NOLINT
       type_        = info->ai_family;
       addr_length_ = static_cast<socklen_t>(info->ai_addrlen);
       addr_        = util::xcalloc<sockaddr>(1, addr_length_);
@@ -1550,7 +1574,7 @@ int inet_any_socket_connection_impl::resolve(char const *server_name, char const
             return (-1);
 
       assign_from_addrinfo(info);
-      freeaddrinfo(info);
+      ::freeaddrinfo(info);
       init_strings();
       set_initialized(1);
       return 0;
@@ -1650,13 +1674,12 @@ inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       if (!check_initialized(1))
             open();
 
-      err_fd_    = get_err_handle();
-      //AUTOC ret  = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-
+      err_fd_ = get_err_handle();
       procinfo_t ret;
+
 #ifdef _WIN32
       if (listener_ == invalid_socket)
-            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
+            ret = spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
       else
             ret = win32::spawn_connection_common_detours(
                 err_fd_, argc, argv, L"ipv4"s,
@@ -1666,9 +1689,6 @@ inet_ipv4_socket_connection_impl::do_spawn_connection(size_t const argc, char **
 #else
       ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
 #endif
-
-      //util::close_descriptor(con_read_);
-      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
@@ -1692,7 +1712,7 @@ inet_ipv4_socket_connection_impl::open_new_socket()
 
       if (addr_string_.empty()) {
             char buf[128];
-            addr_string_ = inet_ntop(AF_INET, &addr_.sin_addr, buf, sizeof buf);
+            addr_string_ = ::inet_ntop(AF_INET, &addr_.sin_addr, buf, sizeof buf);
       }
       hport_ = ntohs(addr_.sin_port);
       addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
@@ -1766,16 +1786,15 @@ inet_ipv6_socket_connection_impl::do_spawn_connection(size_t const argc, char **
       procinfo_t ret;
 #ifdef _WIN32
       if (listener_ == invalid_socket)
-            ret = win32::spawn_connection_common(invalid_socket, invalid_socket, err_fd_, argc, argv);
+            ret = spawn_connection_common(invalid_socket, invalid_socket, err_fd_,
+                                          argc, argv);
       else
-            ret = win32::spawn_connection_common_detours(err_fd_, argc, argv, L"ipv6"s, util::recode<wchar_t>(addr_string_), use_dual_sockets(), hport_);
+            ret = win32::spawn_connection_common_detours(
+                err_fd_, argc, argv, L"ipv6"s, util::recode<wchar_t>(addr_string_),
+                use_dual_sockets(), hport_);
 #else
       ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
 #endif
-
-      //AUTOC ret = spawn_connection_common(con_read_, con_write_, err_fd_, argc, argv);
-      //util::close_descriptor(con_read_);
-      //util::close_descriptor(con_write_);
 
       set_initialized(2);
       return ret;
@@ -1800,7 +1819,7 @@ inet_ipv6_socket_connection_impl::open_new_socket()
       addr_init_ = true;
       if (addr_string_.empty() || addr_string_.back() == ']') {
             char buf[128];
-            addr_string_ = inet_ntop(AF_INET6, &addr_.sin6_addr, buf, sizeof buf);
+            addr_string_ = ::inet_ntop(AF_INET6, &addr_.sin6_addr, buf, sizeof buf);
       }
       hport_ = ntohs(addr_.sin6_port);
       addr_string_with_port_ = fmt::format(FC("{}:{}"), addr_string_, hport_);
@@ -1838,7 +1857,7 @@ inet_ipv6_socket_connection_impl::connect_internally()
 void
 libuv_pipe_handle_impl::close() noexcept
 {
-      uv_process_kill(&proc_handle_, SIGTERM);
+      ::uv_process_kill(&proc_handle_, SIGTERM);
 }
 
 void
@@ -1847,8 +1866,8 @@ libuv_pipe_handle_impl::open()
       throw_if_initialized(typeid(*this), 2);
 
       assert(loop_ != nullptr);
-      uv_pipe_init(loop_, &read_handle_, 0);
-      uv_pipe_init(loop_, &write_handle_, 0);
+      ::uv_pipe_init(loop_, &read_handle_, 0);
+      ::uv_pipe_init(loop_, &write_handle_, 0);
 
       set_initialized(2);
 }
@@ -1856,7 +1875,7 @@ libuv_pipe_handle_impl::open()
 size_t
 libuv_pipe_handle_impl::available() const noexcept(false)
 {
-      return util::available_in_fd(fd());
+      return util::available_in_fd(reinterpret_cast<HANDLE>(fd()));
 }
 
 void
@@ -1877,13 +1896,14 @@ libuv_pipe_handle_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
 #ifdef _WIN32
       int    err_fd;
       HANDLE err_handle = get_err_handle();
-      if (err_handle != GetStdHandle(STD_ERROR_HANDLE)) {
+      if (err_handle == ::GetStdHandle(STD_ERROR_HANDLE)) {
             err_fd = 2;
       } else {
-            err_fd = _open_osfhandle(intptr_t(err_handle), O_WRONLY | _O_BINARY);
+            err_fd = ::_open_osfhandle(intptr_t(err_handle), O_WRONLY | _O_BINARY);
             if (err_fd == -1)
                   err("_open_osfhandle()");
       }
+      crt_err_fd_ = err_fd;
 #else
       int err_fd = get_err_handle();
 #endif
@@ -1914,11 +1934,11 @@ libuv_pipe_handle_impl::do_spawn_connection(UNUSED size_t argc, char **argv)
           .gid   = 0,
       };
 
-      if (int const e = uv_spawn(loop_, &proc_handle_, &opts); e < 0)
+      if (int const e = ::uv_spawn(loop_, &proc_handle_, &opts); e < 0)
       {
 #ifdef _WIN32
             auto const s = util::recode<wchar_t>(uv_strerror(e));
-            util::win32::error_exit_message(L"Fatal libuv error:"s + s);
+            util::win32::error_exit_message(L"Fatal libuv error: "s + s);
 #else
             errx_nothrow("libuv error (%d): \"%s\"", e, uv_strerror(e));
 #endif
@@ -1942,7 +1962,7 @@ libuv_pipe_handle_impl::uvwrite_callback(uv_write_t *req, intc status)
 }
 
 ssize_t
-libuv_pipe_handle_impl::write(void const *buf, ssize_t const nbytes, UNUSED int flags)
+libuv_pipe_handle_impl::write(void const *buf, ssize_t const nbytes, int flags)
 {
       std::unique_lock write_lock{write_mtx_};
       uv_write_t req;
@@ -1952,8 +1972,8 @@ libuv_pipe_handle_impl::write(void const *buf, ssize_t const nbytes, UNUSED int 
                  static_cast<char *>(const_cast<void *>(buf)),
                  static_cast<decltype(ubuf.len)>(nbytes));
 
-      intc ret = uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
-                          &ubuf, 1, uvwrite_callback);
+      intc ret = ::uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
+                            &ubuf, 1, uvwrite_callback);
 
       write_lock.unlock();
       std::mutex       mtx;
@@ -1962,12 +1982,12 @@ libuv_pipe_handle_impl::write(void const *buf, ssize_t const nbytes, UNUSED int 
 
       intc status = static_cast<int>(reinterpret_cast<intptr_t>(req.data));
       if (status != 0)
-            throw std::runtime_error(uv_strerror(status));
+            throw std::runtime_error(::uv_strerror(status));
       return ret;
 }
 
 ssize_t
-libuv_pipe_handle_impl::writev(iovec const *vec, size_t const nbufs, UNUSED int flags)
+libuv_pipe_handle_impl::writev(iovec *vec, size_t const nbufs, int flags)
 {
       std::unique_lock write_lock{write_mtx_};
       uv_write_t  req;
@@ -1975,8 +1995,8 @@ libuv_pipe_handle_impl::writev(iovec const *vec, size_t const nbufs, UNUSED int 
       req.data          = this;
       req.type          = UV_WRITE;
 
-      intc ret = uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
-                          ubufs, static_cast<unsigned>(nbufs), uvwrite_callback);
+      intc ret = ::uv_write(&req, reinterpret_cast<uv_stream_t *>(&write_handle_),
+                            ubufs, static_cast<unsigned>(nbufs), uvwrite_callback);
 
       write_lock.unlock();
       std::mutex       mtx;
@@ -1985,16 +2005,16 @@ libuv_pipe_handle_impl::writev(iovec const *vec, size_t const nbufs, UNUSED int 
 
       intc status = static_cast<int>(reinterpret_cast<intptr_t>(req.data));
       if (status != 0)
-            throw std::runtime_error(uv_strerror(status));
+            throw std::runtime_error(::uv_strerror(status));
 
       return ret;
 }
 
-intptr_t
+libuv_pipe_handle_impl::descriptor_type
 libuv_pipe_handle_impl::fd() const noexcept
 {
 #ifdef _WIN32
-      return read_handle_.handle;
+      return reinterpret_cast<descriptor_type>(read_handle_.handle);
 #else
       return read_handle_.accepted_fd;
 #endif
@@ -2005,29 +2025,24 @@ libuv_pipe_handle_impl::fd() const noexcept
 
 
 #ifdef _WIN32
-namespace win32 {
-
-using util::win32::error_exit;
-using util::win32::error_exit_wsa;
-using util::win32::error_exit_explicit;
 
 static __inline WSAOVERLAPPED
 create_wsa_overlapped()
 {
       WSAOVERLAPPED ov = {};
-      ov.hEvent        = WSACreateEvent();
+      ov.hEvent        = ::WSACreateEvent();
       if (ov.hEvent == nullptr)
-            error_exit_wsa(L"WSACreateEvent()");
+            util::win32::error_exit_wsa(L"WSACreateEvent()");
       return ov;
 }
 
 size_t
-block_nonblocking_recv(SOCKET const sock, void *buf, size_t const nbytes, intc flags)
+socket_recv_impl(socket_t const sock, void *buf, size_t const nbytes, int const flags)
 {
-      WSAOVERLAPPED ov = create_wsa_overlapped();
-      size_t total = 0;
-      DWORD  nread = 0;
-      WSABUF wbuf;
+      WSAOVERLAPPED ov    = create_wsa_overlapped();
+      size_t        total = 0;
+      DWORD         nread = 0;
+      WSABUF        wbuf;
 
       goto first_iter;
 
@@ -2035,18 +2050,18 @@ block_nonblocking_recv(SOCKET const sock, void *buf, size_t const nbytes, intc f
             ::WSAResetEvent(ov.hEvent);
       first_iter:
             wbuf = {static_cast<ULONG>(nbytes - total),
-                    const_cast<char *>(static_cast<char const *>(buf) + total)};
+                    (static_cast<char *>(buf) + total)};
 
             DWORD flg = 0;
             DWORD rc  = ::WSARecv(sock, &wbuf, 1, &nread, &flg, &ov, nullptr);
 
             if (rc != 0) {
-                  if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
-                        error_exit_wsa(L"WSARecv()");
+                  if (rc == DWSOCKET_ERROR && ::WSAGetLastError() != WSA_IO_PENDING)
+                        util::win32::error_exit_wsa(L"WSARecv()");
 
                   rc = ::WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
                   if (rc == WSA_WAIT_FAILED)
-                        error_exit_wsa(L"WSAWaitForMultipleEvents()");
+                        util::win32::error_exit_wsa(L"WSAWaitForMultipleEvents()");
 
                   flg = 0;
                   rc  = ::WSAGetOverlappedResult(sock, &ov, &nread, false, &flg);
@@ -2054,7 +2069,8 @@ block_nonblocking_recv(SOCKET const sock, void *buf, size_t const nbytes, intc f
                         rc = ::WSAGetLastError();
                         if (rc == WSAECONNRESET)
                               break;
-                        error_exit_explicit(L"WSASend via WSAGetOverlappedResult", rc);
+                        util::win32::error_exit_explicit(
+                            L"WSARecv via WSAGetOverlappedResult", rc);
                   }
             }
             total += nread;
@@ -2062,17 +2078,16 @@ block_nonblocking_recv(SOCKET const sock, void *buf, size_t const nbytes, intc f
 
       ::WSACloseEvent(ov.hEvent);
       return total;
-
 }
 
 size_t
-block_nonblocking_send(SOCKET const sock, void const *buf, size_t const nbytes, int flags)
+socket_send_impl(socket_t const sock, void const *buf, size_t const nbytes, int const flags)
 {
-      WSAOVERLAPPED ov = create_wsa_overlapped();
-      size_t total = 0;
-      DWORD  nsent = 0;
-      DWORD  flg   = 0;
-      WSABUF wbuf;
+      WSAOVERLAPPED ov    = create_wsa_overlapped();
+      size_t        total = 0;
+      DWORD         nsent = 0;
+      DWORD         flg   = 0;
+      WSABUF        wbuf;
 
       goto first_iter;
 
@@ -2082,15 +2097,15 @@ block_nonblocking_send(SOCKET const sock, void const *buf, size_t const nbytes, 
             wbuf = {static_cast<ULONG>(nbytes - total),
                     const_cast<char *>(static_cast<char const *>(buf) + total)};
 
-            DWORD rc = ::WSASend(sock, &wbuf, 1, &nsent, 0, &ov, nullptr);
+            DWORD rc = ::WSASend(sock, &wbuf, 1, &nsent, flags, &ov, nullptr);
 
             if (rc != 0) {
-                  if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
-                        error_exit_wsa(L"WSASend()");
+                  if (rc == DWSOCKET_ERROR && ::WSAGetLastError() != WSA_IO_PENDING)
+                        util::win32::error_exit_wsa(L"WSASend()");
 
                   rc = ::WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
                   if (rc == WSA_WAIT_FAILED)
-                        error_exit_wsa(L"WSAWaitForMultipleEvents()");
+                        util::win32::error_exit_wsa(L"WSAWaitForMultipleEvents()");
 
                   flg = 0;
                   rc  = ::WSAGetOverlappedResult(sock, &ov, &nsent, false, &flg);
@@ -2098,7 +2113,8 @@ block_nonblocking_send(SOCKET const sock, void const *buf, size_t const nbytes, 
                         rc = ::WSAGetLastError();
                         if (rc == WSAECONNRESET)
                               break;
-                        error_exit_explicit(L"WSASend via WSAGetOverlappedResult", rc);
+                        util::win32::error_exit_explicit(
+                            L"WSASend via WSAGetOverlappedResult", rc);
                   }
             }
       } while ((total += nsent) < nbytes);
@@ -2107,54 +2123,33 @@ block_nonblocking_send(SOCKET const sock, void const *buf, size_t const nbytes, 
       return total;
 }
 
-} // namespace win32
-#endif
-
-
-/****************************************************************************************/
-
-
-#ifdef _WIN32
-
-__forceinline size_t
-socket_recv_impl(socket_t sock, void *buf, size_t nbytes, int flags)
-{
-      return win32::block_nonblocking_recv(sock, buf, nbytes, flags);
-}
-
-__forceinline size_t
-socket_send_impl(socket_t sock, void *buf, size_t nbytes, int flags)
-{
-      return win32::block_nonblocking_send(sock, buf, nbytes, flags);
-}
-
 size_t
 socket_writev_impl(socket_t const sock, iovec const *bufs, size_t const nbufs, int flags)
 {
-      WSAOVERLAPPED ov = win32::create_wsa_overlapped();
+      WSAOVERLAPPED ov = create_wsa_overlapped();
       DWORD nsent = 0;
       DWORD flg   = 0;
       DWORD rc    = ::WSASend(sock, const_cast<LPWSABUF>(bufs),
                               static_cast<DWORD>(nbufs), &nsent, 0, &ov, nullptr);
 
       if (rc != 0) {
-            if (rc == DWSOCKET_ERROR && WSAGetLastError() != WSA_IO_PENDING)
-                  win32::error_exit_wsa(L"WSASend()");
+            if (rc == DWSOCKET_ERROR && ::WSAGetLastError() != WSA_IO_PENDING)
+                  util::win32::error_exit_wsa(L"WSASend()");
 
-            rc = WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
+            rc = ::WSAWaitForMultipleEvents(1, &ov.hEvent, true, INFINITE, true);
             if (rc == WSA_WAIT_FAILED)
-                  win32::error_exit_wsa(L"WSAWaitForMultipleEvents()");
+                  util::win32::error_exit_wsa(L"WSAWaitForMultipleEvents()");
 
-            rc = WSAGetOverlappedResult(sock, &ov, &nsent, false, &flg);
+            rc = ::WSAGetOverlappedResult(sock, &ov, &nsent, false, &flg);
             if (rc == 0)
-                  win32::error_exit_wsa(L"WSASend failed via WSAGetOverlappedResult");
+                  util::win32::error_exit_wsa(L"WSASend failed via WSAGetOverlappedResult");
       }
 
-      WSACloseEvent(ov.hEvent);
+      ::WSACloseEvent(ov.hEvent);
       return nsent;
 }
 
-#else
+#else /*--------------------------------------------------------------------------------*/
 
 size_t
 socket_recv_impl(socket_t sock, void *buf, size_t nbytes, int flags)

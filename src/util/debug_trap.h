@@ -16,13 +16,11 @@
 #  define PSNIP_NDEBUG 1
 #endif
 
-#if defined(__has_builtin) && !defined(__ibmxl__)
+#if defined(__has_builtin) && !defined(__ibmxl__) && !defined _MSC_VER
 #  if __has_builtin(__builtin_debugtrap)
 #    define PSNIP_TRAP() __builtin_debugtrap()
 #  elif __has_builtin(__debugbreak)
 #    define PSNIP_TRAP() __debugbreak()
-//#  elif __has_builtin(__builtin_trap)
-//#    define PSNIP_TRAP() __builtin_trap()
 #  endif
 #endif
 #if !defined(PSNIP_TRAP)

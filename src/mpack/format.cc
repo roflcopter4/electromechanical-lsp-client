@@ -3,6 +3,10 @@
 
 #include <cstdarg>
 
+#if !defined HAVE__MALLOCA && defined _MSC_VER
+# define HAVE__MALLOCA 1
+#endif
+
 /*
  * This file very hastily converted from C. Perhaps I shouldn't have even bothered.
  */
@@ -24,10 +28,10 @@ enum encode_fmt_next_type { OWN_VALIST, OTHER_VALIST, ARG_ARRAY };
 
 #define NOP ((void)0)
 
-#define NEW_STACK(TYPE, NAME)             \
-      struct {                            \
-            unsigned ctr;                 \
-            TYPE     arr[128];            \
+#define NEW_STACK(TYPE, NAME)                 \
+      struct P99_PASTE(NAME, _s_, __LINE__) { \
+            unsigned ctr;                     \
+            TYPE     arr[128];                \
       } NAME = {}
 
 #define POP(STACK) \
@@ -45,8 +49,8 @@ enum encode_fmt_next_type { OWN_VALIST, OTHER_VALIST, ARG_ARRAY };
 #define STACK_CTR(STACK) ((STACK).ctr)
 
 #ifdef DEBUG
-#  define POP_DEBUG  POP
-#  define PUSH_DEBUG PUSH
+#  define POP_DEBUG(STACK)       POP((STACK))
+#  define PUSH_DEBUG(STACK, VAL) PUSH((STACK), (VAL))
 #else
 #  define POP_DEBUG(STACK)       NOP
 #  define PUSH_DEBUG(STACK, VAL) NOP
@@ -135,7 +139,6 @@ enum encode_fmt_next_type { OWN_VALIST, OTHER_VALIST, ARG_ARRAY };
  *
  * All errors are fatal.
  */
-int x;
 
 
 /**

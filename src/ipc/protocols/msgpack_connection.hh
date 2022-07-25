@@ -17,12 +17,7 @@ template <typename Connection>
       REQUIRES(ipc::BasicConnectionVariant<Connection>)
 class alignas(4096) connection final
     : public ipc::basic_protocol_connection<Connection, ipc::io::msgpack_wrapper>
-    //: public Connection,
-    //  public ipc::io_sync_wrapper<Connection, ipc::io::msgpack_wrapper>,
-    //  public ipc::basic_protocol_interface
 {
-      std::string key_name{};
-
     public:
       using this_type = connection<Connection>;
       using base_type = ipc::basic_protocol_interface;
@@ -72,16 +67,15 @@ class alignas(4096) connection final
             return 0;
       }
 
-      ND uv_poll_cb  poll_callback()       const override { return poll_callback_wrapper; }
-      ND uv_timer_cb timer_callback()      const override { return timer_callback_wrapper; }
-      ND uv_alloc_cb pipe_alloc_callback() const override { return alloc_callback_wrapper; }
-      ND uv_read_cb  pipe_read_callback()  const override { return read_callback_wrapper; }
-      ND void        *data()                     override { return this; }
+      ND constexpr uv_poll_cb  poll_callback()       const override { return poll_callback_wrapper; }
+      ND constexpr uv_alloc_cb pipe_alloc_callback() const override { return alloc_callback_wrapper; }
+      ND constexpr uv_read_cb  pipe_read_callback()  const override { return read_callback_wrapper; }
+      ND constexpr uv_timer_cb timer_callback()      const override { return timer_callback_wrapper; }
+      ND constexpr void const  *data()               const override { return this; }
+      ND constexpr void        *data()                     override { return this; }
 
     private:
       std::mutex mtx_{};
-
-      using base_type::want_close_;
 
       static void timer_callback_wrapper(uv_timer_t *timer)
       {
@@ -107,65 +101,48 @@ class alignas(4096) connection final
             self->true_read_callback(handle, nread, buf);
       }
 
+      //-------------------------------------------------------------------------------
+
       void
-      true_poll_callback(UNUSED uv_poll_t *handle, UNUSED int status, UNUSED int events)
+      true_poll_callback(uv_poll_t *handle, int status, int events)
       {
-            std::lock_guard<std::mutex> lock(mtx_);
+            std::lock_guard lock(mtx_);
+            size_t          avail;
+
+            util::eprint(
+                FC("real_poll_callback called for descriptor {} (tag: {}) -- ({}, {})\n"),
+                this->raw_descriptor(), this->get_key(), status, events);
 
             if (!(events & (UV_DISCONNECT | UV_READABLE))) {
                   util::eprint(FC("Unexpected event(s):  0x{:X}\n"), events);
                   return;
             }
 
-            if (events & UV_READABLE) {
-                  this->just_read();
+            if (events & UV_READABLE && (avail = this->available()) > 0) {
+                  try {
+                        this->just_read();
+                  } catch (std::exception const &e) {
+                        DUMP_EXCEPTION(e);
+                        return;
+                  }
+
                   msgpack::object_handle obj;
 
                   while (get_unpacker().next(obj))
                         util::mpack::dumper(obj.get(), std::cout);
             }
+
             if (events & UV_DISCONNECT) {
-                  util::eprint(
-                      FC("({}): Got disconnect signal, status {}, for fd {}, within "
-                         "{}\n"),
-                      this->raw_descriptor(), status, handle->u.fd,
-                      util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)));
+                  util::eprint(FC("Got disconnect signal, status {}, for fd {}, key '{}' -- ({})\n"),
+                               status, this->raw_descriptor(), this->get_key(), FUNCTION_NAME);
 
                   auto const &key_deleter = cast_deleter(handle->loop->data);
-                  uv_poll_stop(handle);
-                  key_deleter(key_name, false);
+                  this->close();
+                  key_deleter(this->get_key(), false);
             }
-
-#if 0
-            if (events & UV_DISCONNECT) {
-                  uv_poll_stop(handle);
-            } else if (events & UV_READABLE) {
-                  //if (uv_fileno((uv_handle_t const *)handle, &data.fd))
-                  //      err("uv_fileno()");
-
-                  struct userdata *user = handle->data;
-                  struct event_data data;
-                  data.fd  = (int)user->fd;
-                  data.obj = mpack_decode_stream(data.fd);
-                  talloc_steal(CTX, data.obj);
-                  handle_nvim_message(&data);
-
-                  //struct event_data *data = calloc(1, sizeof(struct event_data));
-                  //data->obj = talloc_steal(data, mpack_decode_stream(data->fd));
-                  //START_DETACHED_PTHREAD(handle_nvim_message_wrapper, data);
-                  //handle_nvim_message(data);
-            }
-#endif
       }
 
-      void
-      true_timer_callback(UU uv_timer_t *timer)
-      {
-#if 0
-            if (want_close_)
-                  uv_timer_stop(timer);
-#endif
-      }
+      //-------------------------------------------------------------------------------
 
       void
       true_alloc_callback(UU uv_handle_t *handle, size_t suggested_size, uv_buf_t *buf)
@@ -183,17 +160,14 @@ class alignas(4096) connection final
             if (nread == 0)
                   return;
             if (nread < 0) {
-                  auto const &key_deleter =
-                      *static_cast<std::function<void(std::string const &, bool)> *>(
-                          handle->loop->data);
-
+                  auto const &key_deleter = cast_deleter(handle->loop->data);
                   util::eprint(
-                      FC("({}): Got zero read (disconnect?), within {}, for {}, of type {}\n"),
-                      this->raw_descriptor(),
-                      util::demangle(typeid(std::remove_cvref_t<decltype(*this)>)),
-                      static_cast<void const *>(handle), handle->type);
-                  uv_read_stop(handle);
-                  key_deleter(key_name, false);
+                      FC("({}): Got negative read (disconnect?), for {} aka '{}, of type {}. ({} -> '{}'?)\n"),
+                      this->raw_descriptor(), static_cast<void const *>(handle),
+                      this->get_key(), handle->type, nread,
+                      uv_strerror(static_cast<int>(nread))
+                  );
+                  key_deleter(this->get_key(), false);
                   return;
             }
             util::eprint(FC("Read {} bytes...\n"), nread);
@@ -218,18 +192,18 @@ class alignas(4096) connection final
                                unpacker.nonparsed_size());
       }
 
+      //-------------------------------------------------------------------------------
+
+      void
+      true_timer_callback(UU uv_timer_t *timer)
+      {
+      }
+
       __forceinline __attribute__((__artificial__))
-      static auto const &
-      cast_deleter(void const *data_ptr)
+      static constexpr auto const &cast_deleter(void const *data_ptr)
       {
             using deleter_type = std::function<void(std::string const &, bool)>;
             return *static_cast<deleter_type const *>(data_ptr);
-      }
-
-    public:
-      void set_key(std::string key)
-      {
-            key_name = std::move(key);
       }
 };
 

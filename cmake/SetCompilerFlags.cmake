@@ -90,9 +90,16 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
          -Werror=inline-namespace-reopened-noninline
     )
 
-    set (_debug_flags 
-        -g -gdwarf-5
-    )
+    if (WIN32)
+        set (_debug_flags 
+            -g3 -gdwarf-5
+            #-g3 -gcodeview
+        )
+    else()
+        set (_debug_flags 
+            -g -gdwarf-5
+        )
+    endif()
 
     if (${CMAKE_BUILD_TYPE} STREQUAL "Release" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
         set (LTO_STR -flto=full
@@ -107,9 +114,9 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
             set (LTO_LINK_STR ${LTO_STR} -Wl,--lto-O3 -Wl,--lto-whole-program-visibility)
         endif()
 
-        set (__EXTRA_C_CXX_RELEASE_FLAGS
+        set (__EXTRA_C_CXX_RELEASE_FLAGS -Ofast
             # -fprofile-generate
-            -fprofile-use
+            # -fprofile-use
             -mllvm -march=native
             -mllvm --aggressive-ext-opt
             -mllvm --extra-vectorizer-passes
@@ -161,15 +168,8 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
 
     #------------------------------------------------------------------------------------
     if (WIN32 OR MINGW OR MSYS)
-        if (FALSE)
-            set (_EXTRA ${_EXTRA} -fansi-escape-codes -target x86_64-w64-windows -fc++-abi=microsoft)
-            string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
-                    ${CLANG_STDLIB} ${LTO_STR}
-                    -target x86_64-w64-windows -fc++-abi=microsoft
-            )
-        else()
-            set (CLANG_STDLIB -stdlib=libstdc++)
-            set (_EXTRA ${_EXTRA} -fansi-escape-codes)
+            set (CLANG_STDLIB -stdlib=libc++)
+            set (_EXTRA ${_EXTRA} -fansi-escape-codes -fms-extensions)
             string (JOIN " " CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS}"
                     ${CLANG_STDLIB}
                     ${LTO_LINK_STR}
@@ -178,8 +178,6 @@ if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
                     --unwindlib=libgcc
                     #-Wl,--pdb=
             )
-        endif()
-
     #------------------------------------------------------------------------------------
     else() # NOT WIN32
 
@@ -231,33 +229,39 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
          -Wattributes -fdiagnostics-show-option
     )
     
-    set (_EXTRA ${_EXTRA}
-        -g3
-        -gdwarf-4
-        -ggdb
-        -gstatement-frontiers
-        # -gstrict-dwarf
-        -gas-loc-support 
-        -gas-locview-support
-        # -fno-dwarf2-cfi-asm
-        -gcolumn-info
-        -ginline-points
-        -fvar-tracking
-        -fvar-tracking-assignments
-        -gvariable-location-views
-        -fdebug-types-section
-        -gdescribe-dies
-        -fconcepts-diagnostics-depth=100
-
-        # -fsanitize=undefined -fsanitize=bounds -fsanitize=bool
-        # -fsanitize=address
-        # -fsanitize-address-use-after-scope
-        # -fsanitize=thread
-        # -fsanitize=alignment
-        # -fsanitize=null -fsanitize=return
-
-        # -fanalyzer
-    )
+    if (NOT WIN32)
+        set (_EXTRA ${_EXTRA}
+            -g3
+            -gdwarf-4
+            -ggdb
+            -gstatement-frontiers
+            # -gstrict-dwarf
+            -gas-loc-support 
+            -gas-locview-support
+            # -fno-dwarf2-cfi-asm
+            -gcolumn-info
+            -ginline-points
+            -fvar-tracking
+            -fvar-tracking-assignments
+            -gvariable-location-views
+            -fdebug-types-section
+            -gdescribe-dies
+            -fconcepts-diagnostics-depth=100
+    
+            # -fsanitize=undefined -fsanitize=bounds -fsanitize=bool
+            # -fsanitize=address
+            # -fsanitize-address-use-after-scope
+            # -fsanitize=thread
+            # -fsanitize=alignment
+            # -fsanitize=null -fsanitize=return
+    
+            # -fanalyzer
+        )
+    else()
+        set (_EXTRA ${_EXTRA}
+            -g3
+        )
+    endif()
 
     set (__EXTRA_C_CXX_RELEASE_FLAGS
          -ftree-slp-vectorize
@@ -276,8 +280,8 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 
          # -fauto-profile
          # -fprofile-generate
-         -fprofile-use
-         -fprofile-correction
+         #-fprofile-use
+         #-fprofile-correction
 
          -fsched-pressure
          -fsched-spec-load

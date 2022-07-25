@@ -27,10 +27,16 @@ else()
     if (MINGW)
         list(APPEND CMAKE_REQUIRED_DEFINITIONS 
             -D__MINGW__
-            #-D__USE_MINGW_ANSI_STDIO=1
+            #-D__USE_MINGW_ANSI_STDIO=0
         )
     endif()
 endif()
+if (WIN32)
+    list(APPEND CMAKE_REQUIRED_DEFINITIONS 
+        -D_WIN32_WINNT=0x0A00
+    )
+endif()
+
 
 add_definitions(${CMAKE_REQUIRED_DEFINITIONS})
 
@@ -105,7 +111,7 @@ if (MSVC)
     find_package (Unistring)
     find_package (msgpack COMPONENTS msgpack-cxx)
 else ()
-    find_package (LibUV REQUIRED)
+    find_package (LibUV REQUIRED CONFIG)
     find_package (GLib REQUIRED)
     find_package (Unistring REQUIRED)
     find_package (msgpack REQUIRED COMPONENTS msgpack-cxx)
@@ -163,9 +169,9 @@ check_symbol_exists (fork           "${CHK_SYM_INC}"  HAVE_FORK)
 check_symbol_exists (pause          "${CHK_SYM_INC}"  HAVE_PAUSE)
 check_symbol_exists (pipe2          "${CHK_SYM_INC}"  HAVE_PIPE2)
 
-check_include_file ("afunix.h"      HAVE_AFUNIX_H)
-check_include_file ("execinfo.h"    HAVE_EXECINFO_H)
-check_include_file ("threads.h"     HAVE_THREADS_H)
+CHECK_INCLUDE_FILE (afunix.h      HAVE_AFUNIX_H -DADDRESS_FAMILY=int)
+CHECK_INCLUDE_FILE (execinfo.h    HAVE_EXECINFO_H)
+CHECK_INCLUDE_FILE (threads.h     HAVE_THREADS_H)
 
 if (NOT HAVE_SOCKETPAIR)
     CHECK_SYMBOL_EXISTS (socketpair "socket.h" HAVE_SOCKETPAIR)
@@ -188,7 +194,7 @@ add_subdirectory(src)
 
 # if (TRUE AND (NOT (WIN32 AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")))
 
-if (TRUE AND NOT (MINGW AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
+if (FALSE AND NOT (MINGW AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang"))
   target_precompile_headers(lsp-thing
       PRIVATE
       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/pch.hh>
@@ -276,10 +282,11 @@ else() # NOT MSVC
     
     if (MINGW)
         if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-            target_link_libraries(lsp-thing -lssp)
+            target_link_libraries(lsp-thing -lssp kernel32.lib)
         endif()
     else()
         set_property(TARGET lsp-thing APPEND PROPERTY LINK_FLAGS "-Wl,--as-needed")
+        target_link_libraries(lsp-thing -ldl -lrt -lbacktrace)
     endif()
     
     set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
@@ -292,9 +299,9 @@ else() # NOT MSVC
         ${GLib_PKG_LIBS}
         ${GLib_LIBRARIES}
         ${LIBUV_LIBRARIES}
+        uv
         ${UNISTRING_LIBRARY}
         -lquadmath
-        -ldl -lrt
         # ${REAL_LIBEVENT_LIBRARIES}
     )
 endif()
@@ -319,7 +326,6 @@ target_link_libraries(lsp-thing
     ${CMAKE_THREAD_LIBS_INIT}
     Threads::Threads
     Boost::boost
-    -lbacktrace
     # ${MPI_mpi_LIBRARY}
     # ${MPI_mpi_cxx_LIBRARY}
     #msgpackc

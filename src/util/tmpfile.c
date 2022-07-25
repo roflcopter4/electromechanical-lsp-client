@@ -1,4 +1,5 @@
 // ReSharper disable CppInconsistentNaming
+// ReSharper disable StringLiteralTypo
 #ifndef __USE_ISOC99
 # define __USE_ISOC99 1 //NOLINT
 #endif
@@ -22,7 +23,6 @@
 
 #ifdef _WIN32
 # define FILESEP_CHAR '\\'
-# define FILESEP_STR  "\\"
 # define CHAR_IS_FILESEP(ch) ((ch) == '\\' || (ch) == '/')
 # ifndef PATH_MAX
 #  if WDK_NTDDI_VERSION >= NTDDI_WIN10_RS1
@@ -33,7 +33,6 @@
 # endif
 #else
 # define FILESEP_CHAR '/'
-# define FILESEP_STR  "/"
 # define CHAR_IS_FILESEP(ch) ((ch) == '/')
 #endif
 
@@ -45,10 +44,10 @@ static bool  file_exists(char const *fname);
 /*======================================================================================*/
 
 size_t
-braindead_tempname(_Out_      char       *__restrict buf,
-                   _In_z_     char const *__restrict dir,
-                   _In_opt_z_ char const *__restrict prefix,
-                   _In_opt_z_ char const *__restrict suffix)
+braindead_tempname(_Out_ _Post_z_ char       *__restrict buf,
+                   _In_z_         char const *__restrict dir,
+                   _In_opt_z_     char const *__restrict prefix,
+                   _In_opt_z_     char const *__restrict suffix)
 {
       /* Microsoft's libc doesn't include stpcpy, and I can't bring myself to use strcat,
        * so this is about the best way I can think of to do this. Here's hoping the

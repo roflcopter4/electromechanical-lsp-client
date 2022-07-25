@@ -8,11 +8,12 @@
 
 #include "msgpack/dumper.hh"
 
-#include "toploop.hh"
+//#include "toploop.hh"
+#include "ipc/toploop.hh"
 
 #include "lazy.hh"
 
-#include <nlohmann/json.hpp>
+//#include <nlohmann/json.hpp>
 
 #define AUTOC auto const
 
@@ -21,77 +22,72 @@ namespace testing {
 /****************************************************************************************/
 
 
-#ifdef _WIN32
-using con_type   = ipc::connections::libuv_pipe_handle;
-//using con_type   = ipc::connections::unix_socket;
+//#define USE_PIPES
+
+#ifdef USE_PIPES
+using con_type = ipc::connections::libuv_pipe_handle;
 #else
-// using con_type   = ipc::connections::libuv_pipe_handle;
-// using con_type   = ipc::connections::unix_socket;
-using con_type   = ipc::connections::inet_ipv6_socket;
+# ifdef _WIN32
+using con_type = ipc::connections::unix_socket;
+//using con_type = ipc::connections::inet_ipv4_socket;
+# else
+using con_type = ipc::connections::unix_socket;
+//using con_type = ipc::connections::inet_ipv6_socket;
+# endif
 #endif
 using nvim_type  = ipc::protocols::Msgpack::connection<con_type>;
 using clang_type = ipc::protocols::MsJsonrpc::connection<con_type>;
 
-#define USE_PIPS
 
 
-WHAT_THE_FUCK()
+WHAT_THE_FUCK();
 NOINLINE void foo02()
 {
-      AUTOC loop = loops::main_loop::create();
+      AUTOC loop = ipc::loop::main_loop::create();
 
 #ifdef USE_PIPES
-      AUTOC nvim = nvim_type::new_unique();
-      nvim->impl().set_loop(loop->base());
-      nvim->impl().open();
-      AUTOC clangd = clang_type::new_unique();
-      clangd->impl().set_loop(loop->base());
-      clangd->impl().open();
+      AUTOC nvim      = nvim_type::new_unique();
+      auto &nvim_impl = nvim->impl_libuv();
+      nvim_impl.set_loop(loop->base());
+      nvim_impl.open();
+
+      AUTOC clangd      = clang_type::new_unique();
+      auto &clangd_impl = clangd->impl_libuv();
+      clangd->redirect_stderr_to_devnull();
+      clangd_impl.set_loop(loop->base());
+      clangd_impl.open();
 #else
-      auto nvim   = nvim_type::new_unique();
-      auto clangd = clang_type::new_unique();
-      //nvim->impl().should_connect(false);
-      //clangd->impl().use_dual_sockets(true);
-      //clangd->impl().use_dual_sockets(true);
+      auto nvim   = nvim_type::new_shared();
+      auto clangd = clang_type::new_shared();
+
+      //clangd->redirect_stderr_to_devnull();
+      auto *clangd_impl = clangd->impl_socket();
+      auto *nvim_impl = nvim->impl_socket();
+
 # ifdef _WIN32
-      clangd->impl().should_connect(false);
-      clangd->impl().open();
+      clangd_impl->should_connect(false);
+      clangd_impl->open();
+      nvim_impl->should_connect(false);
+      nvim_impl->open();
 # endif
 #endif
 
-      clangd->redirect_stderr_to_devnull();
 
 #if 1
       nvim->spawn_connection_l(
-         //R"(C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_64\python.exe)",
-         "python"
 #ifdef _WIN32
-         ".exe"
+         R"(C:\Program Files (x86)\Microsoft Visual Studio\Shared\Python39_64\python.exe)"
+#else
+         "python"
 #endif
          , "-c",
          R"(
 import msgpack, sys, time
 sys.stdout.mode = 'wb'
-sys.stdout.buffer.write(msgpack.packb([0.1231, 5/3, 10/3, 9/3, {'a': '\r\n'}, True, 'l'*64, '23', ~0, -1, 18446744073709551615, []]))
-sys.stdout.buffer.write(msgpack.packb([0.1231, 10, [[], [], {}], 10]))
+sys.stdout.buffer.write(msgpack.packb([0.1231, 5/3, 10/3, 9/3, {'a': '\\r\\n'}, True, 'l'*64, '23', ~0, -1, 18446744073709551615, []]))
+sys.stdout.buffer.write(msgpack.packb([61.27248, 1E100, 10, [[], [], {'penis': 12345, 'else': [1,2,3,4,5,6,7,8,9], 'turd': [1,5,4]}], ['a','b','c',[1,2,3]], 10]))
 sys.stdout.buffer.flush();
 time.sleep(1)
-)"
-      );
-#endif
-
-#if 0
-      clangd->spawn_connection_l(
-         "python.exe",
-         "-c",
-         R"(
-import json, sys, time
-x = json.dumps([0.1231, 5/3, 10/3, 9/3, {'a': 7}, True, 43, '23', ~0, -1, 18446744073709551615, []]).encode('utf8')
-sys.stdout.buffer.write(b'Content-Length: %d\r\n\r\n%s' % (len(x), x))
-x = json.dumps([0.1231, '\r\n', 10, [[], [], {}], 10]).encode('utf8')
-sys.stdout.buffer.write(b'Content-Length: %d\r\n\r\n%s' % (len(x), x))
-sys.stdout.flush()
-time.sleep(20)
 )"
       );
 #endif
@@ -99,29 +95,29 @@ time.sleep(20)
       clangd->spawn_connection_l("clangd", "--log=verbose");
 
 #ifdef USE_PIPES
-      //loop->use_pipe_handle("nvim", nvim->impl().get_uv_handle(), nvim.get());
-      loop->use_pipe_handle  ("clangd", clangd);
+      loop->use_pipe_handle("nvim", nvim_impl.get_uv_handle(), nvim.get());
+      loop->start_pipe_handle("nvim", nvim);
+
+      loop->use_pipe_handle("clangd", clangd_impl.get_uv_handle(), clangd.get());
       loop->start_pipe_handle("clangd", clangd);
-      loop->use_pipe_handle  ("nvim",   nvim);
-      loop->start_pipe_handle("nvim",   nvim);
-      //assert (nvim->impl().get_uv_handle()->type == UV_NAMED_PIPE);
 #else
       //ResumeThread(nvim->pid().hThread);
       //nvim->impl().accept();
-      //loop->open_poll_handle ("nvim", nvim);
-      //loop->start_poll_handle("nvim", nvim);
 
 # ifdef _WIN32
       ResumeThread(clangd->pid().hThread);
-      clangd->impl().accept();
+      clangd_impl->accept();
+      ResumeThread(nvim->pid().hThread);
+      nvim_impl->accept();
 # endif
-      loop->open_poll_handle ("clangd", clangd);
-      loop->start_poll_handle("clangd", clangd);
+      {
+            //auto &iface = dynamic_cast<ipc::basic_protocol_interface &>(*clangd);
+            loop->open_poll_handle ("clangd", clangd.get());
+            loop->start_poll_handle("clangd", clangd.get());
+            loop->open_poll_handle ("nvim", nvim.get());
+            loop->start_poll_handle("nvim", nvim.get());
+      }
 #endif
-
-      //std::this_thread::sleep_for(2s);
-      //auto thrd = std::thread{[&loop]() { loop->loop_start(); }};
-      //std::this_thread::sleep_for(2s);
 
       loop->loop_start_async();
 
@@ -139,7 +135,7 @@ time.sleep(20)
             auto wrap = clangd->get_new_packer();
 
             wrap().add_member("jsonrpc", "2.0");
-            wrap().add_member("method", "textDocument/didOpen"sv);
+            wrap().add_member("method", "textDocument/didOpen");
             wrap().set_member("params");
             wrap().set_member("textDocument");
             wrap().add_member("uri", fname_uri);
@@ -149,6 +145,10 @@ time.sleep(20)
 
             clangd->write_object(wrap);
             //clangd->wait();
+      }
+      {
+            ::LARGE_INTEGER x = {.QuadPart = 0};
+            ::GetFileSizeEx(reinterpret_cast<::HANDLE>(clangd->raw_descriptor()), &x);
       }
       {
             auto wrap = clangd->get_new_packer();
@@ -163,9 +163,10 @@ time.sleep(20)
             //clangd->wait();
       }
 
-      std::this_thread::sleep_for(5s);
+      std::this_thread::sleep_for(15s);
+      clangd->close();
+      //nvim->close();
       loop->loop_stop();
-      //loop->wait();
       //thrd.join();
 }
 
@@ -384,6 +385,7 @@ NOINLINE void foo03()
 #endif
 
 
+#if 0
 NOINLINE static void donloh()
 {
 #define O(...) nlohmann::json::object( {__VA_ARGS__} ) //NOLINT(cppcoreguidelines-macro-usage)
@@ -404,6 +406,7 @@ NOINLINE static void donloh()
 
 #undef O
 }
+#endif
 
 NOINLINE static void dorapid()
 {
@@ -459,27 +462,19 @@ NOINLINE static void dodumbrapid()
 
 NOINLINE void foo04()
 {
-      donloh();
+      //donloh();
       dorapid();
       dodumbrapid();
 }
 
 
-NOINLINE void foo10(char const *addr)
+NOINLINE void foo10(LPCWSTR module_name, LPCSTR proc_name)
 {
-      using con_type   = ipc::connections::inet_socket;
-      using proto_type = ipc::protocols::Msgpack::connection<con_type>;
-
-      auto nvim  = proto_type::new_shared();
-      auto &impl = dynamic_cast<con_type::connection_impl_type &>(nvim->impl());
-      impl.should_open_listener(false);
-      impl.resolve(addr);
-      impl.connect();
-
-      util::eprint(FC("Connected to {}!\n"), addr);
-      nvim->close();
+      using proc_type = HRESULT (WINAPI *)(HANDLE, PCWSTR);
+      auto *SetThreadDescription_p = util::win32::get_proc_address_module<proc_type>(
+          module_name, proc_name);
+      (void)SetThreadDescription_p(::GetCurrentThread(), L"foo");
 }
-
 
 /****************************************************************************************/
 } // namespace testing

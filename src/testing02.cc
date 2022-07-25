@@ -7,7 +7,6 @@
 #include "ipc/rpc/neovim.hh"
 
 #include "lazy.hh"
-#include "toploop.hh"
 
 #if 0
 // clang-format off
@@ -60,10 +59,13 @@ class executor
 /****************************************************************************************/
 
 
-using connection_type = ipc::protocols::MsJsonrpc::connection<
-    ipc::detail::impl::spawner_connection<ipc::detail::unix_socket_connection_impl>>;
+using base_con_type   = ipc::connections::unix_socket;
+using connection_type = ipc::protocols::MsJsonrpc::connection<base_con_type>;
 
 
+/**
+ * \brief asio test
+ */
 NOINLINE void foo05()
 {
       auto clangd = std::make_unique<connection_type>();

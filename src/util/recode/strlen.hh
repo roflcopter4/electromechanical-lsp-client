@@ -87,8 +87,6 @@ ND size_t strlen(T str) noexcept
 {
       return impl::strlen(str);
 }
-//ND size_t strlen(std::remove_pointer_t<std::remove_cv_t<T>> const *str) noexcept;
-
 
 
 /****************************************************************************************/

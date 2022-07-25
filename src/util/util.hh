@@ -27,7 +27,7 @@ typedef std::string_view      sview; //NOLINT
 
 
 namespace constants {
-extern const bool coloured_stderr;
+extern bool const coloured_stderr;
 } // namespace constants
 
 
@@ -36,17 +36,10 @@ extern hacks::path get_temporary_filename(char const *__restrict prefix = nullpt
                                           char const *__restrict suffix = nullptr);
 
 
-extern std::string slurp_file(char const *fname, bool binary = false);
-
-inline std::string slurp_file(std::string const &fname,  bool const binary = false) {
-      return slurp_file(fname.c_str(), binary);
-}
-inline std::string slurp_file(hacks::path const &fname,  bool const binary = false) {
-      return slurp_file(fname.string().c_str(), binary);
-}
-inline std::string slurp_file(hacks::sview const &fname, bool const binary = false) {
-      return slurp_file(fname.data(), binary);
-}
+extern std::string slurp_file(char const         *fname, bool binary = false);
+extern std::string slurp_file(std::string const  &fname, bool binary = false);
+extern std::string slurp_file(hacks::path const  &fname, bool binary = false);
+extern std::string slurp_file(hacks::sview const &fname, bool binary = false);
 
 
 ND extern uintmax_t   xatoi(char const *number, bool strict = true);
@@ -63,7 +56,7 @@ ND extern std::string demangle(std::type_info const &id);
  * about possible null pointers. So I'll make an exception. Damn it Microsoft. */
 template <typename T>
 ND __forceinline T *
-xmalloc(size_t const size = sizeof(T))  noexcept(false)
+xmalloc(size_t const size = sizeof(T))
 {
       //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = malloc(size);
@@ -75,7 +68,7 @@ xmalloc(size_t const size = sizeof(T))  noexcept(false)
 template <typename T>
 ND __forceinline T *
 xcalloc(size_t const nmemb = SIZE_C(1),
-        size_t const size  = sizeof(T))  noexcept(false)
+        size_t const size  = sizeof(T))
 {
       //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
       void *ret = calloc(nmemb, size);
@@ -126,13 +119,13 @@ extern int waitpid(detail::procinfo_t const &pid);
 
 extern    void   close_descriptor(HANDLE &fd) noexcept;
 extern    void   close_descriptor(SOCKET &fd) noexcept;
-ND extern size_t available_in_fd (SOCKET s) noexcept(false);
-ND extern size_t available_in_fd (HANDLE s) noexcept(false);
+ND extern size_t available_in_fd (SOCKET s);
+ND extern size_t available_in_fd (HANDLE s);
 extern    int    waitpid(HANDLE pid);
 
 #endif
 
-ND extern size_t available_in_fd(int s) noexcept(false);
+ND extern size_t available_in_fd(int s);
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -165,7 +158,7 @@ strlcpy(_Out_z_cap_(N) char (&dst)[N],
 {
 #if defined HAVE_STRLCPY
       return ::strlcpy(dst, src, N);
-#elif defined HAVE_STRCPY_S && 0  // Apparently strcpy_s doesn't work like strlcpy
+#elif defined HAVE_STRCPY_S && false  // Apparently strcpy_s doesn't work like strlcpy
       return strcpy_s(dst, src);
 #else
       return ::emlsp_strlcpy(dst, src, N);
@@ -192,26 +185,97 @@ fwritel(Elem const (&buffer)[N], FILE *dst)
 
 
 template <typename S, typename... Args>
-    REQUIRES (fmt::detail::is_compiled_string_c<S>)
-constexpr void
+    REQUIRES (concepts::is_compiled_string_c<S>)
+void
 eprint(S const &format_str, Args const &...args)
 {
-      ::flockfile(stderr);
+#ifdef _WIN32
+      //_lock_file(stderr);
+#else
+      flockfile(stderr);
+#endif
       if (constants::coloured_stderr)
+            //fwritel("\033[38;2;255;255;0m" MAIN_PROJECT_NAME " (warning):  \033[0m"
+            //        "\033[38;2;255;182;193m", stderr);
             fmt::print(stderr, FC("{}\033[38;2;255;182;193m"),
                        styled(MAIN_PROJECT_NAME " (warning):  ",
                               fg(fmt::color::yellow) | fmt::emphasis::bold));
       else
             fwritel(MAIN_PROJECT_NAME " (warning):  ", stderr);
-      fmt::print(stderr, format_str, std::forward<Args const &>(args)...);
+      fmt::print(stderr, format_str, std::forward<Args const &&>(args)...);
       if (constants::coloured_stderr)
             fwritel("\033[0m", stderr);
       ::fflush(stderr);
-      ::funlockfile(stderr);
+#ifdef _WIN32
+      //_unlock_file(stderr);
+#else
+      funlockfile(stderr);
+#endif
 }
 
 
-/*--------------------------------------------------------------------------------------*/
+/*======================================================================================*/
+
+
+__forceinline constexpr void
+timespec_add(timespec       *const __restrict lval,
+             timespec const *const __restrict rval)
+{
+      lval->tv_nsec += rval->tv_nsec;
+      lval->tv_sec  += rval->tv_sec;
+
+      if (lval->tv_nsec >= INT64_C(1000000000)) {
+            ++lval->tv_sec;
+            lval->tv_nsec -= INT64_C(1000000000);
+      }
+}
+
+
+template <typename Rep, typename Period>
+__forceinline constexpr timespec
+duration_to_timespec(std::chrono::duration<Rep, Period> const &dur)
+{
+      timespec dur_ts;  //NOLINT(cppcoreguidelines-pro-type-member-init)
+      auto const secs  = std::chrono::duration_cast<std::chrono::seconds>(dur);
+      auto const nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(dur) -
+                         std::chrono::duration_cast<std::chrono::nanoseconds>(secs);
+      dur_ts.tv_sec  = secs.count();
+      dur_ts.tv_nsec = nsecs.count();
+      return dur_ts;
+}
+
+
+__forceinline constexpr std::chrono::nanoseconds
+timespec_to_duration(timespec const *dur_ts)
+{
+      return std::chrono::seconds(dur_ts->tv_sec) +
+             std::chrono::nanoseconds(dur_ts->tv_nsec);
+}
+
+
+constexpr auto &operator+=(timespec &lval, timespec const &rval)
+{
+      timespec_add(&lval, &rval);
+      return lval;
+}
+
+constexpr auto &operator+=(timespec &lval, timespec const *const rval)
+{
+      timespec_add(&lval, rval);
+      return lval;
+}
+
+template <typename Rep, typename Period>
+constexpr auto &operator+=(timespec &lval, std::chrono::duration<Rep, Period> const &rval)
+{
+      auto const ts = duration_to_timespec(rval);
+      timespec_add(&lval, &ts);
+      return lval;
+}
+
+
+/*======================================================================================*/
+
 
 namespace ipc {
 
@@ -231,34 +295,55 @@ extern ::addrinfo *resolve_addr(char const *server, char const *port, int type =
 #ifdef _WIN32
 namespace win32 {
 
-NORETURN void error_exit_explicit(wchar_t const *msg, DWORD errval);
-NORETURN void error_exit_message (wchar_t const *msg);
-NORETURN void error_exit_explicit(char const *msg, DWORD errval);
-NORETURN void error_exit_message (char const *msg);
+void warning_box_explicit(_In_z_ wchar_t const *msg, _In_ DWORD errval);
+void warning_box_message (_In_z_ wchar_t const *msg);
+void warning_box_explicit(_In_z_ char const *msg, _In_ DWORD errval);
+void warning_box_message (_In_z_ char const *msg);
 
-NORETURN inline void error_exit        (wchar_t const *msg)      { error_exit_explicit(msg,         GetLastError());    }
-NORETURN inline void error_exit_wsa    (wchar_t const *msg)      { error_exit_explicit(msg,         WSAGetLastError()); }
-NORETURN inline void error_exit_errno  (wchar_t const *msg)      { error_exit_explicit(msg,         errno);             }
-NORETURN inline void error_exit        (std::wstring const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
-NORETURN inline void error_exit_wsa    (std::wstring const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
-NORETURN inline void error_exit_errno  (std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno);             }
-NORETURN inline void error_exit_message(std::wstring const &msg) { error_exit_message (msg.c_str());                    }
+NORETURN void error_exit_explicit(_In_z_ wchar_t const *msg, _In_ DWORD errval);
+NORETURN void error_exit_message (_In_z_ wchar_t const *msg);
+NORETURN void error_exit_explicit(_In_z_ char const *msg, _In_ DWORD errval);
+NORETURN void error_exit_message (_In_z_ char const *msg);
 
-NORETURN inline void error_exit        (char const *msg)        { error_exit_explicit(msg,         GetLastError());    }
-NORETURN inline void error_exit_wsa    (char const *msg)        { error_exit_explicit(msg,         WSAGetLastError()); }
-NORETURN inline void error_exit_errno  (char const *msg)        { error_exit_explicit(msg,         errno);             }
-NORETURN inline void error_exit        (std::string const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
-NORETURN inline void error_exit_wsa    (std::string const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
-NORETURN inline void error_exit_errno  (std::string const &msg) { error_exit_explicit(msg.c_str(), errno);             }
-NORETURN inline void error_exit_message(std::string const &msg) { error_exit_message (msg.c_str());                    }
+NORETURN __forceinline void error_exit        (wchar_t const *msg)      { error_exit_explicit(msg,         GetLastError());    }
+NORETURN __forceinline void error_exit_wsa    (wchar_t const *msg)      { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN __forceinline void error_exit_errno  (wchar_t const *msg)      { error_exit_explicit(msg,         errno);             }
+NORETURN __forceinline void error_exit        (std::wstring const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN __forceinline void error_exit_wsa    (std::wstring const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN __forceinline void error_exit_errno  (std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN __forceinline void error_exit_message(std::wstring const &msg) { error_exit_message (msg.c_str());                    }
+
+NORETURN __forceinline void error_exit        (char const *msg)        { error_exit_explicit(msg,         GetLastError());    }
+NORETURN __forceinline void error_exit_wsa    (char const *msg)        { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN __forceinline void error_exit_errno  (char const *msg)        { error_exit_explicit(msg,         errno);             }
+NORETURN __forceinline void error_exit        (std::string const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN __forceinline void error_exit_wsa    (std::string const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN __forceinline void error_exit_errno  (std::string const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN __forceinline void error_exit_message(std::string const &msg) { error_exit_message (msg.c_str());                    }
 
 extern BOOL WINAPI myCtrlHandler(DWORD type);
+
+template <typename Proc = ::FARPROC>
+Proc get_proc_address_module(LPCWSTR const module_name, LPCSTR const proc_name)
+{
+      auto *mod_hand = ::GetModuleHandleW(module_name);
+      if (!mod_hand || mod_hand == INVALID_HANDLE_VALUE)
+            error_exit(L"GetModuleHandleW()");
+      // NOLINTNEXTLINE(clang-diagnostic-cast-function-type)
+      auto *routine = reinterpret_cast<Proc>(::GetProcAddress(mod_hand, proc_name));
+      if (!routine)
+            error_exit(L"GetProcAddress()");
+      return routine;
+}
 
 } // namespace win32
 #endif
 
 /****************************************************************************************/
 } // namespace util
+
+using util::operator+=;
+
 } // namespace emlsp
 
 

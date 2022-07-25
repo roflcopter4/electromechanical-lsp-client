@@ -35,21 +35,6 @@ class msgpack_packer
       using marshaller_type = msgpack::packer<buffer_type>;
 
     protected:
-#if 0
-      friend msgpack_wrapper<ipc::connections::pipe>;
-      friend msgpack_wrapper<ipc::connections::std_streams>;
-      friend msgpack_wrapper<ipc::connections::unix_socket>;
-      friend msgpack_wrapper<ipc::connections::inet_ipv4_socket>;
-      friend msgpack_wrapper<ipc::connections::inet_ipv6_socket>;
-      friend msgpack_wrapper<ipc::connections::inet_socket>;
-      friend msgpack_wrapper<ipc::connections::libuv_pipe_handle>;
-#if defined _WIN32
-      friend msgpack_wrapper<ipc::connections::win32_named_pipe>;
-      friend msgpack_wrapper<ipc::connections::win32_handle_pipe>;
-#else
-      friend msgpack_wrapper<ipc::connections::socketpair>;
-#endif
-#endif
       friend msgpack_wrapper<Connection>;
 
       msgpack_packer *get_if_available()
@@ -110,7 +95,7 @@ class msgpack_wrapper : public basic_wrapper<Connection,
 
     /*----------------------------------------------------------------------------------*/
 
-      explicit msgpack_wrapper(connection_type *con) : base_type(con)
+      explicit msgpack_wrapper(connection_type &con) : base_type(con)
       {
             this->unpacker_.m_user_data = this;
             this->unpacker_.reserve_buffer(read_buffer_size);
@@ -125,21 +110,17 @@ class msgpack_wrapper : public basic_wrapper<Connection,
 
     /*----------------------------------------------------------------------------------*/
 
-    private:
-      using base_type::unpacker_;
-      using base_type::con_;
-
-    public:
       using base_type::write_object;
 
       size_t just_read()
       {
             size_t total = 0;
-            while (con_->available() > 0) {
-                  if (unpacker_.buffer_capacity() == 0)
-                        unpacker_.reserve_buffer();
-                  size_t const nread = con_->raw_read(unpacker_.buffer(), unpacker_.buffer_capacity(), 0);
-                  unpacker_.buffer_consumed(nread);
+            while (this->con().available() > 0) {
+                  if (this->unpacker_.buffer_capacity() == 0)
+                        this->unpacker_.reserve_buffer();
+                  size_t const nread = this->con().raw_read(
+                      this->unpacker_.buffer(), this->unpacker_.buffer_capacity(), 0);
+                  this->unpacker_.buffer_consumed(nread);
                   total += nread;
             }
             return total;
@@ -149,21 +130,22 @@ class msgpack_wrapper : public basic_wrapper<Connection,
       msgpack::object_handle read_object() override
       {
             assert(0 && "I told you not to use this function.");
+            PSNIP_TRAP();
             std::lock_guard lock{this->read_mtx_};
 
             auto  obj = msgpack::object_handle{};
-            AUTOC nread = con_->raw_read(unpacker_.buffer(), unpacker_.buffer_capacity(), 0);
-            unpacker_.buffer_consumed(nread);
+            AUTOC nread = this->con().raw_read(this->unpacker_.buffer(), this->unpacker_.buffer_capacity(), 0);
+            this->unpacker_.buffer_consumed(nread);
 
 #if 0
-            while (!unpacker_.next(obj)) {
-                  if (unpacker_.buffer_capacity() == 0)
-                        unpacker_.reserve_buffer();
+            while (!this->unpacker_.next(obj)) {
+                  if (this->unpacker_.buffer_capacity() == 0)
+                        this->unpacker_.reserve_buffer();
 
                   do {
                         // errno = 0;
-                        nread = con_->raw_read(unpacker_.buffer(),
-                                               unpacker_.buffer_capacity(), 0);
+                        nread = this->con().raw_read(this->unpacker_.buffer(),
+                                               this->unpacker_.buffer_capacity(), 0);
                         if (nread == (-1) || (errno && errno != EAGAIN)) {
                               perror("uhhhhh");
                               fflush(stdout);
@@ -172,12 +154,12 @@ class msgpack_wrapper : public basic_wrapper<Connection,
                         }
                   } while (nread <= 0);
 
-                  unpacker_.buffer_consumed(nread);
+                  this->unpacker_.buffer_consumed(nread);
             }
 
-            if (unpacker_.nonparsed_size() > 0)
+            if (this->unpacker_.nonparsed_size() > 0)
                   fmt::print(stderr, FC("Warning: {} bytes still unparsed.\n"),
-                             unpacker_.nonparsed_size());
+                             this->unpacker_.nonparsed_size());
 #endif
 
             return obj;
@@ -192,9 +174,9 @@ class msgpack_wrapper : public basic_wrapper<Connection,
             for (unsigned i = 0; i < vec.vector_size(); ++i)
                   winvec[i] = WSABUF{static_cast<DWORD>(vec.vector()[i].iov_len),
                                      static_cast<char *>(vec.vector()[i].iov_base)};
-            return con_->impl().writev(winvec.get(), vec.vector_size());
+            return this->con().raw_writev(winvec.get(), vec.vector_size());
 #else
-            return con_->impl().writev(vec.vector(), vec.vector_size());
+            return this->con().raw_writev(vec.vector(), vec.vector_size());
 #endif
       }
 
@@ -217,7 +199,7 @@ class msgpack_wrapper : public basic_wrapper<Connection,
 
       auto &get_unpacker() &noexcept
       {
-            return unpacker_;
+            return this->unpacker_;
       }
 };
 
