@@ -6,19 +6,6 @@
 #  include "config.h"
 #endif
 
-#ifdef DEBUG
-# define _LIBCPP_DEBUG_LEVEL 2
-# define _GLIBCXX_ASSERTIONS 1
-// # define _GLIBCXX_PARALLEL 1
-// # define _GLIBCXX_PARALLEL_ASSERTIONS 1
-# undef NDEBUG
-#endif
-
-#define __PTW32_CLEANUP_C 1
-//#define __PTW32_CLEANUP_CXX 1
-
-// #include "all_the_clang.hh"
-
 #include <algorithm>
 #include <any>
 #include <array>
@@ -144,20 +131,20 @@
 #include <fmt/ranges.h>
 #include <fmt/xchar.h>
 
-#include "util/macros.h"
-#include "util/types.h"
+#include "util/c/macros.h"
+#include "util/c/types.h"
 #include "util/util.hh"
 
-#include "rapid.hh"
+#include "json/rapid.hh"
 
 #include <msgpack.hpp>
 #include <uv.h>
 
-#include <glib.h> //NOLINT
-#include <gio/gio.h>
+//#include <glib.h> //NOLINT
+//#include <gio/gio.h>
 // clang-format on
 
-#include "util/my_glib.hh"
+//#include "util/my_glib.hh"
 
 #if 0
 #ifdef NDEBUG
@@ -175,8 +162,9 @@
 #endif
 #endif
 
-#ifdef __MINGW64__
-extern "C" __declspec(dllimport) HRESULT __stdcall
+#if defined __MINGW64__ || defined __MINGW32__
+extern "C" __declspec(dllimport)
+HRESULT __stdcall
 SetThreadDescription (
     _In_ HANDLE hThread,
     _In_ PCWSTR lpThreadDescription

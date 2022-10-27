@@ -1,5 +1,5 @@
+﻿// ReSharper disable CppClangTidyConcurrencyMtUnsafe
 #include "Common.hh"
-#include "ipc/connection_impl.hh"
 
 #if defined _WIN32 && defined _MSC_VER
 //# include <Shlwapi.h>
@@ -17,15 +17,10 @@ inline namespace emlsp {
   NOINLINE void foo05();
   NOINLINE void foo06();
   NOINLINE void foo10(char const *);
+  NOINLINE void foo20();
+  NOINLINE int  foo100();
+  NOINLINE void foo101();
  } // namespace testing
-
- namespace window1 {
-  NOINLINE extern int windowmain(HINSTANCE hInst);
- } // namespace window1
- namespace window2 {
-  NOINLINE extern int windowmain(HINSTANCE hInst);
- } // namespace window2
-
 } // namespace emlsp
 
 /****************************************************************************************/
@@ -46,8 +41,7 @@ static void init_locale() noexcept
 #endif
 
 #ifndef __MINGW64__
-      std::locale const locale(locale_name);
-      std::locale::global(locale);
+      std::locale::global(std::locale{locale_name});
 #endif
 }
 
@@ -78,7 +72,7 @@ static void init_crt_debugging()
       _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDOUT);
 
       int const flag = _CrtSetDbgFlag(_CRTDBG_REPORT_FLAG);
-      _CrtSetDbgFlag(flag | _CRTDBG_DELAY_FREE_MEM_DF | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+      _CrtSetDbgFlag(flag | _CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
       //VLDRefreshModules();
@@ -90,18 +84,17 @@ static void init_crt_debugging()
 NOINLINE static void
 call_initializers(UU int &argc, UU char **&argv)
 {
+      init_crt_debugging();
       init_locale();
-      //init_crt_debugging();
-      // MPI::Init(argc, argv);
 
 #ifdef _WIN32
       init_wsa();
-      atexit([] { (void)::WSACleanup(); });
-      if (_setmode(0, _O_BINARY) == (-1))
+      //std::atexit(reinterpret_cast<void (*)()>(::WSACleanup));
+      if (::_setmode(0, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(0)");
-      if (_setmode(1, _O_BINARY) == (-1))
+      if (::_setmode(1, _O_BINARY) == (-1))
             util::win32::error_exit(L"_setmode(1)");
-      if (_setmode(2, _O_TEXT) == (-1))
+      if (::_setmode(2, _O_TEXT) == (-1))
             util::win32::error_exit(L"_setmode(2)");
       if (!::SetConsoleCtrlHandler(&util::win32::myCtrlHandler, true))
             util::win32::error_exit(L"SetConsoleCtrlHandler");
@@ -120,6 +113,8 @@ do_main(int argc, char *argv[])
       if (argc > 2)
             errx_nothrow("ERROR: Too many parameters.\n");
 
+      testing::foo101();
+
       // util::win32::warning_box_explicit("Die in fire:", WSAENOTSOCK);
       // util::win32::warning_box_explicit("Die in fire:", WSAECONNREFUSED);
       // util::win32::warning_box_explicit("Die in fire:", WSAEADDRINUSE);
@@ -130,6 +125,8 @@ do_main(int argc, char *argv[])
       // testing::foo05();
       // testing::foo06();
       // testing::foo10(argv[1]);
+
+      //testing::foo20();
 
       return 0;
 }

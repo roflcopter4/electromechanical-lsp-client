@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Common.hh"
-#include "util/exceptions.hh"
 
 #include <msgpack.hpp>
 

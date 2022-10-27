@@ -8,7 +8,7 @@
 #endif
 
 #include "Common.hh"
-#include "util/c_util.h"
+#include "util/c/c_util.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -36,7 +36,7 @@
 # define CHAR_IS_FILESEP(ch) ((ch) == '/')
 #endif
 
-#define RAND() cxx_random_engine_get_random_val_32()
+#define RAND() emlsp_cxx_random_engine_get_random_val_32()
 
 static char *get_random_chars(char *buf);
 static bool  file_exists(char const *fname);

@@ -326,10 +326,22 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 #-- MSVC --
 elseif (MSVC)
 
-   # Allow use of "deprecated" function names in MSVC (read/write)
-   add_definitions(-D_CRT_NONSTDC_NO_DEPRECATE)
-   set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Zc:preprocessor /std:c17")
-   set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:preprocessor /Zc:__cplusplus /std:c++20")
+   set (_cflags_common "/nologo /Zc:preprocessor /Zc:inline /Zc:forScope /MP /utf-8 /favor:INTEL64 /Zi /arch:AVX512 /diagnostics:caret /I${fmt_INCLUDE_DIRECTORIES}")
+   set (CMAKE_C_FLAGS   "${_cflags_common} /std:c17 ${CMAKE_C_FLAGS}")
+   set (CMAKE_CXX_FLAGS "${_cflags_common} /std:c++20 /Zc:__cplusplus /permissive- /EHsc ${CMAKE_CXX_FLAGS}")
+   unset (_cflags_common)
+   
+   set(CMAKE_C_FLAGS_DEBUG     "/MDd /D_DEBUG /Gy /GS /Ob0 /Od /RTC1 ${CMAKE_C_FLAGS_DEBUG}"     CACHE STRING "")
+   set(CMAKE_CXX_FLAGS_DEBUG   "/MDd /D_DEBUG /Gy /GS /Ob0 /Od /RTC1 ${CMAKE_CXX_FLAGS_DEBUG}"   CACHE STRING "")
+   set(CMAKE_C_FLAGS_RELEASE   "/MD  /DNDEBUG /Gy /O2 /Oi /GL /GS-   ${CMAKE_C_FLAGS_RELEASE}"   CACHE STRING "")
+   set(CMAKE_CXX_FLAGS_RELEASE "/MD  /DNDEBUG /Gy /O2 /Oi /GL /GS-   ${CMAKE_CXX_FLAGS_RELEASE}" CACHE STRING "")
+   
+   string(APPEND CMAKE_STATIC_LINKER_FLAGS_RELEASE_INIT " /nologo ")
+   set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "/nologo /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG ${CMAKE_SHARED_LINKER_FLAGS_RELEASE}" CACHE STRING "")
+   set(CMAKE_EXE_LINKER_FLAGS_RELEASE    "/nologo /DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF /LTCG ${CMAKE_EXE_LINKER_FLAGS_RELEASE}"    CACHE STRING "")
+   
+   set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "/nologo /DEBUG ${CMAKE_SHARED_LINKER_FLAGS_DEBUG}" CACHE STRING "")
+   set(CMAKE_EXE_LINKER_FLAGS_DEBUG    "/nologo /DEBUG ${CMAKE_EXE_LINKER_FLAGS_DEBUG}"    CACHE STRING "")
 
 endif()
 
@@ -345,8 +357,7 @@ if (MINGW)
 endif()
 
 if (MSVC)
-    set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP /utf-8")
-    set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP /utf-8")
+
 else()
     list(APPEND CMAKE_C_FLAGS_DEBUG
         ${BASE} ${CFLAGS_DEBUG_COMMON} ${WARNS} ${_EXTRA} ${CMAKE_C_FLAGS} ${LTO_STR})
@@ -368,10 +379,6 @@ else()
 
     list(APPEND CMAKE_C_FLAGS ${CMAKE_C_FLAGS} ${C_ONLY_WARNS})
     list(JOIN CMAKE_C_FLAGS " " CMAKE_C_FLAGS)
-
-    string(TOUPPER ${CMAKE_BUILD_TYPE} _upper_CMAKE_BUILD_TYPE)
-    set (ALL_THE_C_FLAGS   ${CMAKE_C_FLAGS_${_upper_CMAKE_BUILD_TYPE}})
-    set (ALL_THE_CXX_FLAGS ${CMAKE_CXX_FLAGS_${_upper_CMAKE_BUILD_TYPE}})
 
     list(JOIN CMAKE_C_FLAGS_DEBUG            " " CMAKE_C_FLAGS_DEBUG            )
     list(JOIN CMAKE_C_FLAGS_RELEASE          " " CMAKE_C_FLAGS_RELEASE          )

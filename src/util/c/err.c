@@ -1,7 +1,9 @@
 // ReSharper disable CppInconsistentNaming
-#include "myerr.h"
 
-#include "c_util.h"
+// clang-tidy off
+#include "util/c/myerr.h"
+#include "util/c/c_util.h"
+// clang-tidy on
 
 #include <glib.h>
 
@@ -42,8 +44,11 @@
 
 static CRITICAL_SECTION error_write_mtx;
 
-INITIALIZER_HACK(mutex_init)
+INITIALIZER_HACK(err_c_mutex_init)
 {
+      fprintf(stderr, "Hello from function %s\n", FUNCTION_NAME);
+      //DWORD nbytes;
+      //WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, sizeof(msg) - 1, &nbytes, NULL); 
       InitializeCriticalSection(&error_write_mtx);
 }
 
@@ -126,13 +131,25 @@ emlsp_my_err_(_In_ bool const print_err,
       else
             putc('\n', stderr);
 
+#if 0
+#ifdef _MSC_VER
+      __try {
+#endif
       g_on_error_stack_trace("");
+#ifdef _MSC_VER
+      } __except (EXCEPTION_EXECUTE_HANDLER) {}
+#endif
+#endif
+      if (e)
+            emlsp_win32_dump_backtrace(stderr);
 
       fflush(stderr);
       UNLOCK_FILE(stderr);
       dumb_wrapper_mutex_unlock(&error_write_mtx);
 
-      abort();
+      if (e)
+            abort();
+      exit(0);
 }
 
 
@@ -163,7 +180,7 @@ emlsp_my_warn_(_In_ bool const print_err,
       if (print_err)
             dump_error(e);
       else
-            putc('\n', stderr);
+            fputc('\n', stderr);
 
       fflush(stderr);
       UNLOCK_FILE(stderr);

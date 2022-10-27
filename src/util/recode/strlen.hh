@@ -12,14 +12,8 @@ namespace util::unistring {
 
 namespace impl {
 
-#if 0
-#define _UNISTR_STRLEN(Type)  \
-  template <>                 \
-  ND __forceinline size_t strlen<Type const *>(Type const *str) noexcept
-#endif
-
 #define _UNISTR_STRLEN(TYPE)  \
-  ND inline size_t strlen(_In_z_ TYPE const *const str) noexcept
+  NODISCARD inline size_t strlen(_In_z_ TYPE const *const str) noexcept
 
 
 #if defined EMLSP_UNISTRING_NO_STRLEN
@@ -77,12 +71,12 @@ ND constexpr size_t strlen(T const (&str)[N]) noexcept
 }
 
 template <typename T>
-      REQUIRES (
-            concepts::Pointer<T> &&
-            concepts::NotReference<T> &&
-            concepts::NotArray<T> &&
-            requires (T x) { {*x} -> concepts::Integral; }
-      )
+    REQUIRES (
+          concepts::Pointer<T> &&
+          !concepts::Reference<T> &&
+          !concepts::Array<T> &&
+          requires (T x) { {*x} -> concepts::Integral; }
+    )
 ND size_t strlen(T str) noexcept
 {
       return impl::strlen(str);

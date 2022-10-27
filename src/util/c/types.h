@@ -3,7 +3,7 @@
 #define HGUARD__TYPES_H_
 /****************************************************************************************/
 
-#include "util/macros.h"
+#include "util/c/macros.h"
 
 __BEGIN_DECLS
 
@@ -31,6 +31,8 @@ typedef long double float80_t;
 #ifdef __GNUC__
 typedef __float128 float128_t;
 #endif
+
+typedef int const intc;
 
 
 #ifndef SOCK_CLOEXEC

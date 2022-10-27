@@ -22,7 +22,6 @@ class base_connection
 {
       using this_type = base_connection;
       using iovec = detail::iovec;
-      using intc = int const;
 
     protected:
       using procinfo_t   = util::detail::procinfo_t;
@@ -255,7 +254,7 @@ class spawner_connection : public base_connection
 
       //--------------------------------------------------------------------------------
 
-      virtual procinfo_t spawn_connection(char **const argv)
+      procinfo_t spawn_connection(char **const argv)
       {
             assert(*argv);
             char **p = argv;
@@ -264,7 +263,7 @@ class spawner_connection : public base_connection
             return spawn_connection(util::ptr_diff(p, argv), argv);
       }
 
-      virtual procinfo_t spawn_connection(std::vector<char const *> &&vec)
+      procinfo_t spawn_connection(std::vector<char const *> &&vec)
       {
             assert(!vec.empty());
             if (vec.back() != nullptr)
@@ -319,7 +318,7 @@ class spawner_connection : public detail::spawner_connection
 {
       ConnectionImpl impl_;
 
-      union {
+      union process_info {
             procinfo_t    pid_;
             uv_process_t *libuv_process_handle_;
       } process_{};
@@ -355,14 +354,14 @@ class spawner_connection : public detail::spawner_connection
 
       //--------------------------------------------------------------------------------
 
-      procinfo_t spawn_connection(size_t argc, char **argv) final
+      procinfo_t spawn_connection(size_t argc, char **argv) override
       {
             if constexpr (is_uv_pipe_) {
-                  auto &hand = dynamic_cast<base::libuv_pipe_handle_impl &>(impl());
-                  std::ignore = hand.do_spawn_connection(argc, argv);
-                  process_.libuv_process_handle_ = hand.get_uv_process_handle();
+                  //auto &hand = dynamic_cast<base::libuv_pipe_handle_impl &>(impl());
+                  std::ignore = impl_.do_spawn_connection(argc, argv);
+                  process_.libuv_process_handle_ = impl_.get_uv_process_handle();
             } else {
-                  process_.pid_ = this->impl().do_spawn_connection(argc, argv);
+                  process_.pid_ = impl_.do_spawn_connection(argc, argv);
             }
 
             return process_.pid_;
@@ -432,12 +431,12 @@ class spawner_connection : public detail::spawner_connection
             else
                   proc_hand = process_.pid_.hProcess;
 
-            WaitForSingleObject(proc_hand, INFINITE);
-            GetExitCodeProcess (proc_hand, reinterpret_cast<LPDWORD>(&status));
+            ::WaitForSingleObject(proc_hand, INFINITE);
+            ::GetExitCodeProcess (proc_hand, reinterpret_cast<LPDWORD>(&status));
 
             if (owns_process) {
-                  CloseHandle(process_.pid_.hThread);
-                  CloseHandle(process_.pid_.hProcess);
+                  ::CloseHandle(process_.pid_.hThread);
+                  ::CloseHandle(process_.pid_.hProcess);
             }
 #else
             pid_t proc_id;
@@ -474,7 +473,6 @@ class spawner_connection : public detail::spawner_connection
       }
 };
 
-} // namespace impl
 
 
 /****************************************************************************************/
@@ -488,7 +486,6 @@ class stdio_connection : public base_connection
 
       ConnectionImpl impl_;
       procinfo_t     parent_pid_{};
-
 
     public:
       using connection_impl_type = ConnectionImpl;
@@ -544,6 +541,7 @@ class stdio_connection : public base_connection
 };
 
 
+} // namespace impl
 } // namespace detail
 
 
@@ -557,12 +555,13 @@ concept BasicConnectionVariant = std::derived_from<T, base_connection>;
 
 namespace connections {
 
-using std_streams       = detail::stdio_connection;
+using std_streams       = detail::impl::stdio_connection;
 using pipe              = detail::impl::spawner_connection<detail::base::pipe_connection_impl>;
 using unix_socket       = detail::impl::spawner_connection<detail::base::unix_socket_connection_impl>;
 using inet_ipv4_socket  = detail::impl::spawner_connection<detail::base::inet_ipv4_socket_connection_impl>;
 using inet_ipv6_socket  = detail::impl::spawner_connection<detail::base::inet_ipv6_socket_connection_impl>;
 using inet_socket       = detail::impl::spawner_connection<detail::base::inet_any_socket_connection_impl>;
+using file_descriptors  = detail::impl::spawner_connection<detail::base::fd_connection_impl>;
 using libuv_pipe_handle = detail::impl::spawner_connection<detail::base::libuv_pipe_handle_impl>;
 #if defined _WIN32 && defined WIN32_USE_PIPE_IMPL
 using win32_handle_pipe = detail::impl::spawner_connection<detail::base::pipe_handle_connection_impl>;

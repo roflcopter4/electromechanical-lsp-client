@@ -3,7 +3,6 @@
 // ReSharper disable CppTooWideScopeInitStatement
 
 #include "Common.hh"
-#include "util/myerr.h"
 #include "util/util.hh"
 
 #define AUTOC auto const
@@ -47,8 +46,24 @@ inline namespace emlsp {
 namespace util {
 
 namespace constants {
+#if defined __MINGW__
+bool const coloured_stderr = true;
+#else
 bool const coloured_stderr = ::isatty(2);
+#endif
 } // namespace constants
+
+
+namespace data {
+FILE *const stderr_file = stderr;
+static char projbuf[128];
+std::string_view const projstr = {
+    projbuf,
+    fmt::format_to(projbuf, "{}",
+                   styled(MAIN_PROJECT_NAME " (warning):  ",
+                          fg(fmt::color::dark_orange) | fmt::emphasis::bold))
+};
+} // namespace data
 
 
 namespace {
@@ -57,19 +72,51 @@ void cleanup_sighandler(int signum);
 
 class cleanup_c
 {
+      using this_type = cleanup_c;
       using path = std::filesystem::path;
 
       path                 tmp_path_{};
       std::stack<path>     delete_list_{};
       std::recursive_mutex mtx_{};
+      std::once_flag       cleanup_flag_{};
 
       template <typename ...Types>
-      static constexpr void dbg_log(UNUSED Types &&...args)
+      static constexpr void dbg_log([[maybe_unused]] Types &&...args)
       {
-#ifndef NDEBUG
+#if !defined NDEBUG || defined __clang__
             fmt::print(stderr, std::forward<Types>(args)...);
 #endif
       }
+
+      /*--------------------------------------------------------------------------------*/
+
+      void really_do_cleanup()
+      {
+            std::lock_guard lock(mtx_);
+            dbg_log(FC("\n"));
+
+            while (!delete_list_.empty()) {
+                  auto const value = delete_list_.top();
+                  auto const name  = value.string();
+                  delete_list_.pop();
+                  dbg_log(FC("Removing path '{}'\n"), name);
+
+                  std::error_code e;
+                  std::filesystem::remove(value, e);
+                  if (e)
+                        dbg_log(FC("Failed to remove file '{}': \"{}\"\n"), name, e);
+            }
+
+            fflush(stderr);
+            tmp_path_ = path{};
+      }
+
+      static void do_cleanup_once_wrapper(this_type *self)
+      {
+            self->really_do_cleanup();
+      }
+
+      /*--------------------------------------------------------------------------------*/
 
     public:
       void push(path const &path_arg)
@@ -92,27 +139,13 @@ class cleanup_c
       void do_cleanup()
       {
             std::lock_guard lock(mtx_);
-            dbg_log(FC("\n"));
-
-            while (!delete_list_.empty()) {
-                  auto const value = delete_list_.top();
-                  auto const name  = value.string();
-                  delete_list_.pop();
-                  dbg_log(FC("Removing path '{}'\n"), name);
-
-                  std::error_code e;
-                  std::filesystem::remove(value, e);
-                  if (e)
-                        dbg_log(FC("Failed to remove file '{}': \"{}\"\n"), name, e);
-            }
-
-            fflush(stderr);
-            tmp_path_ = path{};
+            std::call_once(cleanup_flag_, do_cleanup_once_wrapper, this);
       }
 
       cleanup_c() noexcept
       {
 #ifdef _WIN32
+# if 0
             ::signal(SIGABRT,  cleanup_sighandler);
             ::signal(SIGBREAK, cleanup_sighandler);
             ::signal(SIGFPE,   cleanup_sighandler);
@@ -120,6 +153,8 @@ class cleanup_c
             ::signal(SIGINT,   cleanup_sighandler);
             ::signal(SIGSEGV,  cleanup_sighandler);
             ::signal(SIGTERM,  cleanup_sighandler);
+            ::signal(SIGABRT_COMPAT, cleanup_sighandler);
+# endif
 #else
             struct sigaction act{};
             act.sa_handler = cleanup_sighandler;
@@ -154,23 +189,25 @@ class cleanup_c
 
 cleanup_c cleanup{};
 
-void
+
+[[maybe_unused]] void
 cleanup_sighandler(int const signum)
 {
       cleanup.do_cleanup();
 
 #ifdef _WIN32
-      signal(signum, SIG_DFL);
+      std::ignore = signal(signum, SIG_DFL);
 #else
       struct sigaction act {};
       act.sa_handler = SIG_DFL;  //NOLINT(*-union-access)
       sigaction(signum, &act, nullptr);
 #endif
 
-      raise(signum);
+      std::ignore = raise(signum);
 }
 
 } // namespace
+
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -222,141 +259,31 @@ get_temporary_filename(char const *__restrict prefix, char const *__restrict suf
       return ret;
 }
 
-/****************************************************************************************/
-
-namespace ipc {
-
-static constexpr socket_t invalid_socket = static_cast<socket_t>(-1);
-
-static __forceinline void
-init_sockaddr_un(struct sockaddr_un &addr, char const *const path)
-{
-      size_t const len = util::strlcpy(addr.sun_path, path);
-      addr.sun_family  = AF_UNIX;
-
-      if (len >= sizeof(addr.sun_path))
-            throw std::logic_error(
-                fmt::format(FC("The file path \"{}\" (len: {}) is too large to "
-                               "fit into a UNIX socket address (size: {})"),
-                            path, len + 1, sizeof(addr.sun_path)));
-}
-
-static __forceinline socket_t
-open_socket(int dom, int type, int proto)
-{
-#ifdef _WIN32
-      auto const sock = ::WSASocketW(dom, type, proto, nullptr, 0,
-                                     WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
-#else
-      auto const sock = ::socket(dom, type, proto);
-#endif
-      if (sock == invalid_socket) [[unlikely]]
-            FATAL_ERROR("socket");
-#ifndef _WIN32
-      int tmp = ::fcntl(sock, F_GETFL);
-      ::fcntl(sock, F_SETFL, tmp | O_CLOEXEC);
-#endif
-      return sock;
-}
-
-socket_t
-open_new_unix_socket(char const *const path, int dom, int type, int proto)
-{
-      struct sockaddr_un addr{};
-      init_sockaddr_un(addr, path);
-      socket_t const sock = open_socket(dom, type, proto);
-
-      int const ret = ::bind(
-          sock, reinterpret_cast<struct sockaddr *>(&addr),
-          sizeof(struct sockaddr_un)
-      );
-
-      if (ret == (-1)) [[unlikely]]
-            FATAL_ERROR("bind");
-      if (::listen(sock, 1) == (-1)) [[unlikely]]
-            FATAL_ERROR("listen");
-
-      return sock;
-}
-
-socket_t
-connect_to_unix_socket(struct sockaddr_un const *addr, int dom, int type, int proto)
-{
-      socket_t const sock = open_socket(dom, type, proto);
-
-      int const ret = ::connect(
-          sock, reinterpret_cast<struct sockaddr const *>(addr),
-          sizeof(struct sockaddr_un)
-      );
-
-      if (ret == (-1))
-            FATAL_ERROR("connect");
-
-      return sock;
-}
-
-socket_t
-connect_to_unix_socket(char const *const path, int dom, int type, int proto)
-{
-      struct sockaddr_un addr{};
-      init_sockaddr_un(addr, path);
-      return connect_to_unix_socket(&addr, dom, type, proto);
-}
-
-
-struct addrinfo *
-resolve_addr(char const *server, char const *port, int const type)
-{
-      struct addrinfo  hints{};
-      struct addrinfo *res = nullptr;
-
-      if (auto const portnum = xatoi(port); portnum >= 65536)
-            errx("Error: port %ju is not within the range (1, 65536).", portnum);
-
-      hints.ai_flags    = AI_NUMERICSERV | AI_NUMERICHOST;
-      hints.ai_socktype = type;
-
-      int rc = ::getaddrinfo(server, port, &hints, &res);
-      if (rc != 0)
-#ifdef _WIN32
-            errx("Host not found for ('%s') and ('%s') --> %ls",
-                 server, port, ::gai_strerrorW(rc));
-#else
-            errx("Host not found for ('%s') and ('%s') --> %s",
-                 server, port, gai_strerror(rc));
-#endif
-
-      return res;
-}
-
-
-} // namespace ipc
-
 
 /****************************************************************************************/
 /* RNG helper utils for C code */
 
 
 extern "C" _Check_return_ unsigned
-cxx_random_device_get_random_val(void)
+emlsp_cxx_random_device_get_random_val(void)
 {
       static std::random_device rand_device;
       return rand_device();
 }
 
 extern "C" _Check_return_ uint32_t
-cxx_random_engine_get_random_val_32(void)
+emlsp_cxx_random_engine_get_random_val_32(void)
 {
-      static std::mt19937 rand_engine_32(cxx_random_device_get_random_val());
+      static std::mt19937 rand_engine_32(emlsp_cxx_random_device_get_random_val());
       return rand_engine_32();
 }
 
 extern "C" _Check_return_ uint64_t
-cxx_random_engine_get_random_val_64(void)
+emlsp_cxx_random_engine_get_random_val_64(void)
 {
       static std::mt19937_64 rand_engine_64(
-          (static_cast<uint64_t>(cxx_random_device_get_random_val()) << 32) |
-           static_cast<uint64_t>(cxx_random_device_get_random_val()));
+          (static_cast<uint64_t>(emlsp_cxx_random_device_get_random_val()) << 32) |
+           static_cast<uint64_t>(emlsp_cxx_random_device_get_random_val()));
 
       return rand_engine_64();
 }
@@ -378,7 +305,7 @@ my_err_throw(_In_    bool const           print_err,
              ...)
 {
 #ifdef _WIN32
-      int const e = static_cast<int>(GetLastError());
+      int const e = static_cast<int>(::GetLastError());
 #else
       int const e = errno;
 #endif
@@ -581,12 +508,12 @@ static constexpr size_t error_buffer_size = 2048;
 /*
  * UNSPEAKABLY EVIL MACRO EVERYONE PANIC AND SCREAM
  */
-#define GET_ERROR_BUFFER(FDIR, SUFFIX)                                   \
+#define GET_ERROR_BUFFER(WHAT, SUFFIX)                                   \
       do {                                                               \
             auto const code = std::error_code{static_cast<int>(errval),  \
                                               std::system_category()};   \
             swprintf_s(buf, std::size(buf),                              \
-                       L"\"" FDIR L"\" failed with error %d:\n"          \
+                       L"\"" WHAT L"\" failed with error %d:\n"          \
                        L"\u2002\u2002\u2002\u2002%hs" SUFFIX,            \
                        msg, errval, code.message().c_str());             \
       } while (0)
@@ -675,7 +602,7 @@ slurp_file(char const *const fname, bool const binary)
       if ((binary && nread != size_t(st.st_size)) || ssize_t(nread) <= 0)
             err("fread()");
 
-      ::fclose(fp);
+      std::ignore = ::fclose(fp);
       resize_string_hack(buf, nread);
 
       /* This really does have to be buf.data()[...] because the NUL has to go after
@@ -704,11 +631,16 @@ std::string slurp_file(hacks::sview const &fname, bool const binary)
 std::string char_repr(char const ch)
 {
       switch (ch) {
-      case '\n': return "\\n";
-      case '\r': return "\\r";
-      case '\0': return "\\0";
-      case '\t': return "\\t";
-      case ' ':  return "<SPACE>";
+      case '\0': return "\\0"s;
+      case '\a': return "\\a"s;
+      case '\b': return "\\b"s;
+      case '\t': return "\\t"s;
+      case '\n': return "\\n"s;
+      case '\v': return "\\v"s;
+      case '\f': return "\\f"s;
+      case '\r': return "\\r"s;
+      case 033:  return "\\e"s;
+      case ' ':  return "<SPACE>"s;
       default:   return std::string{ch};
       }
 }
@@ -766,9 +698,16 @@ available_in_fd(SOCKET const s)
 {
       unsigned long value  = 0;
       int const     result = ::ioctlsocket(s, detail::ioctl_size_available, &value);
-      if (result < 0)
-            return 0;
-            //win32::error_exit_wsa(L"ioctlsocket");
+      if (result < 0) {
+            DWORD const e = ::WSAGetLastError();
+            switch (e) {
+            case WSAECONNABORTED:
+            case WSAECONNRESET:
+                  win32::error_exit_wsa(L"ioctlsocket");
+            default:
+                  return 0;
+            }
+      }
       return value;
 }
 
@@ -778,7 +717,7 @@ available_in_fd(HANDLE const s)
       DWORD avail;
       if (!::PeekNamedPipe(s, nullptr, 0, nullptr, &avail, nullptr))
             throw std::system_error(
-                std::error_code{::WSAGetLastError(), std::system_category()});
+                std::error_code{static_cast<int>(::GetLastError()), std::system_category()});
       return avail;
 }
 
@@ -901,7 +840,7 @@ int waitpid(detail::procinfo_t const &pid)
 namespace win32 {
 
 BOOL WINAPI
-myCtrlHandler(DWORD const type)
+myCtrlHandler(DWORD const type) noexcept
 {
       bool action;
 
@@ -919,7 +858,7 @@ myCtrlHandler(DWORD const type)
       // CTRL-CLOSE: confirm that the user wants to exit.
       case CTRL_CLOSE_EVENT:
             eprint(FC("\nCtrl-Close event\n"));
-            action = true;
+            action = false;
             break;
 
       // Pass other signals to the next handler.
@@ -962,3 +901,20 @@ myCtrlHandler(DWORD const type)
 /****************************************************************************************/
 } // namespace util
 } // namespace emlsp
+
+
+#ifdef _WIN32
+extern "C" NORETURN void
+emlsp_win32_error_exit_message_w(_In_z_ wchar_t const *msg)
+{
+      ::emlsp::util::win32::error_exit_message(msg);
+}
+
+extern "C" void
+emlsp_win32_dump_backtrace(_In_ FILE *fp)
+{
+      std::string buf;
+      util::add_backtrace(buf);
+      fwrite(buf.data(), 1, buf.size(), fp);
+}
+#endif

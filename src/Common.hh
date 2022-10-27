@@ -31,7 +31,7 @@
 
 #ifdef __cplusplus
 
-#define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (1<<23)
+#define MSGPACK_UNPACKER_INIT_BUFFER_SIZE SIZE_C(8'388'608)  /* 2^23 aka 8MiB */
 // #define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (8)
 
 # include <assert.h> //NOLINT
@@ -81,21 +81,17 @@ using namespace fmt::literals;
 #  include <unistd.h>
 # endif
 
-#include "util/types.h"
-#include "util/macros.h"
+#include "util/c/types.h"
+#include "util/c/macros.h"
 
 #endif // defined __cplusplus
 
 /*--------------------------------------------------------------------------------------*/
 
-//#ifdef __cplusplus
-//# include "util/util.hh"
-//#else
-///* nothing */
-//#endif
+#include "util/c/initializer.h"
+#include "util/c/myerr.h"
+#include "util/c/debug_trap.h"
 
-#include "util/initializer_hack.h"
-#include "util/myerr.h"
 
 /****************************************************************************************/
 #endif // Common.hh

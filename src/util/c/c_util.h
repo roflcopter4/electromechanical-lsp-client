@@ -6,7 +6,7 @@
 #include "Common.hh"
 
 #if defined __GNUC__ || defined __clang__
-# ifdef _clang__
+# ifdef __clang__
 #  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__printf__, __VA_ARGS__)))
 # else
 #  define ATTRIBUTE_PRINTF(...) __attribute__((__format__(__gnu_printf__, __VA_ARGS__)))
@@ -123,19 +123,26 @@ extern int dprintf(_In_ int fd,
 #endif
 
 
-extern _Check_return_ uint32_t cxx_random_device_get_random_val(void)
+extern _Check_return_ uint32_t emlsp_cxx_random_device_get_random_val(void)
       __attribute__((__visibility__("hidden"), __warn_unused_result__));
 // Get random 32 bit value. Duh.
-extern _Check_return_ uint32_t cxx_random_engine_get_random_val_32(void)
+extern _Check_return_ uint32_t emlsp_cxx_random_engine_get_random_val_32(void)
       __attribute__((__visibility__("hidden"), __warn_unused_result__));
 // Get random 64 bit value. Duh.
-extern _Check_return_ uint64_t cxx_random_engine_get_random_val_64(void)
+extern _Check_return_ uint64_t emlsp_cxx_random_engine_get_random_val_64(void)
       __attribute__((__visibility__("hidden"), __warn_unused_result__));
 
 
 #ifdef _WIN32
 extern _Check_return_ DWORD getppid(void)
       __attribute__((__warn_unused_result__));
+
+extern _Success_(return == 0) int fsync(_In_ int descriptor);
+
+# ifndef __cplusplus
+extern NORETURN void emlsp_win32_error_exit_message_w(_In_z_ wchar_t const *msg);
+extern          void emlsp_win32_dump_backtrace(_In_ FILE *fp);
+# endif
 #endif
 
 

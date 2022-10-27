@@ -23,7 +23,7 @@
 #    define PSNIP_TRAP() __debugbreak()
 #  endif
 #endif
-#if !defined(PSNIP_TRAP)
+ #if !defined(PSNIP_TRAP)
 #  if defined(_MSC_VER) || defined(__INTEL_COMPILER)
 #    define PSNIP_TRAP() __debugbreak()
 #  elif defined(__ARMCC_VERSION)

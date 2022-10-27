@@ -12,6 +12,7 @@ namespace ipc {
 /****************************************************************************************/
 
 
+#if 0
 namespace stolen {
 
 namespace detail {
@@ -123,6 +124,7 @@ class transport_interface
   EndWorkDoneProgress    = Bind.outgoingNotification("$/progress");
   SemanticTokensRefresh  = Bind.outgoingMethod("workspace/semanticTokens/refresh");
  */
+#endif
 
 
 /*======================================================================================*/
@@ -138,10 +140,9 @@ class basic_protocol_interface
 
     public:
       explicit basic_protocol_interface(base_connection &connection)
-          : con_(connection)
-      {
-            spawner_ = dynamic_cast<detail::spawner_connection *>(&con_);
-      }
+          : con_(connection),
+            spawner_(dynamic_cast<detail::spawner_connection *>(&con_))
+      {}
 
       ~basic_protocol_interface() override = default;
 
@@ -154,14 +155,19 @@ class basic_protocol_interface
       virtual int response()       = 0;
       virtual int error_response() = 0;
 
-      ND virtual constexpr uv_poll_cb         poll_callback() const       = 0;
-      ND virtual constexpr uv_alloc_cb        pipe_alloc_callback() const = 0;
-      ND virtual constexpr uv_read_cb         pipe_read_callback() const  = 0;
-      ND virtual constexpr uv_timer_cb        timer_callback() const      = 0;
-      ND virtual constexpr void const        *data() const                = 0;
-      ND virtual constexpr void              *data()                      = 0;
-      ND virtual constexpr std::string const &get_key() const &           = 0;
-         virtual           void               set_key(std::string key)    = 0;
+      //using my_uv_poll_cb  = void (*)(uv_poll_t *, int, int) noexcept;
+      //using my_uv_alloc_cb = void (*)(uv_handle_t *, size_t, uv_buf_t *) noexcept;
+      //using my_uv_read_cb  = void (*)(uv_stream_t *, ssize_t, uv_buf_t const *) noexcept;
+      //using my_uv_timer_cb = void (*)(uv_timer_t *) noexcept;
+
+      ND virtual constexpr uv_poll_cb         poll_callback() const noexcept       = 0;
+      ND virtual constexpr uv_alloc_cb        pipe_alloc_callback() const noexcept = 0;
+      ND virtual constexpr uv_read_cb         pipe_read_callback() const noexcept  = 0;
+      ND virtual constexpr uv_timer_cb        timer_callback() const noexcept      = 0;
+      ND virtual constexpr void const        *data() const noexcept                = 0;
+      ND virtual constexpr void              *data() noexcept                      = 0;
+      ND virtual constexpr std::string const &get_key() const & noexcept           = 0;
+         virtual           void               set_key(std::string key) noexcept    = 0;
 
       /*------------------------------------------------------------------------------*/
 
@@ -253,8 +259,10 @@ class basic_protocol_connection
       std::string key_name_;
 
     public:
-      using connection_type = Connection;
-      using io_wrapper_type = IOWrapper<Connection>;
+      using connection_type     = Connection;
+      using io_wrapper_type     = IOWrapper<Connection>;
+      template <typename T>
+      using io_wrapper_template = IOWrapper<T>;
 
       basic_protocol_connection()
           : Connection(),
@@ -283,16 +291,23 @@ class basic_protocol_connection
 
       /*------------------------------------------------------------------------------*/
 
-      void set_key(std::string key) final
+      void set_key(std::string key) noexcept final
       {
             key_name_ = std::move(key);
       }
 
-      ND constexpr std::string const &get_key() const & final
+      ND constexpr std::string const &get_key() const & noexcept final
       {
             return key_name_;
       }
 };
+
+
+template <typename T>
+concept ProtocolConnectionInstanceVariant =
+    std::derived_from<T,
+                      basic_protocol_connection<typename T::connection_type,
+                                                T::template io_wrapper_template>>;
 
 
 /*======================================================================================*/

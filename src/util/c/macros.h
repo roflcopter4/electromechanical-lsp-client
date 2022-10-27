@@ -70,6 +70,16 @@
 # define DEPRECATED_MSG(x)
 #endif
 
+#if defined __GNUC__ || defined __clang__
+# define UNREACHABLE __builtin_unreachable()
+#elif defined _MSC_VER
+# define UNREACHABLE __assume(0)
+#else
+# define UNREACHABLE() ((void)0)
+#endif
+
+/*--------------------------------------------------------------------------------------*/
+
 #ifdef __cplusplus
 
 # define DELETE_COPY_CTORS(t)               \
@@ -96,15 +106,16 @@
       DEFAULT_COPY_CTORS(t); \
       DEFAULT_MOVE_CTORS(t)
 
-#define DUMP_EXCEPTION(e)                                                                \
-      do {                                                                               \
-            fflush(stderr);                                                              \
-            fprintf(                                                                  \
-                stderr,                                                                  \
-                "\nCaught exception in function '%s', at line %d "                    \
+#define DUMP_EXCEPTION(e)                                                            \
+      do {                                                                           \
+            FILE *const stderr_file_ = stderr;                                       \
+            fflush(stderr_file_);                                                    \
+            fprintf(                                                                 \
+                stderr_file_,                                                        \
+                "\nCaught exception in function '%s', at line %d "                   \
                 "'%s'\n\033[1;32mWhat <<_EOF_\033[0m\n%s\n\033[1;32m_EOF_\033[0m\n", \
-                FUNCTION_NAME, __LINE__, __FILE__, (e).what());                          \
-            fflush(stderr);                                                              \
+                FUNCTION_NAME, __LINE__, __FILE__, (e).what());                      \
+            fflush(stderr_file_);                                                    \
       } while (0)
 
 # ifdef __TAG_HIGHLIGHT__
@@ -180,6 +191,25 @@
 
 #ifndef __has_builtin
 #  define __has_builtin(x) 0
+#endif
+
+/*--------------------------------------------------------------------------------------*/
+/* Pragmas */
+
+#ifdef _MSC_VER
+# define PRAGMA_MSVC(...) __pragma(__VA_ARGS__)
+#else
+# define PRAGMA_MSVC(...)
+#endif
+#ifdef __clang__
+# define PRAGMA_CLANG(...) _Pragma(__VA_ARGS__)
+#else
+# define PRAGMA_CLANG(...)
+#endif
+#ifdef __GNUC__
+# define PRAGMA_GCC(...) _Pragma(__VA_ARGS__)
+#else
+# define PRAGMA_GCC(...)
 #endif
 
 /*--------------------------------------------------------------------------------------*/
@@ -260,7 +290,7 @@
 #if defined __GNUC__ || defined __clang__
 # define FUNCTION_NAME __PRETTY_FUNCTION__
 #elif defined _MSC_VER
-# define FUNCTION_NAME __FUNCTION__
+# define FUNCTION_NAME __FUNCSIG__
 #else
 # define FUNCTION_NAME __func__
 #endif

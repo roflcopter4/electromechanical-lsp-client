@@ -7,6 +7,10 @@
 # define HAVE__MALLOCA 1
 #endif
 
+#ifdef _MSC_VER
+# pragma warning(disable: 4706)
+#endif
+
 /*
  * This file very hastily converted from C. Perhaps I shouldn't have even bothered.
  */
@@ -61,25 +65,25 @@ enum encode_fmt_next_type { OWN_VALIST, OTHER_VALIST, ARG_ARRAY };
 /**
  * Get the next argument from the source specified by 'next_type`.
  */
-#define NEXT(VAR, TYPE, MEMBER)                                         \
-      do {                                                              \
-            switch (next_type) {                                        \
-            case OWN_VALIST:                                            \
-                  (VAR) = (TYPE)va_arg(args, TYPE);                     \
-                  break;                                                \
-            case OTHER_VALIST:                                          \
-                  assert(ref != NULL);                                  \
-                  (VAR) = (TYPE)va_arg(*ref, TYPE);                     \
-                  break;                                                \
-            case ARG_ARRAY:                                             \
-                  assert(a_args);                                       \
-                  assert(a_args[a_arg_ctr]);                            \
-                  (VAR) = ((a_args[a_arg_ctr][a_arg_subctr]).MEMBER);   \
-                  ++a_arg_subctr;                                       \
-                  break;                                                \
-            default:                                                    \
-                  abort();                                              \
-            }                                                           \
+#define NEXT(VAR, TYPE, MEMBER)                                             \
+      do {                                                                  \
+            switch (next_type) {                                            \
+            case OWN_VALIST:                                                \
+                  (VAR) = (TYPE)va_arg(args, TYPE);                         \
+                  break;                                                    \
+            case OTHER_VALIST:                                              \
+                  assert(ref != nullptr);                                   \
+                  (VAR) = (TYPE)va_arg(*ref, TYPE);                         \
+                  break;                                                    \
+            case ARG_ARRAY:                                                 \
+                  assert(a_args);                                           \
+                  assert(a_args[a_arg_ctr]);                                \
+                  (VAR) = (TYPE)((a_args[a_arg_ctr][a_arg_subctr]).MEMBER); \
+                  ++a_arg_subctr;                                           \
+                  break;                                                    \
+            default:                                                        \
+                  abort();                                                  \
+            }                                                               \
       } while (0)
 
 /**
@@ -93,7 +97,7 @@ enum encode_fmt_next_type { OWN_VALIST, OTHER_VALIST, ARG_ARRAY };
                   (VAR) = (TYPE)va_arg(args, TYPE); \
                   break;                            \
             case OTHER_VALIST:                      \
-                  assert(ref != NULL);              \
+                  assert(ref != nullptr);           \
                   (VAR) = (TYPE)va_arg(*ref, TYPE); \
                   break;                            \
             case ARG_ARRAY:                         \
@@ -182,7 +186,7 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
 
       /* Go through the format string once to get the number of arguments and
        * in particular the number and size of any arrays. */
-      while ((ch = (uchar)*ptr++)) {
+      while ((ch = static_cast<uchar>(*ptr++))) {
             switch (ch) {
             /* Legal values. Increment size and continue. */
             case 'b': case 'B':
@@ -256,6 +260,7 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
       NEW_STACK(unsigned char, dict_stack);
       PUSH(len_stack, cur_ctr);
       PUSH(dict_stack, 0);
+
 
       /* This loop is where all of the actual interpretation and encoding
        * happens. A few stacks are used when recursively encoding arrays and

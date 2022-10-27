@@ -15,7 +15,7 @@ namespace ipc::protocols::Msgpack {
 
 template <typename Connection>
       REQUIRES(ipc::BasicConnectionVariant<Connection>)
-class alignas(4096) connection final
+class connection
     : public ipc::basic_protocol_connection<Connection, ipc::io::msgpack_wrapper>
 {
     public:
@@ -29,11 +29,16 @@ class alignas(4096) connection final
       using io_wrapper_type::read_object;
       using io_wrapper_type::get_unpacker;
 
+      //using base_type::my_uv_poll_cb;
+      //using base_type::my_uv_alloc_cb;
+      //using base_type::my_uv_read_cb;
+      //using base_type::my_uv_timer_cb;
+
     protected:
       connection() = default;
 
     public:
-      virtual ~connection() override = default;
+      ~connection() override = default;
 
       connection(connection const &)                = delete;
       connection(connection &&) noexcept            = delete;
@@ -67,12 +72,12 @@ class alignas(4096) connection final
             return 0;
       }
 
-      ND constexpr uv_poll_cb  poll_callback()       const override { return poll_callback_wrapper; }
-      ND constexpr uv_alloc_cb pipe_alloc_callback() const override { return alloc_callback_wrapper; }
-      ND constexpr uv_read_cb  pipe_read_callback()  const override { return read_callback_wrapper; }
-      ND constexpr uv_timer_cb timer_callback()      const override { return timer_callback_wrapper; }
-      ND constexpr void const  *data()               const override { return this; }
-      ND constexpr void        *data()                     override { return this; }
+      ND constexpr uv_poll_cb  poll_callback()       const noexcept final { return poll_callback_wrapper; }
+      ND constexpr uv_alloc_cb pipe_alloc_callback() const noexcept final { return alloc_callback_wrapper; }
+      ND constexpr uv_read_cb  pipe_read_callback()  const noexcept final { return read_callback_wrapper; }
+      ND constexpr uv_timer_cb timer_callback()      const noexcept final { return timer_callback_wrapper; }
+      ND constexpr void const  *data()               const noexcept final { return this; }
+      ND constexpr void        *data()                     noexcept final { return this; }
 
     private:
       std::mutex mtx_{};
@@ -133,8 +138,8 @@ class alignas(4096) connection final
             }
 
             if (events & UV_DISCONNECT) {
-                  util::eprint(FC("Got disconnect signal, status {}, for fd {}, key '{}' -- ({})\n"),
-                               status, this->raw_descriptor(), this->get_key(), FUNCTION_NAME);
+                  util::eprint(FC("Got disconnect signal, status {}, for fd {}, key '{}'\n"),
+                               status, this->raw_descriptor(), this->get_key());
 
                   auto const &key_deleter = cast_deleter(handle->loop->data);
                   this->close();

@@ -63,12 +63,12 @@ class main_loop final
       static constexpr int timespec_get_base = CLOCK_MONOTONIC;
 #endif
 
-      struct uv_variant {
+      struct my_uv_variant {
             union {
-                  uv_handle_t *handle;
-                  uv_stream_t *stream;
-                  uv_poll_t   *poll;
-                  uv_pipe_t   *pipe;
+                  ::uv_handle_t *handle;
+                  ::uv_stream_t *stream;
+                  ::uv_poll_t   *poll;
+                  ::uv_pipe_t   *pipe;
             };
             bool own = true;
       };
@@ -76,23 +76,23 @@ class main_loop final
 #ifdef _WIN32
       HANDLE thrd_ = INVALID_HANDLE_VALUE;
 
-      SOCKET the_socket_{};
-      uv_poll_cb the_cb_{};
-      void *the_data_{};
+      SOCKET       the_socket_{};
+      ::uv_poll_cb the_cb_{};
+      void        *the_data_{};
 #else
       pthread_t thrd_{};
 #endif
 
-      uv_loop_t        base_{};
-      uv_timer_t       timer_{};
+      ::uv_loop_t      base_{};
+      ::uv_timer_t     timer_{};
       std::atomic_bool started_ = false;
       std::mutex       base_mtx_;
 
-      std::recursive_mutex              loop_waiter_mtx_{};
-      std::condition_variable           loop_waiter_cnd_{};
-      std::map<std::string, uv_variant> handles_{};
+      std::recursive_mutex                 loop_waiter_mtx_{};
+      std::condition_variable              loop_waiter_cnd_{};
+      std::map<std::string, my_uv_variant> handles_{};
 
-      uv_signal_t watchers_[std::size(signals_to_handle)]{};
+      ::uv_signal_t watchers_[std::size(signals_to_handle)]{};
 
       //-------------------------------------------------------------------------------
 
@@ -106,8 +106,8 @@ class main_loop final
 
 #if 0
             for (unsigned i = 0; i < std::size(signals_to_handle); ++i) {
-                  uv_signal_init(&base_, &watchers_[i]);
-                  uv_signal_start(&watchers_[i], sighandler_wrapper,
+                  ::uv_signal_init(&base_, &watchers_[i]);
+                  ::uv_signal_start(&watchers_[i], sighandler_wrapper,
                                   signals_to_handle[i]);
                   watchers_[i].data = this;
             }
@@ -147,7 +147,7 @@ class main_loop final
 
       //-------------------------------------------------------------------------------
 
-      ND uv_loop_t *base()
+      ND ::uv_loop_t *base()
       {
             return &base_;
       }
@@ -166,14 +166,12 @@ class main_loop final
       /********************************************************************************/
 
       template <ProtocolConnectionVariant T>
-      uv_poll_t *
-      open_poll_handle_fd(std::string const &name, int const fd, T *connection)
+      ::uv_poll_t *open_poll_handle_fd(std::string const &name, int const fd, T *connection)
       {
             std::lock_guard<std::mutex> lock(base_mtx_);
-            auto *hand = new uv_poll_t;
+            auto *hand = new ::uv_poll_t;
             memset(hand, 0, sizeof *hand);
-            //uv_variant var{.poll = hand};
-            uv_variant var;
+            my_uv_variant var;
             var.poll = hand;
 #ifdef _WIN32
             ::uv_poll_init(&base_, hand, fd);
@@ -190,8 +188,7 @@ class main_loop final
 
 #ifdef _WIN32
       template <ProtocolConnectionVariant T>
-      uv_poll_t *
-      open_poll_handle_socket(std::string const &name, SOCKET const fd, T *connection)
+      ::uv_poll_t *open_poll_handle_socket(std::string const &name, SOCKET const fd, T *connection)
       {
 # if 0
             the_socket_ = fd;
@@ -199,10 +196,9 @@ class main_loop final
             return nullptr;
 # else
             std::lock_guard lock(base_mtx_);
-            auto *hand = new uv_poll_t;
+            auto *hand = new ::uv_poll_t;
             memset(hand, 0, sizeof *hand);
-            //uv_variant var{.poll = hand};
-            uv_variant var;
+            my_uv_variant var;
             var.poll = hand;
             ::uv_poll_init_socket(&base_, hand, fd);
 
@@ -220,15 +216,13 @@ class main_loop final
 
     public:
       template <ProtocolConnectionVariant T>
-      uv_poll_t *open_poll_handle(std::string const &name, T *connection)
+      ::uv_poll_t *open_poll_handle(std::string const &name, T *connection)
       {
-            uv_poll_t *ret;
+            ::uv_poll_t *ret;
 #ifdef _WIN32
             ret = connection->impl().is_socket()
-                      ? open_poll_handle_socket(
-                            name, static_cast<SOCKET>(connection->raw_descriptor()), connection)
-                      : open_poll_handle_fd(
-                            name, static_cast<int>(connection->raw_descriptor()), connection);
+                      ? open_poll_handle_socket(name, static_cast<SOCKET>(connection->raw_descriptor()), connection)
+                      : open_poll_handle_fd(name, static_cast<int>(connection->raw_descriptor()), connection);
 #else
             ret = open_poll_handle(std::move(name), connection->raw_descriptor(), connection);
 #endif
@@ -236,20 +230,20 @@ class main_loop final
       }
 
       template <ProtocolConnectionVariant T>
-      uv_poll_t *open_poll_handle(std::string const &name, T &connection)
+      ::uv_poll_t *open_poll_handle(std::string const &name, T &connection)
       {
             return open_poll_handle(name, &connection);
       }
 
       template <detail::ProtocolConnectionVariantPointer Ptr>
-      uv_poll_t *open_poll_handle(std::string const &name, Ptr &connection)
+      ::uv_poll_t *open_poll_handle(std::string const &name, Ptr &connection)
       {
             return open_poll_handle(name, connection.get());
       }
 
       //-------------------------------------------------------------------------------
 
-      void start_poll_handle(std::string const &key, uv_poll_cb const callback)
+      void start_poll_handle(std::string const &key, ::uv_poll_cb const callback)
       {
 #if 0
             the_cb_ = callback;
@@ -279,14 +273,14 @@ class main_loop final
 
       /********************************************************************************/
 
-      uv_pipe_t *open_pipe_handle(std::string const        &name,
-                                  uv_file const             fd,
-                                  basic_protocol_interface *connection)
+      ::uv_pipe_t *open_pipe_handle(std::string const        &name,
+                                    ::uv_file const           fd,
+                                    basic_protocol_interface *connection)
       {
             std::lock_guard<std::mutex> lock(base_mtx_);
-            auto *hand = new uv_pipe_t;
+            auto *hand = new ::uv_pipe_t;
             memset(hand, 0, sizeof *hand);
-            uv_variant var{.pipe = hand};
+            my_uv_variant var{.pipe = hand};
             ::uv_pipe_init(&base_, hand, 0);
             ::uv_pipe_open(hand, fd);
 
@@ -298,34 +292,33 @@ class main_loop final
             return it->second.pipe;
       }
 
-      uv_pipe_t *use_pipe_handle(std::string const        &name,
-                                 uv_pipe_t                *hand,
-                                 basic_protocol_interface *connection)
+      ::uv_pipe_t *use_pipe_handle(std::string const        &name,
+                                   ::uv_pipe_t              *hand,
+                                   basic_protocol_interface *connection)
       {
             connection->set_key(name);
-            uv_variant var{.pipe = hand, .own = false};
+            my_uv_variant var{.pipe = hand, .own = false};
             hand->data = connection;
             auto const &[it, ok] = handles_.emplace(std::pair{name, var});
             assert(ok != 0);
             return it->second.pipe;
       }
 
-      template <ProtocolConnectionVariant T>
-      uv_pipe_t *use_pipe_handle(std::string const        &name,
-                                 std::unique_ptr<T> const &connection)
+      template <detail::ProtocolConnectionVariantPointer Ptr>
+      ::uv_pipe_t *use_pipe_handle(std::string const &name, Ptr const &connection)
       {
-            return use_pipe_handle(name, connection->impl_libuv().get_uv_handle(),
+            return use_pipe_handle(name, connection->impl_libuv()->get_uv_handle(),
                                    connection.get());
       }
 
       //-------------------------------------------------------------------------------
 
-      void start_pipe_handle(std::string const &key,
-                             uv_alloc_cb const  alloc_callback,
-                             uv_read_cb  const  read_callback)
+      void start_pipe_handle(std::string const  &key,
+                             ::uv_alloc_cb const alloc_callback,
+                             ::uv_read_cb const  read_callback)
       {
             std::lock_guard<std::mutex> lock(base_mtx_);
-            ::uv_read_start(reinterpret_cast<uv_stream_t *>(handles_.at(key).pipe),
+            ::uv_read_start(handles_[key].stream,
                             alloc_callback, read_callback);
       }
 
@@ -333,7 +326,7 @@ class main_loop final
                              basic_protocol_interface const *connection)
       {
             std::lock_guard<std::mutex> lock(base_mtx_);
-            ::uv_read_start(reinterpret_cast<uv_stream_t *>(handles_.at(key).pipe),
+            ::uv_read_start(handles_[key].stream,
                             connection->pipe_alloc_callback(),
                             connection->pipe_read_callback());
       }
@@ -379,7 +372,7 @@ class main_loop final
                         if (ret == 0)
                               continue;
 
-                        uv_poll_t tmp{};
+                        ::uv_poll_t tmp{};
                         tmp.data = the_data_;
                         auto const re = fds[0].revents;
 
@@ -418,7 +411,7 @@ class main_loop final
             ::uv_timer_stop(&timer_);
             ::uv_stop(&base_);
             if (int const e = ::uv_loop_close(&base_))
-                  util::eprint(FC("uv_loop_close failed with status {} -> {}\n"), e, uv_strerror(e));
+                  util::eprint(FC("::uv_loop_close failed with status {} -> {}\n"), e, uv_strerror(e));
 
             util::eprint(FC("Trying to join...\n"));
 
@@ -457,7 +450,7 @@ class main_loop final
             handles_.clear();
       }
 
-      static void delete_handle(uv_variant &hand)
+      static void delete_handle(my_uv_variant &hand)
       {
             if (!hand.handle)
                   return;
@@ -534,15 +527,20 @@ class main_loop final
       }
 
     private:
-      errno_t do_timed_wait(DWORD const dwtimeout)
+      errno_t do_timed_wait(DWORD const dwtimeout) noexcept
       {
-            std::lock_guard<std::recursive_mutex> lock(loop_waiter_mtx_);
-            auto const ret = ::WaitForSingleObjectEx(thrd_, dwtimeout, true);
-            if (ret == 0 && thrd_ != INVALID_HANDLE_VALUE) {
-                  ::CloseHandle(thrd_);
-                  thrd_ = INVALID_HANDLE_VALUE;
+            try {
+                  std::lock_guard<std::recursive_mutex> lock(loop_waiter_mtx_);
+                  auto const ret = ::WaitForSingleObjectEx(thrd_, dwtimeout, true);
+                  if (ret == 0 && thrd_ != INVALID_HANDLE_VALUE) {
+                        ::CloseHandle(thrd_);
+                        thrd_ = INVALID_HANDLE_VALUE;
+                  }
+                  return static_cast<errno_t>(ret);
+            } catch (std::exception const &e) {
+                  DUMP_EXCEPTION(e);
+                  errx_nothrow("Cannot throw exception in this context. Exiting.");
             }
-            return ret;
       }
 
       //-------------------------------------------------------------------------------
@@ -553,15 +551,15 @@ class main_loop final
                 nullptr, 0, loop_start_thread_routine, &base_, 0, nullptr));
             if (!thrd_)
                   util::win32::error_exit(L"_beginthreadex()");
-#ifdef _MSC_VER
+# ifdef _MSC_VER
             ::SetThreadDescription(thrd_, L"Main Libuv Thread");
-#else
+# else
             /* SetThreadDescription isn't exposed by default on MinGW. */
             auto *SetThreadDescription_p =
                 util::win32::get_proc_address_module<HRESULT(WINAPI *)(HANDLE, PCWSTR)>(
                     L"Kernel32", "SetThreadDescription");
             SetThreadDescription_p(thrd_, L"Main Libuv Thread");
-#endif
+# endif
       }
 
       void force_stop_loop_thread(int const wait_e)
@@ -570,8 +568,9 @@ class main_loop final
 
             if (wait_e == WAIT_TIMEOUT) {
                   util::eprint(FC("Resorting to crying a lot after timeout.\n"));
-#ifdef _MSC_VER
-                  [this]() -> void {
+# ifdef _MSC_VER
+                  [this]() noexcept -> void {
+                        //NOLINTNEXTLINE(clang-diagnostic-language-extension-token)
                         __try {
                               ::TerminateThread(thrd_, 1);
                               do_timed_wait(INFINITE);
@@ -580,18 +579,18 @@ class main_loop final
                               ::fflush(stderr);
                         }
                   }();
-#else
+# else
                   TerminateThread(thrd_, 1);
                   do_timed_wait(INFINITE);
-#endif
+# endif
             } else {
                   util::win32::error_exit_explicit(L"WaitForSingleObject()", wait_e);
             }
       }
 
-      static unsigned loop_start_thread_routine(void *vdata)
+      static unsigned loop_start_thread_routine(void *vdata) noexcept
       {
-            auto *base = static_cast<uv_loop_t *>(vdata);
+            auto *base = static_cast<::uv_loop_t *>(vdata);
             ::uv_run(base, UV_RUN_DEFAULT);
             ::_endthreadex(0);
             return 0;
@@ -681,13 +680,13 @@ class main_loop final
 
       /********************************************************************************/
 
-      static void sighandler_wrapper(_Notnull_ uv_signal_t *handle, int const signum)
+      static void sighandler_wrapper(_Notnull_ ::uv_signal_t *handle, int const signum)
       {
             auto *self = static_cast<this_type *>(handle->data);
             self->sighandler(handle, signum);
       }
 
-      void sighandler(UU uv_signal_t *handle, int signum)
+      void sighandler(UU ::uv_signal_t *handle, int signum)
       {
             util::eprint(FC("Have signal {} aka SIG{}  ->  {}\n"),
                          signum,
@@ -730,7 +729,7 @@ class main_loop final
             }
       }
 
-      static void timer_callback(uv_timer_t * /*handle*/)
+      static void timer_callback(::uv_timer_t * /*handle*/) noexcept
       {
             /* NOP */
       }

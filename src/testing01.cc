@@ -57,10 +57,10 @@ NOINLINE void foo02()
       clangd_impl.set_loop(loop->base());
       clangd_impl.open();
 #else
-      auto nvim   = nvim_type::new_shared();
-      auto clangd = clang_type::new_shared();
+      auto nvim   = nvim_type::new_unique();
+      auto clangd = clang_type::new_unique();
 
-      //clangd->redirect_stderr_to_devnull();
+      clangd->redirect_stderr_to_devnull();
       auto *clangd_impl = clangd->impl_socket();
       auto *nvim_impl = nvim->impl_socket();
 
@@ -72,6 +72,13 @@ NOINLINE void foo02()
 # endif
 #endif
 
+      {
+            auto foobar = ipc::protocols::MsJsonrpc::connection<ipc::connections::pipe>::new_unique();
+            eprintf("Is clangd a socket?  %d\n", clangd->impl().is_socket());
+            eprintf("Is nvim   a socket?  %d\n", nvim->impl().is_socket());
+            eprintf("Is foobar a socket?  %d\n", foobar->impl().is_socket());
+            fflush(stderr);
+      }
 
 #if 1
       nvim->spawn_connection_l(
@@ -105,9 +112,9 @@ time.sleep(1)
       //nvim->impl().accept();
 
 # ifdef _WIN32
-      ResumeThread(clangd->pid().hThread);
+      ::ResumeThread(clangd->pid().hThread);
       clangd_impl->accept();
-      ResumeThread(nvim->pid().hThread);
+      ::ResumeThread(nvim->pid().hThread);
       nvim_impl->accept();
 # endif
       {
@@ -121,13 +128,13 @@ time.sleep(1)
 
       loop->loop_start_async();
 
-      auto fname_uri_ptr = util::glib::filename_to_uri(util::recode<char>(lazy::fname_raw));
-      auto fname_uri     = std::string_view{fname_uri_ptr.get()};
+      auto const fname_uri_ptr = util::glib::filename_to_uri(util::recode<char>(lazy::fname_raw));
+      auto const fname_uri     = std::string_view{fname_uri_ptr.get()};
 
       {
-            auto path_uri = util::glib::filename_to_uri(util::recode<char>(lazy::path_raw));
-            auto init     = ipc::lsp::data::init_msg(path_uri.get());
-            auto content  = util::slurp_file(lazy::fname_raw);
+            auto const path_uri = util::glib::filename_to_uri(util::recode<char>(lazy::path_raw));
+            auto const init     = ipc::lsp::data::init_msg(path_uri.get());
+            auto const content  = util::slurp_file(lazy::fname_raw);
 
             clangd->write_string(init);
             std::this_thread::sleep_for(500ms);
@@ -147,10 +154,6 @@ time.sleep(1)
             //clangd->wait();
       }
       {
-            ::LARGE_INTEGER x = {.QuadPart = 0};
-            ::GetFileSizeEx(reinterpret_cast<::HANDLE>(clangd->raw_descriptor()), &x);
-      }
-      {
             auto wrap = clangd->get_new_packer();
             wrap().add_member("jsonrpc", "2.0");
             wrap().add_member("id", 1);
@@ -163,9 +166,9 @@ time.sleep(1)
             //clangd->wait();
       }
 
-      std::this_thread::sleep_for(15s);
+      std::this_thread::sleep_for(8s);
       clangd->close();
-      //nvim->close();
+      nvim->close();
       loop->loop_stop();
       //thrd.join();
 }

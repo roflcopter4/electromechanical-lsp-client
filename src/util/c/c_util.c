@@ -1,5 +1,5 @@
 #include "Common.hh"
-#include "util/c_util.h"
+#include "util/c/c_util.h"
 
 #define MINOF(a, b) (((a) < (b)) ? (a) : (b))
 #define MAXOF(a, b) (((a) > (b)) ? (a) : (b))
@@ -47,6 +47,8 @@ asprintf(_Outptr_result_z_             char      **restrict destp,
 #else
 # define DIAG_POP()
 #endif
+PRAGMA_GCC("GCC diagnostic push")
+PRAGMA_GCC("GCC diagnostic error \"-Wint-conversion\"")
 
 _Check_return_ char const *
 my_strerror(_In_                 errno_t errval,
@@ -73,6 +75,7 @@ my_strerror(_In_                 errno_t errval,
       return estr;
 }
 
+PRAGMA_GCC("GCC diagnostic pop")
 DIAG_POP()
 
 /****************************************************************************************/
@@ -127,6 +130,7 @@ dprintf(_In_ int const fd,
 
 #endif
 
+
 /****************************************************************************************/
 
 #ifdef _WIN32
@@ -140,34 +144,43 @@ dprintf(_In_ int const fd,
 _Check_return_
 DWORD getppid(void)
 {
-      PROCESSENTRY32 pe32;
+      bool           found     = false;
       DWORD          ppid      = 0;
-      DWORD const    pid       = GetCurrentProcessId();
       void *const    hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
-      if (hSnapshot == INVALID_HANDLE_VALUE)
-            goto fail;
+      if (hSnapshot && hSnapshot == INVALID_HANDLE_VALUE)
+      {
+            PROCESSENTRY32 pe32 = {.dwSize = sizeof pe32};
+            DWORD const    pid  = GetCurrentProcessId();
+            BOOL           ok   = Process32First(hSnapshot, &pe32);
 
-      memset(&pe32, 0, sizeof pe32);
-      pe32.dwSize = sizeof pe32;
-
-      if (!Process32First(hSnapshot, &pe32))
-            goto fail;
-
-      do {
-            if (pe32.th32ProcessID == pid) {
-                  ppid = pe32.th32ParentProcessID;
-                  break;
+            while (ok) {
+                  if (pid == pe32.th32ProcessID) {
+                        ppid  = pe32.th32ParentProcessID;
+                        found = true;
+                        break;
+                  }
+                  ok = Process32Next(hSnapshot, &pe32);
             }
-      } while (Process32Next(hSnapshot, &pe32));
 
-      if (hSnapshot && hSnapshot != INVALID_HANDLE_VALUE)
             CloseHandle(hSnapshot);
 
-      return ppid;
+            if (found)
+                  return ppid;
+      }
 
-fail:
-      err("getppid() failed to find parent id. This function *must* always succeed so "
-          "this error is fatal.");
+      emlsp_win32_error_exit_message_w(
+          L"getppid() failed to find parent ID. Because getppid() *must* always "
+          L"succeed, this error is fatal.");
+}
+
+/*--------------------------------------------------------------------------------------*/
+
+_Success_(return == 0)
+int fsync(_In_ int const descriptor)
+{
+      return (FlushFileBuffers((HANDLE)(uintptr_t)_get_osfhandle(descriptor)) == 0)
+                 ? -1
+                 :  0;
 }
 #endif

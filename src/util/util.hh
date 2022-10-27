@@ -4,12 +4,11 @@
 /*--------------------------------------------------------------------------------------*/
 
 #include "Common.hh"
-#include "util/c_util.h"
+#include "util/c/c_util.h"
 #include "util/concepts.hh"
-#include "util/deleters.hh"
-#include "util/exceptions.hh"
 #include "util/hackish_templates.hh"
-#include "util/strings.hh"
+#include "util/misc.hh"
+#include "util/socket.hh"
 
 #include "util/recode/recode.hh"
 
@@ -50,46 +49,6 @@ using ::my_strerror;
 
 ND extern std::string demangle(_In_z_ char const *raw_name) __attribute__((__nonnull__));
 ND extern std::string demangle(std::type_info const &id);
-
-
-/* I wouldn't normally check the return of malloc & friends, but MSVC loudly complains
- * about possible null pointers. So I'll make an exception. Damn it Microsoft. */
-template <typename T>
-ND __forceinline T *
-xmalloc(size_t const size = sizeof(T))
-{
-      //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
-      void *ret = malloc(size);
-      if (ret == nullptr) [[unlikely]]
-            throw std::system_error(std::make_error_code(std::errc::not_enough_memory));
-      return static_cast<T *>(ret);
-}
-
-template <typename T>
-ND __forceinline T *
-xcalloc(size_t const nmemb = SIZE_C(1),
-        size_t const size  = sizeof(T))
-{
-      //NOLINTNEXTLINE(hicpp-no-malloc, cppcoreguidelines-no-malloc)
-      void *ret = calloc(nmemb, size);
-      if (ret == nullptr) [[unlikely]]
-            throw std::system_error(std::make_error_code(std::errc::not_enough_memory));
-      return static_cast<T *>(ret);
-}
-
-
-constexpr void free_all() {}
-
-/* I can't lie; the primary reason this exists is to silence clang's whining about
- * calling free. */
-template <typename T, typename ...Pack>
-      REQUIRES(util::concepts::GenericPointer<T>)
-constexpr void free_all(T arg, Pack ...pack)
-{
-      // NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
-      ::free(arg);
-      free_all(pack...);
-}
 
 /*--------------------------------------------------------------------------------------*/
 
@@ -177,40 +136,70 @@ ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2) noexcept
 
 
 template <typename Elem, size_t N>
+      REQUIRES (concepts::Integral<Elem>)
 __forceinline size_t
-fwritel(Elem const (&buffer)[N], FILE *dst)
+fwrite(Elem const (&buffer)[N], FILE *dst)
 {
       return ::fwrite(buffer, sizeof(Elem), N - SIZE_C(1), dst);
 }
 
 
+template <typename Cont>
+      REQUIRES (concepts::NonTrivial<Cont> &&
+                concepts::Integral<typename Cont::value_type>)
+__forceinline size_t
+fwrite(Cont const &container, FILE *dst)
+{
+      return ::fwrite(container.data(), sizeof(typename Cont::value_type),
+                      container.size(), dst);
+}
+
+
+namespace data {
+extern FILE *const            stderr_file;
+extern std::string_view const projstr;
+} // namespace data
+
+
 template <typename S, typename... Args>
-    REQUIRES (concepts::is_compiled_string_c<S>)
-void
+    //REQUIRES (concepts::is_compiled_string_c<S>)
+NOINLINE void
 eprint(S const &format_str, Args const &...args)
 {
+      using data::projstr, data::stderr_file;
+
 #ifdef _WIN32
-      //_lock_file(stderr);
+# define LOCK_FILE(x)   _lock_file(x)
+# define UNLOCK_FILE(x) _unlock_file(x)
 #else
-      flockfile(stderr);
+# define LOCK_FILE(x)   flockfile(x)
+# define UNLOCK_FILE(x) funlockfile(x)
 #endif
-      if (constants::coloured_stderr)
-            //fwritel("\033[38;2;255;255;0m" MAIN_PROJECT_NAME " (warning):  \033[0m"
-            //        "\033[38;2;255;182;193m", stderr);
-            fmt::print(stderr, FC("{}\033[38;2;255;182;193m"),
-                       styled(MAIN_PROJECT_NAME " (warning):  ",
-                              fg(fmt::color::yellow) | fmt::emphasis::bold));
-      else
-            fwritel(MAIN_PROJECT_NAME " (warning):  ", stderr);
-      fmt::print(stderr, format_str, std::forward<Args const &&>(args)...);
-      if (constants::coloured_stderr)
-            fwritel("\033[0m", stderr);
-      ::fflush(stderr);
-#ifdef _WIN32
-      //_unlock_file(stderr);
-#else
-      funlockfile(stderr);
-#endif
+
+      LOCK_FILE(stderr_file);
+
+      try {
+            auto const tmp = fmt::format(std::forward<S const &&>(format_str),
+                                         std::forward<Args const &&>(args)...);
+            if (constants::coloured_stderr)
+                  fwrite(projstr, stderr_file);
+            else
+                  fwrite(MAIN_PROJECT_NAME " (warning):  ", stderr_file);
+
+            fwrite(tmp, stderr_file);
+
+            if (constants::coloured_stderr)
+                  fwrite("\033[0m", stderr_file);
+
+            fflush(stderr_file);
+      } catch (...) {
+            UNLOCK_FILE(stderr_file);
+            throw;
+      }
+
+      UNLOCK_FILE(data::stderr_file);
+#undef LOCK_FILE
+#undef UNLOCK_FILE
 }
 
 
@@ -277,20 +266,9 @@ constexpr auto &operator+=(timespec &lval, std::chrono::duration<Rep, Period> co
 /*======================================================================================*/
 
 
-namespace ipc {
+extern std::string_view const &get_signal_name(int signum);
+extern std::string_view const &get_signal_explanation(int signum);
 
-#define SOCK_ARGS \
-      int dom = AF_UNIX, int type = SOCK_STREAM | SOCK_CLOEXEC, int proto = 0
-
-extern ::socket_t open_new_unix_socket  (char const *path,          SOCK_ARGS);
-extern ::socket_t connect_to_unix_socket(char const *path,          SOCK_ARGS);
-extern ::socket_t connect_to_unix_socket(::sockaddr_un const *addr, SOCK_ARGS);
-
-#undef SOCK_ARGS
-
-extern ::addrinfo *resolve_addr(char const *server, char const *port, int type = SOCK_STREAM);
-
-} // namespace ipc
 
 #ifdef _WIN32
 namespace win32 {
@@ -300,28 +278,28 @@ void warning_box_message (_In_z_ wchar_t const *msg);
 void warning_box_explicit(_In_z_ char const *msg, _In_ DWORD errval);
 void warning_box_message (_In_z_ char const *msg);
 
-NORETURN void error_exit_explicit(_In_z_ wchar_t const *msg, _In_ DWORD errval);
-NORETURN void error_exit_message (_In_z_ wchar_t const *msg);
-NORETURN void error_exit_explicit(_In_z_ char const *msg, _In_ DWORD errval);
-NORETURN void error_exit_message (_In_z_ char const *msg);
+NORETURN _Analysis_noreturn_ void error_exit_explicit(_In_z_ wchar_t const *msg, _In_ DWORD errval);
+NORETURN _Analysis_noreturn_ void error_exit_message (_In_z_ wchar_t const *msg);
+NORETURN _Analysis_noreturn_ void error_exit_explicit(_In_z_ char const *msg, _In_ DWORD errval);
+NORETURN _Analysis_noreturn_ void error_exit_message (_In_z_ char const *msg);
 
-NORETURN __forceinline void error_exit        (wchar_t const *msg)      { error_exit_explicit(msg,         GetLastError());    }
-NORETURN __forceinline void error_exit_wsa    (wchar_t const *msg)      { error_exit_explicit(msg,         WSAGetLastError()); }
-NORETURN __forceinline void error_exit_errno  (wchar_t const *msg)      { error_exit_explicit(msg,         errno);             }
-NORETURN __forceinline void error_exit        (std::wstring const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
-NORETURN __forceinline void error_exit_wsa    (std::wstring const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
-NORETURN __forceinline void error_exit_errno  (std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno);             }
-NORETURN __forceinline void error_exit_message(std::wstring const &msg) { error_exit_message (msg.c_str());                    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit        (wchar_t const *msg)      { error_exit_explicit(msg,         GetLastError());    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_wsa    (wchar_t const *msg)      { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_errno  (wchar_t const *msg)      { error_exit_explicit(msg,         errno);             }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit        (std::wstring const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_wsa    (std::wstring const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_errno  (std::wstring const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_message(std::wstring const &msg) { error_exit_message (msg.c_str());                    }
 
-NORETURN __forceinline void error_exit        (char const *msg)        { error_exit_explicit(msg,         GetLastError());    }
-NORETURN __forceinline void error_exit_wsa    (char const *msg)        { error_exit_explicit(msg,         WSAGetLastError()); }
-NORETURN __forceinline void error_exit_errno  (char const *msg)        { error_exit_explicit(msg,         errno);             }
-NORETURN __forceinline void error_exit        (std::string const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
-NORETURN __forceinline void error_exit_wsa    (std::string const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
-NORETURN __forceinline void error_exit_errno  (std::string const &msg) { error_exit_explicit(msg.c_str(), errno);             }
-NORETURN __forceinline void error_exit_message(std::string const &msg) { error_exit_message (msg.c_str());                    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit        (char const *msg)        { error_exit_explicit(msg,         GetLastError());    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_wsa    (char const *msg)        { error_exit_explicit(msg,         WSAGetLastError()); }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_errno  (char const *msg)        { error_exit_explicit(msg,         errno);             }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit        (std::string const &msg) { error_exit_explicit(msg.c_str(), GetLastError());    }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_wsa    (std::string const &msg) { error_exit_explicit(msg.c_str(), WSAGetLastError()); }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_errno  (std::string const &msg) { error_exit_explicit(msg.c_str(), errno);             }
+NORETURN _Analysis_noreturn_ __forceinline void error_exit_message(std::string const &msg) { error_exit_message (msg.c_str());                    }
 
-extern BOOL WINAPI myCtrlHandler(DWORD type);
+extern BOOL WINAPI myCtrlHandler(DWORD type) noexcept;
 
 template <typename Proc = ::FARPROC>
 Proc get_proc_address_module(LPCWSTR const module_name, LPCSTR const proc_name)
@@ -335,7 +313,6 @@ Proc get_proc_address_module(LPCWSTR const module_name, LPCSTR const proc_name)
             error_exit(L"GetProcAddress()");
       return routine;
 }
-
 } // namespace win32
 #endif
 

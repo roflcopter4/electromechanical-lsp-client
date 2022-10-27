@@ -25,13 +25,9 @@
 #undef int64_t
 
 //#define FORCE_USE_OF_LIBUNISTRING 1
-//#define EMLSP_UNISTRING_NO_WCSLEN
-//#define EMLSP_UNISTRING_NO_STRLEN
-//#define EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
-
-#ifdef EMLSP_USE_WIN32_STR_CONVERSION_FUNCS
-# errror "Not supported"
-#endif
+//#define EMLSP_UNISTRING_NO_WCSLEN 1
+//#define EMLSP_UNISTRING_NO_STRLEN 1
+#define EMLSP_USE_WIN32_STR_CONVERSION_FUNCS 1
 
 #if defined(_MSC_VER) || __has_builtin(__builtin_strlen)
 #  define _STRLEN(str) __builtin_strlen(str)

@@ -12,17 +12,31 @@ inline namespace emlsp {
 namespace util {
 /****************************************************************************************/
 
+template <typename Elem, size_t Num>
+BOOL WriteFile(HANDLE hand, Elem const (&buf)[Num])
+{
+      DWORD nwritten;
+      auto const ret = ::WriteFile(hand, buf, Num - 1, &nwritten, nullptr);
+      return ret;
+}
+
+}}
+
 
 #if defined _MSC_VER
 INITIALIZER_HACK(demangle_setup)
 {
-      SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+      fprintf(stderr, "Hello from function %s\n", FUNCTION_NAME);
 
-      if (!SymInitialize(GetCurrentProcess(), nullptr, true))
-            win32::error_exit(L"SymInitialize()");
+      ::SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+
+      if (!::SymInitialize(::GetCurrentProcess(), nullptr, true))
+            util::win32::error_exit(L"SymInitialize()");
 }
 #endif
 
+
+inline namespace emlsp { namespace util {
 
 std::string
 demangle(_In_z_ char const *raw_name)
@@ -32,7 +46,7 @@ demangle(_In_z_ char const *raw_name)
 #if defined _MSC_VER
       // BUG Doesn't seem to work at all? Meh.
       char buf[4096];
-      UnDecorateSymbolName(raw_name, buf, sizeof(buf), UNDNAME_COMPLETE);
+      ::UnDecorateSymbolName(raw_name, buf, sizeof(buf), UNDNAME_COMPLETE);
       name = buf;
 #elif defined __GNUG__ || defined _LIBCPP_VERSION
       int  status;

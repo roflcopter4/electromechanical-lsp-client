@@ -21,21 +21,20 @@ class read_buffer final
       static constexpr size_t default_buffer_size  = SIZE_C(1) << 23;
       static constexpr size_t default_buffer_align = 4096;
 
-      char            *buf_;
       std::align_val_t buf_align_;
-
-      size_t max_;
-      size_t used_{};
-      size_t offset_{};
+      size_t  max_;
+      size_t  used_{};
+      size_t  offset_{};
+      char   *buf_;
 
     public:
       explicit read_buffer(size_t const size      = default_buffer_size,
                            size_t const alignment = default_buffer_align)
-          /* This stupidity is required to appease MSVC, which inexplicably considers
-           * using the placement new operator to be an error. */
-          : buf_(static_cast<char *>(operator new[](size, std::align_val_t{alignment}))),
-            buf_align_(std::align_val_t{alignment}),
-            max_(size)
+          : buf_align_(std::align_val_t{alignment}),
+            max_(size),
+          /* This stupidity is required to appease MSVC, which inexplicably
+           * considers using the placement new operator to be an error. */
+            buf_(static_cast<char *>(operator new[](max_, buf_align_)))
       {
             memset(buf_, 0, size);
       }
@@ -43,7 +42,7 @@ class read_buffer final
       ~read_buffer()
       {
 #if defined __MINGW64__ && defined __GNUG__ && defined __clang__
-            /* On MinGW, using libstdlibc++, clang doesn't seem to recognize
+            /* On MinGW, using libc++, clang doesn't seem to recognize
              * operator delete[] with a size argument. */
             operator delete[](buf_, buf_align_);
 #else
@@ -107,14 +106,13 @@ class read_buffer final
       {
             if (used_ + delta < max_) {
                   size_t const oldmax = max_;
-                  auto *tmp = operator new[]((max_ += delta), buf_align_);
+                  void *const  tmp    = operator new[]((max_ += delta), buf_align_);
                   memcpy(tmp, buf_, used_);
 #if defined __MINGW64__ && defined __GNUG__ && defined __clang__
                   operator delete[](buf_, buf_align_);
 #else
                   operator delete[](buf_, oldmax, buf_align_);
 #endif
-                  //delete[] buf_;
                   buf_ = static_cast<char *>(tmp);
             }
       }
@@ -128,7 +126,7 @@ class read_buffer final
 
 template <typename Connection>
       REQUIRES(ipc::BasicConnectionVariant<Connection>)
-class alignas(4096) connection final
+class connection
     : public ipc::basic_protocol_connection<Connection, ipc::io::ms_jsonrpc_wrapper>
 {
       std::mutex          read_mtx_;
@@ -147,8 +145,8 @@ class alignas(4096) connection final
 
       //-------------------------------------------------------------------------------
 
-      connection() = default;
-      virtual ~connection() override = default;
+      connection()           = default;
+      ~connection() override = default;
 
       connection(connection const &)                = delete;
       connection(connection &&) noexcept            = delete;
@@ -189,17 +187,17 @@ class alignas(4096) connection final
             return 0;
       }
 
-      ND constexpr uv_poll_cb  poll_callback()       const override { return poll_callback_wrapper; }
-      ND constexpr uv_alloc_cb pipe_alloc_callback() const override { return alloc_callback_wrapper; }
-      ND constexpr uv_read_cb  pipe_read_callback()  const override { return read_callback_wrapper; }
-      ND constexpr uv_timer_cb timer_callback()      const override { return timer_callback_wrapper; }
-      ND constexpr void const *data()                const override { return this; }
-      ND constexpr void       *data()                      override { return this; }
+      ND constexpr uv_poll_cb  poll_callback()       const noexcept final { return poll_callback_wrapper; }
+      ND constexpr uv_alloc_cb pipe_alloc_callback() const noexcept final { return alloc_callback_wrapper; }
+      ND constexpr uv_read_cb  pipe_read_callback()  const noexcept final { return read_callback_wrapper; }
+      ND constexpr uv_timer_cb timer_callback()      const noexcept final { return timer_callback_wrapper; }
+      ND constexpr void const *data()                const noexcept final { return this; }
+      ND constexpr void       *data()                      noexcept final { return this; }
 
       //-------------------------------------------------------------------------------
 
     private:
-      static void poll_callback_wrapper(uv_poll_t *handle, int status, int events)
+      static void poll_callback_wrapper(uv_poll_t *handle, intc status, intc events)
       {
             auto *self = static_cast<this_type *>(handle->data);
             self->real_poll_callback(handle, status, events);
@@ -226,7 +224,7 @@ class alignas(4096) connection final
       //-------------------------------------------------------------------------------
 
       void
-      real_poll_callback(UU uv_poll_t *handle, int status, int events)
+      real_poll_callback(UU uv_poll_t *handle, intc status, intc events)
       {
             std::lock_guard lock{read_mtx_};
 
@@ -271,10 +269,13 @@ class alignas(4096) connection final
                         auto writer = rapidjson::Writer{sb};
                         doc->Accept(writer);
 
+                        _lock_file(stderr);
                         fmt::print(FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n"
                                       "\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
                                    sb.GetSize(),
                                    std::string_view{sb.GetString(), sb.GetSize()});
+                        fflush(stdout);
+                        _unlock_file(stderr);
                   }
             }
 
@@ -313,7 +314,7 @@ class alignas(4096) connection final
                       FC("({}): Got negative read (disconnect?), for {} aka '{}', of type {}. ({} -> '{}'?)\n"),
                       this->raw_descriptor(),
                       static_cast<void const *>(handle), this->get_key(),
-                      handle->type, nread, uv_strerror(nread));
+                      handle->type, nread, uv_strerror(static_cast<int>(nread)));
                   auto const &key_deleter = cast_deleter(handle->loop->data);
                   key_deleter(this->get_key(), false);
                   return;

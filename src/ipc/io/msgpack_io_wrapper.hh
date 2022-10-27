@@ -34,9 +34,10 @@ class msgpack_packer
       using buffer_type     = msgpack::vrefbuffer;
       using marshaller_type = msgpack::packer<buffer_type>;
 
-    protected:
+      friend class msgpack_wrapper<Connection>;
       friend msgpack_wrapper<Connection>;
 
+    protected:
       msgpack_packer *get_if_available()
       {
             std::lock_guard lock(mtx_);
@@ -197,10 +198,10 @@ class msgpack_wrapper : public basic_wrapper<Connection,
             return pack.get_if_available();
       }
 
-      auto &get_unpacker() &noexcept
-      {
-            return this->unpacker_;
-      }
+      auto        &get_unpacker()        & noexcept { return this->unpacker_; }
+      auto       &&get_unpacker()       && noexcept { return this->unpacker_; }
+      auto const  &get_unpacker() const  & noexcept { return this->unpacker_; }
+      auto const &&get_unpacker() const && noexcept { return this->unpacker_; }
 };
 
 

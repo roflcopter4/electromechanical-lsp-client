@@ -7,10 +7,10 @@ namespace util::concepts {
 
 template <typename T> concept Const     = std::is_const_v<std::remove_reference_t<T>>;
 template <typename T> concept Trivial   = std::is_trivial_v<std::remove_reference_t<T>>;
-template <typename T> concept Pointer   = std::is_pointer_v<T>;
+template <typename T> concept Pointer   = std::is_pointer_v<std::remove_reference_t<T>>;
 template <typename T> concept Array     = std::is_array_v<std::remove_reference_t<T>>;
 template <typename T> concept Integral  = std::is_integral_v<std::remove_reference_t<T>>;
-template <typename T> concept Function  = std::is_function_v<T>;
+template <typename T> concept Function  = std::is_function_v<std::remove_reference_t<T>>;
 template <typename T> concept Reference = std::is_reference_v<T>;
 template <typename T> concept GenericPointer = std::convertible_to<std::remove_cvref_t<T>, void *>;
 
@@ -35,7 +35,7 @@ template <typename T> concept StringVariant =
     std::same_as<std::remove_cvref_t<T>, std::string_view>;
 
 template <typename T> concept NotConst      = !Const<T>;
-template <typename T> concept NotReference  = !Reference<T>;
+template <typename T> concept NonReference  = !Reference<T>;
 template <typename T> concept NotPointer    = !Pointer<T>;
 template <typename T> concept NotArray      = !Array<T>;
 template <typename T> concept NotIntegral   = !Integral<T>;

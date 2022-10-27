@@ -1,8 +1,6 @@
 #include "Common.hh"
 #include "util/util.hh"
 
-#include "util/strings.hh"
-
 
 inline namespace emlsp {
 namespace util {
@@ -11,12 +9,12 @@ namespace util {
 
 namespace {
 
-struct signal_to_string_t {
+struct signal_to_string_s {
       std::string_view name;
       std::string_view explanation;
 };
 
-std::map<int, signal_to_string_t> signal_to_string = {
+std::map<int, signal_to_string_s> signal_to_string = {
 #ifdef SIGINT
     {SIGINT,    {"SIGINT", "Interactive attention signal."}          },
 #endif

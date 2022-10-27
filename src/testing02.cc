@@ -21,6 +21,7 @@
 //#include <ieee754.h>
 
 //#include </usr/lib/gcc/x86_64-pc-linux-gnu/12.1.0/include/quadmath.h>
+#if 0
 #include <boost/asio.hpp>
 namespace asio = boost::asio;
 
@@ -128,3 +129,4 @@ NOINLINE void foo06()
 /****************************************************************************************/
 } // namespace testing
 } // namespace emlsp
+#endif

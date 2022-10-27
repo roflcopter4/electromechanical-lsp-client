@@ -6,7 +6,6 @@
 
 #include "Common.hh"
 #include "ipc/misc.hh"
-#include "util/debug_trap.h"
 
 /* #undef WIN32_USE_PIPE_IMPL */
 #define WHAT_THE_FUCK() [[maybe_unused]] static constexpr int P99_PASTE(z_VARIABLE_that_IS_not_USED_, __LINE__, _, __COUNTER__, _) = 0
@@ -161,12 +160,6 @@ class base_connection_impl_interface
 #else
       std::thread *get_child_watcher_thread() { (void)this; return nullptr; }
 #endif
-
-#ifdef _WIN32
-    public:
-      ND virtual bool spawn_with_shim() const noexcept { return false; }
-         virtual void spawn_with_shim(bool) noexcept {}
-#endif
 };
 
 
@@ -262,10 +255,9 @@ class socket_connection_base_impl
       ND socket_t peer()     const { return con_read_; }
       ND socket_t acceptor() const { return acc_read_; }
 
-      virtual socket_t accept()  = 0;
-      virtual socket_t connect() = 0;
-
-      ND virtual sockaddr       &addr() &       = 0;
+      virtual socket_t           accept()       = 0;
+      virtual socket_t           connect()      = 0;
+      ND virtual sockaddr       &addr()       & = 0;
       ND virtual sockaddr const &addr() const & = 0;
 
       ND constexpr bool is_socket() const noexcept final
@@ -331,14 +323,6 @@ class unix_socket_connection_impl final
       ND sockaddr       &addr()       & final { return reinterpret_cast<sockaddr &>(addr_); }
       ND auto const     &path() const &       { return path_; }
 
-#ifdef _WIN32
-      ND bool spawn_with_shim() const noexcept final { return use_shim_; }
-      void spawn_with_shim(bool val) noexcept final;
-
-    private:
-      bool use_shim_ = false;
-#endif
-
     protected:
       socket_t open_new_socket()    final;
       socket_t connect_internally() final;
@@ -397,10 +381,6 @@ class socketpair_connection_impl final
 /* TCP/IP */
 
 
-extern socket_t
-connect_to_inet_socket(sockaddr const *addr, socklen_t size, int type, int protocol = 0);
-
-
 template <typename AddrType>
       REQUIRES (IsInetSockaddr<AddrType> ||
                 std::same_as<AddrType, sockaddr *>)
@@ -440,8 +420,8 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl
 
             /* XXX Code implicitly assumes that we read and write to and from the
              *     acc_* sockets, so use those to connect. Ugh. */
-            acc_read_ = connect_to_inet_socket(get_addr_generic(),
-                                               get_socklen(), get_type());
+            acc_read_ = util::socket::connect_to_inet_socket(get_addr_generic(),
+                                                             get_socklen(), get_type());
             acc_write_ = acc_read_;
             return con_read_;
       }
@@ -515,7 +495,7 @@ class inet_any_socket_connection_impl final
       using this_type = inet_any_socket_connection_impl;
       using base_type = socket_connection_base_impl;
 
-      int       type_        = AF_UNSPEC;
+      int       family_        = AF_UNSPEC;
       socklen_t addr_length_ = 0;
 
     public:
@@ -540,7 +520,7 @@ class inet_any_socket_connection_impl final
 
       ND constexpr socklen_t get_socklen()  const final { return addr_length_; }
       ND sockaddr const *get_addr_generic() const final { return addr_; }
-      ND int get_type() const final { return type_; }
+      ND int get_type() const final { return family_; }
 
     private:
       void set_listener(socket_t const/*sock*/, sockaddr const & /*addr*/) noexcept final
@@ -593,8 +573,8 @@ class inet_ipv6_socket_connection_impl final
     public:
       inet_ipv6_socket_connection_impl()        = default;
       ~inet_ipv6_socket_connection_impl() final = default;
-      DELETE_MOVE_CTORS(inet_ipv6_socket_connection_impl);
-      DELETE_COPY_CTORS(inet_ipv6_socket_connection_impl);
+
+      DELETE_ALL_CTORS(inet_ipv6_socket_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -633,8 +613,8 @@ class pipe_connection_impl : public base_connection_impl_interface
       using base_type = base_connection_impl_interface;
       friend class fd_connection_impl;
 
-      int volatile read_  = (-1);
-      int volatile write_ = (-1);
+      int read_  = (-1);
+      int write_ = (-1);
 
     public:
       pipe_connection_impl() = default;
@@ -643,8 +623,7 @@ class pipe_connection_impl : public base_connection_impl_interface
             close();
       }
 
-      DELETE_COPY_CTORS(pipe_connection_impl);
-      DELETE_MOVE_CTORS(pipe_connection_impl);
+      DELETE_ALL_CTORS(pipe_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -688,8 +667,7 @@ class fd_connection_impl final : public pipe_connection_impl
       fd_connection_impl(HANDLE readfd, HANDLE writefd);
 #endif
 
-      DELETE_COPY_CTORS(fd_connection_impl);
-      DELETE_MOVE_CTORS(fd_connection_impl);
+      DELETE_ALL_CTORS(fd_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -730,8 +708,7 @@ class pipe_handle_connection_impl final : public base_connection_impl_interface
             close();
       }
 
-      DELETE_COPY_CTORS(pipe_handle_connection_impl);
-      DELETE_MOVE_CTORS(pipe_handle_connection_impl);
+      DELETE_ALL_CTORS(pipe_handle_connection_impl);
 
       //--------------------------------------------------------------------------------
 
@@ -747,13 +724,13 @@ class pipe_handle_connection_impl final : public base_connection_impl_interface
       void       close() noexcept final;
       procinfo_t do_spawn_connection(size_t argc, char **argv) final;
 
-      ND descriptor_type fd() const noexcept      final { return reinterpret_cast<descriptor_type>(read_); }
+      ND descriptor_type fd() const noexcept final { return reinterpret_cast<descriptor_type>(read_); }
       ND size_t available() const final { return util::available_in_fd(read_); }
 
       ND HANDLE read_fd()  const noexcept { return read_; }
       ND HANDLE write_fd() const noexcept { return write_; }
 
-      void set_descriptors(HANDLE const readfd, HANDLE const writefd)
+      void set_descriptors(HANDLE const readfd, HANDLE const writefd) noexcept
       {
             set_initialized(1);
             read_  = readfd;
@@ -867,6 +844,7 @@ class libuv_pipe_handle_impl final
       ssize_t write(void const *buf, ssize_t nbytes, int flags) final;
 
     private:
+      PRAGMA_MSVC(warning(suppress: 5030))
       [[noreturn, gnu::__error__("This implementation can't read")]]
       ssize_t read(void * /*buf*/, ssize_t /*nbytes*/, int /*flags*/) final
       {
@@ -874,7 +852,7 @@ class libuv_pipe_handle_impl final
       }
 
       [[noreturn, gnu::__error__("This implementation can't read")]]
-      ssize_t read(void * /*buf*/, UU ssize_t const /*nbytes*/) final
+      ssize_t read(void * /*buf*/, ssize_t const /*nbytes*/) final
       {
             throw std::logic_error("This implementation can't read.");
       }
@@ -893,8 +871,7 @@ class libuv_pipe_handle_impl final
 
       void set_loop(uv_loop_t *loop);
 
-      DELETE_COPY_CTORS(libuv_pipe_handle_impl);
-      DELETE_MOVE_CTORS(libuv_pipe_handle_impl);
+      DELETE_ALL_CTORS(libuv_pipe_handle_impl);
 
     private:
       static void uvwrite_callback(uv_write_t *req, int status);
@@ -975,8 +952,6 @@ base_connection_impl_interface::get_err_handle()
 # define XLATE_ERR(e) e
 #endif
 
-WHAT_THE_FUCK();
-
 inline void close_socket(socket_t &sock) noexcept
 {
       if (sock != invalid_socket) {
@@ -997,16 +972,16 @@ inline void socket_connection_base_impl::close() noexcept
       close_socket(con_read_);
 }
 
+namespace io_impl {
 
-WHAT_THE_FUCK();
-extern size_t socket_recv_impl(socket_t sock, void       *buf, size_t nbytes, int flags);
-extern size_t socket_send_impl(socket_t sock, void const *buf, size_t nbytes, int flags);
-extern size_t socket_writev_impl(socket_t sock, iovec const *, size_t nbufs, int flags);
+extern ssize_t socket_recv_impl(socket_t sock, void       *buf, size_t nbytes, int flags);
+extern ssize_t socket_send_impl(socket_t sock, void const *buf, size_t nbytes, int flags);
+extern ssize_t socket_writev_impl(socket_t sock, iovec const *, size_t nbufs, int flags);
 
 
-template <typename File, size_t (*WriteFn)(File, iovec const *, size_t, int)>
-size_t
-writev_all(File fd, iovec *buf_vec, size_t nbufs, int const flags)
+//template <typename File, size_t (*WriteFn)(File, iovec const *, size_t, int)>
+inline ssize_t
+writev_all(socket_t fd, iovec *buf_vec, size_t nbufs, int const flags)
 {
 #ifdef _WIN32
 # define iov_len  len
@@ -1031,14 +1006,14 @@ writev_all(File fd, iovec *buf_vec, size_t nbufs, int const flags)
       //init_iovec(vec_cpy[nbufs], nullptr, 0);
       //memcpy(vec_cpy, buf_vec, nbufs * sizeof(iovec));
 
-      size_t total = 0;
+      ssize_t total = 0;
 
       while (nbufs > 0 && buf_vec[0].iov_len > 0) {
-            size_t delta = WriteFn(fd, buf_vec, nbufs, flags);
+            ssize_t delta = socket_writev_impl(fd, buf_vec, nbufs, flags);
             assert(delta > 0);
             total += delta;
 
-            for (iovec *vec; (vec = buf_vec)->iov_len > 0; ++buf_vec, --nbufs) {
+            for (iovec *vec; nbufs > 0 && (vec = buf_vec)->iov_len > 0; ++buf_vec, --nbufs) {
                   if (vec->iov_len > delta) {
                         vec->iov_len -= static_cast<decltype(vec->iov_len)>(delta);
                         vec->iov_base = (static_cast<char *>(vec->iov_base)) + delta;
@@ -1055,6 +1030,8 @@ writev_all(File fd, iovec *buf_vec, size_t nbufs, int const flags)
 #undef iov_base
 }
 
+} // namespace io_impl
+
 
 inline ssize_t
 socket_connection_base_impl::read(void         *buf,
@@ -1063,7 +1040,7 @@ socket_connection_base_impl::read(void         *buf,
 {
       std::lock_guard<std::recursive_mutex> lock{read_mtx_};
       SETERRNO(0);
-      return static_cast<ssize_t>(socket_recv_impl(acc_read_, buf, nbytes, flags));
+      return io_impl::socket_recv_impl(acc_read_, buf, nbytes, flags);
 }
 
 inline ssize_t
@@ -1073,7 +1050,7 @@ socket_connection_base_impl::write(void    const *buf,
 {
       std::lock_guard<std::recursive_mutex> lock{write_mtx_};
       SETERRNO(0);
-      return static_cast<ssize_t>(socket_send_impl(acc_write_, buf, nbytes, flags));
+      return io_impl::socket_send_impl(acc_write_, buf, nbytes, flags);
 }
 
 
@@ -1084,8 +1061,7 @@ socket_connection_base_impl::writev(iovec  *bufs,
 {
       std::lock_guard<std::recursive_mutex> lock{write_mtx_};
       SETERRNO(0);
-      return static_cast<ssize_t>(
-          writev_all<socket_t, socket_writev_impl>(acc_write_, bufs, nbufs, flags));
+      return io_impl::writev_all(acc_write_, bufs, nbufs, flags);
 }
 
 

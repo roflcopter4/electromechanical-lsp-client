@@ -46,8 +46,7 @@ class my_char_traits : public std::char_traits<Elem>
       /* This function is supposed to set `count' elements from `first' to the value
        * `ch'. Typically `ch' is 0. In other words, this function is meant to zero the
        * memory. Instead, this function does nothing. Much better. */
-      static constexpr Elem *
-      assign(Elem *const first, UNUSED size_t count, UNUSED Elem const ch) noexcept
+      static constexpr Elem *assign(Elem *const first, size_t, Elem const) noexcept
       {
             /* Do nothing. */
             return first;
@@ -68,13 +67,14 @@ template <typename T>
       REQUIRES (impl::StdStringDerived<T>)
 void resize_string_hack(T &str, size_t const new_size)
 {
+      using value_type   = typename T::value_type;
       using alloc_traits = std::allocator_traits<typename T::allocator_type>;
-      using value_t      = typename T::value_type;
-      using rebind_t     = typename alloc_traits::template rebind_alloc<value_t>;
-      using char_traits  = impl::my_char_traits<value_t>;
-      using hack_string  = std::basic_string<value_t, char_traits, rebind_t>;
+      using allocator    = typename alloc_traits::template rebind_alloc<value_type>;
+      using char_traits  = impl::my_char_traits<value_type>;
 
-      reinterpret_cast<hack_string &>(str).resize(new_size);
+      reinterpret_cast<
+          std::basic_string<value_type, char_traits, allocator> &
+      >(str).resize(new_size);
 }
 
 
