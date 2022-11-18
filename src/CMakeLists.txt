@@ -1,71 +1,113 @@
-# /src
 
 set(CMAKE_SKIP_BUILD_RPATH FALSE)
 set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
+set (lsp-thing_TOPSOURCES
+    "main.cc"
+    "testing01.cc"
+    "testing02.cc"
+    "testing03.cc"
+)
+set(lsp-thing_SOURCES_UTIL_C
+    "util/c/c_util.c"
+    "util/c/err.c"
+    "util/c/tmpfile.c"
+)
+set (lsp-thing_SOURCES
+    # "main.cc"
+    # "testing01.cc"
+    # "testing02.cc"
+    # "testing03.cc"
+
+    "mpack/format.cc"
+    "msgpack/dumper.cc"
+
+    "ipc/connection_impl.cc"
+    "ipc/rpc/lsp/static-data.cc"
+
+    "util/demangle.cc"
+    "util/signals.cc"
+    "util/socket.cc"
+    "util/util.cc"
+
+    "util/recode/recode.cc"
+)
+
+# Include headers to make using MSVC less infuriatingly tedious.
+set (lsp-thing_TOPHEADERS
+    "Common.hh"
+    "pch.hh"
+    "lazy.hh"
+)
+set(lsp-thing_HEADERS_UTIL_C
+    "util/c/c_util.h"
+    "util/c/debug_trap.h"
+    "util/c/initializer.h"
+    "util/c/macros.h"
+    "util/c/myerr.h"
+    "util/c/types.h"
+)
+set (lsp-thing_HEADERS
+    "json/rapid.hh"
+    "msgpack/dumper.hh"
+
+    "ipc/toploop.hh"
+
+    "ipc/connection_impl.hh"
+    "ipc/basic_sync_thing.hh"
+    "ipc/basic_protocol_connection.hh"
+    "ipc/ipc_connection.hh"
+    "ipc/misc.hh"
+    #"ipc/connection_interface.hh"
+
+    "ipc/io/basic_io_wrapper.hh"
+    "ipc/io/msgpack_io_wrapper.hh"
+    "ipc/io/ms_jsonrpc_io_wrapper.hh"
+
+    "ipc/protocols/msgpack_connection.hh"
+    "ipc/protocols/ms_jsonrpc_connection.hh"
+
+    "ipc/rpc/lsp.hh"
+    "ipc/rpc/lsp/static-data.hh"
+    "ipc/rpc/neovim.hh"
+    "ipc/rpc/rpc.hh"
+
+    # "util/errno.hh"
+    "util/concepts.hh"
+    "util/formatters.hh"
+    "util/hackish_templates.hh"
+    "util/misc.hh"
+    "util/util.hh"
+
+    "util/recode/recode.hh"
+    "util/recode/recode_private.hh"
+    "util/recode/strlen.hh"
+)
+
+
 add_executable(lsp-thing
-    # $<TARGET_OBJECTS:x4c_parser>
-    main.cc
-    nlohmann.cc
-    rapid.cc
-    rpc.cc
-    client.cc
+    ${lsp-thing_SOURCES}
+    ${lsp-thing_HEADERS}
+    ${lsp-thing_TOPSOURCES}
+    ${lsp-thing_TOPHEADERS}
+    ${lsp-thing_SOURCES_UTIL_C}
+    ${lsp-thing_HEADERS_UTIL_C}
 
-    event/loop.cc
-    event/event.cc
-    lsp-protocol/static-data.cc
-
-    util/err.c
-    util/tmpfile.c
-    util/util.cc
-    util/c_util.c
+    "${CMAKE_BINARY_DIR}/config.h"
 )
 
-if (TRUE OR NOT "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-   target_precompile_headers(lsp-thing
-       PRIVATE
-       $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/pch.hh>
-   )
-endif()
+source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}"
+             PREFIX "Source Files/src"
+             FILES ${lsp-thing_SOURCES} ${lsp-thing_HEADERS})
+source_group("Source Files/src/zzz-Root"
+             FILES ${lsp-thing_TOPSOURCES} ${lsp-thing_TOPHEADERS})
+source_group("Source Files/src/util/C"
+             FILES ${lsp-thing_SOURCES_UTIL_C} ${lsp-thing_HEADERS_UTIL_C})
 
-set_property(TARGET lsp-thing APPEND PROPERTY INCLUDE_DIRECTORIES
-             "${CMAKE_CURRENT_SOURCE_DIR}"
-             "${GLib_INCLUDE_DIRS}"
-)
-
-set_property(SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/pch.hh APPEND PROPERTY COMPILE_OPTIONS
-        -fpch-debuginfo -fpch-instantiate-templates -fpch-codegen -relocatable-pch
-)
-
-################################################################################
-# Libraries
-
-if (WIN32)
-    if (${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
-        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/debug/lib")
-		target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_DEBUG})
-    else()
-        set (_WIN32_VCPKG_LIB_PATH "${_VCPKG_INSTALLED_DIR}/x64-windows/lib")
-		target_link_libraries(lsp-thing ${TINYCTHREAD_LIBRARY_RELEASE})
-    endif()
-endif()
-
-target_link_libraries(lsp-thing
-    ${CMAKE_THREAD_LIBS_INIT}
-    #fmt::fmt
-    rapidjson
-    nlohmann_json
-    ${GLib_LIBRARY}
-    #-luv
-)
-
-if (USE_JEMALLOC STREQUAL "YES")
-    target_link_libraries(x4c ${JEMALLOC_LIBRARY})
-endif()
-
-if (WIN32)
-    target_link_libraries(lsp-thing
-        ws2_32.lib
-    )
-endif()
+unset (lsp-thing_SOURCES)
+unset (lsp-thing_HEADERS)
+unset (lsp-thing_TOPSOURCES)
+unset (lsp-thing_TOPHEADERS)
+unset (lsp-thing_SOURCES_UTIL_C)
+unset (lsp-thing_HEADERS_UTIL_C)

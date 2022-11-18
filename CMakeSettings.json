@@ -2,32 +2,51 @@
   "configurations": [
     {
       "name": "x64-Debug",
-      "generator": "Visual Studio 16 2019 Win64",
+      "generator": "Visual Studio 17 2022 Win64",
       "configurationType": "Debug",
       "inheritEnvironments": [ "msvc_x64_x64" ],
       "buildRoot": "${projectDir}\\out\\build\\${name}",
       "installRoot": "${projectDir}\\out\\install\\${name}",
-      "cmakeCommandArgs": "-DCMAKE_EXPORT_COMPILE_COMMANDS=YES -DVCPKG_CRT_LINKAGE=dynamic -DCMAKE_BUILD_TYPE=Debug -DVCPKG_ROOT=\"D:/VCPKG\"",
+      "cmakeCommandArgs": "-DCMAKE_EXPORT_COMPILE_COMMANDS=YES -DCMAKE_BUILD_TYPE=Debug",
       "buildCommandArgs": "-nologo",
       "ctestCommandArgs": "",
-      "cmakeToolchain": "D:\\VCPKG\\scripts\\toolchains\\windows.cmake",
       "variables": [
         {
-          "name": "CMAKE_C_FLAGS",
-          "value": "/DWIN32 /D_WINDOWS -Zc:preprocessor /ARCH:AVX512 /std:c17 /MP",
-          "type": "STRING"
-        },
-        {
           "name": "CMAKE_VERBOSE_MAKEFILE",
-          "value": "True",
+          "value": "ON",
           "type": "BOOL"
         },
         {
-          "name": "CMAKE_CXX_FLAGS",
-          "value": "/DWIN32 /D_WINDOWS /EHsc -Zc:preprocessor -Zc:__cplusplus /mt /std:c++20 /MP",
+          "name": "VCPKG_ROOT",
+          "value": "D:/VCPKG",
           "type": "STRING"
         }
-      ]
+      ],
+      "cmakeExecutable": "D:\\Program Files\\Microsoft Visual Studio\\2022\\Preview\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Visual Studio 17 2022 Win64",
+      "configurationType": "Release",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "buildRoot": "${projectDir}\\out\\build\\${name}",
+      "installRoot": "${projectDir}\\out\\install\\${name}",
+      "cmakeCommandArgs": "-DCMAKE_EXPORT_COMPILE_COMMANDS=YES",
+      "buildCommandArgs": "-nologo",
+      "ctestCommandArgs": "",
+      "variables": [
+        {
+          "name": "CMAKE_VERBOSE_MAKEFILE",
+          "value": "ON",
+          "type": "BOOL"
+        },
+        {
+          "name": "VCPKG_ROOT",
+          "value": "D:/VCPKG",
+          "type": "STRING"
+        }
+      ],
+      "cmakeExecutable": "D:\\Program Files\\Microsoft Visual Studio\\2022\\Preview\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin\\cmake.exe"
     }
   ]
 }

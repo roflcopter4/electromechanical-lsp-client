@@ -1,7 +1,10 @@
+#pragma once
+#ifndef HGUARD__CONFIG_H_
+#define HGUARD__CONFIG_H_ //NOLINT
+
 #cmakedefine DEBUG
 #cmakedefine USE_JEMALLOC
 
-#cmakedefine HAVE_ARC4RANDOM
 #cmakedefine HAVE_ASPRINTF
 #cmakedefine HAVE_CLOCK_GETTIME
 #cmakedefine HAVE_DPRINTF
@@ -13,27 +16,100 @@
 #cmakedefine HAVE_PAUSE
 #cmakedefine HAVE_PIPE2
 #cmakedefine HAVE_POSIX_SPAWNP
+#cmakedefine HAVE_SOCKETPAIR
 #cmakedefine HAVE_STRCASECMP
+#cmakedefine HAVE_STRCPY_S
+#cmakedefine HAVE_STRERROR_R
+#cmakedefine HAVE_STRERROR_S
 #cmakedefine HAVE_STRICMP
 #cmakedefine HAVE_STRLCAT
 #cmakedefine HAVE_STRLCPY
 #cmakedefine HAVE_STRSEP
 #cmakedefine HAVE_TIMESPEC_GET
 
+#cmakedefine HAVE_AFUNIX_H
 #cmakedefine HAVE_EXECINFO_H
-#cmakedefine HAVE_INTRIN_H
-#cmakedefine HAVE_STDATOMIC_H
-#cmakedefine HAVE_STDNORETURN_H
-#cmakedefine HAVE_SYS_AUXV_H
 #cmakedefine HAVE_THREADS_H
-#cmakedefine HAVE_UNISTD_H
-#cmakedefine HAVE_X86_INTRIN_H
 
-#define ASIO_HAS_STD_INVOKE_RESULT 1
+#if defined DEBUG && defined NDEBUG
+#  undef NDEBUG
+#endif
+#if !defined NDEBUG && !defined DEBUG
+#  define DEBUG 1
+#endif
+#ifdef DEBUG
+#  define _DEBUG 1
+#endif
+
+#define MAIN_PROJECT_NAME           "@CMAKE_PROJECT_NAME@"
+#define MAIN_PROJECT_VERSION_STRING "@CMAKE_PROJECT_VERSION@"
+#define MAIN_PROJECT_VERSION_MAJOR  @CMAKE_PROJECT_VERSION_MAJOR@
+#define MAIN_PROJECT_VERSION_MINOR  @CMAKE_PROJECT_VERSION_MINOR@
+#define MAIN_PROJECT_VERSION_PATCH  @CMAKE_PROJECT_VERSION_PATCH@
+
+#define __STDC_WANT_LIB_EXT__    1
+#define __STDC_WANT_LIB_EXT1__   1
+#define __STDC_WANT_LIB_EXT2__   1
+#define __STDC_WANT_SECURE_LIB__ 1
+
+#define ASIO_HAS_STD_INVOKE_RESULT       1
 #define BOOST_ASIO_HAS_STD_INVOKE_RESULT 1
 
-#define MAIN_PROJECT_NAME    "@CMAKE_PROJECT_NAME@"
-#define MAIN_PROJECT_VERSION_STRING "@CMAKE_PROJECT_VERSION@"
-#define MAIN_PROJECT_VERSION_MAJOR @CMAKE_PROJECT_VERSION_MAJOR@
-#define MAIN_PROJECT_VERSION_MINOR @CMAKE_PROJECT_VERSION_MINOR@
-#define MAIN_PROJECT_VERSION_PATCH @CMAKE_PROJECT_VERSION_PATCH@
+#define FMT_HEADER_ONLY 1
+#define FMT_USE_NONTYPE_TEMPLATE_PARAMETERS 1
+#define FMT_USE_USER_DEFINED_LITERALS 0
+#define FMT_USE_FULL_CACHE_DRAGONBOX 1
+
+#define RAPIDJSON_SSE2 1
+#define RAPIDJSON_SSE42 1
+#define RAPIDJSON_USE_MEMBERSMAP 0
+#define RAPIDJSON_HAS_CXX11_TYPETRAITS 1
+#define RAPIDJSON_HAS_CXX11_RANGE_FOR  1
+#define RAPIDJSON_HAS_STDSTRING 1
+
+#define JSON_HAS_CPP_20 1
+#define JSON_HAS_CPP_17 1
+#define JSON_HAS_CPP_14 1
+#define JSON_HAS_CPP_11 1
+//#define JSON_HAS_EXPERIMENTAL_FILESYSTEM 1
+#define JSON_HAS_FILESYSTEM 1
+#define JSON_USE_IMPLICIT_CONVERSIONS 1
+#define JSON_DIAGNOSTICS 1
+
+#if !defined _GNU_SOURCE && defined __gnu_linux__
+#  define _GNU_SOURCE //NOLINT
+#endif
+
+#ifdef _MSC_VER
+#  define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING 1
+#  define _CRT_SECURE_NO_WARNINGS 1
+#  define _USE_DECLSPECS_FOR_SAL 1
+#  ifndef HAVE_STRERROR_S
+#    define HAVE_STRERROR_S 1
+#  endif
+#  pragma warning(disable: 4820 4365 4061 4623 4625 4626 5026 5027 5045 4619)
+#else
+#  ifndef NDEBUG
+#    define _LIBCPP_DEBUG_LEVEL 2
+#    define _GLIBCXX_ASSERTIONS 1
+#  endif
+#endif
+
+#if defined _WIN32 || defined _WIN64
+#  define WIN32_LEAN_AND_MEAN 1
+#  define NOMINMAX 1
+#  define BOOST_USE_WINDOWS_H 1
+#  define __PTW32_CLEANUP_C 1
+#elif defined __linux__   || defined __bsdi__   || defined __FreeBSD__   || \
+      defined __OpenBSD__ || defined __NetBSD__ || defined __DragonFly__ || \
+      defined __CYGWIN__  || defined __unix__   || defined unix
+   /* Nothing */
+#elif defined __APPLE__ && defined __MACH__
+#  error "OSX/MacOS is totally untested. Remove this error message from `cmake-config.h.in' and re-run cmake to compile. CAVEAT EMPTOR"
+#elif defined __MSDOS__ || defined __DOS__
+#  error "lol"
+#else
+#  error "What the hell kind of OS are you even using?"
+#endif
+
+#endif // config.h

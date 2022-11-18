@@ -1,28 +1,54 @@
 #pragma once
-#ifndef HGUARD_d_COMMON_HH_
-#define HGUARD_d_COMMON_HH_
+#ifndef HGUARD__COMMON_HH_
+#define HGUARD__COMMON_HH_ //NOLINT
 /****************************************************************************************/
 
 #ifdef HAVE_CONFIG_H
 # include "config.h"
 #endif
-
-#include "util/macros.h"
+#ifdef USE_JEMALLOC
+#  define JEMALLOC_NO_DEMANGLE 1
+#  include <jemalloc/jemalloc.h>
+#endif
+#ifndef _MSC_VER
+#  define _Notnull_
+#  define _In_
+#  define _In_z_
+#  define _In_opt_
+#  define _In_opt_z_
+#  define _In_z_bytecount_(x)
+#  define _Out_
+#  define _Out_writes_(x)
+#  define _Out_z_cap_(x)
+#  define _Outptr_
+#  define _Outptr_result_z_
+#  define _Printf_format_string_
+#  define _Post_z_
+#endif
+//#define __USE_MINGW_ANSI_STDIO 0
 
 /*--------------------------------------------------------------------------------------*/
 
 #ifdef __cplusplus
 
+#define MSGPACK_UNPACKER_INIT_BUFFER_SIZE SIZE_C(8'388'608)  /* 2^23 aka 8MiB */
+// #define MSGPACK_UNPACKER_INIT_BUFFER_SIZE (8)
+
+# include <assert.h> //NOLINT
 # include "pch.hh"
 
-using std::operator""s; //NOLINT
+inline namespace emlsp {
+using namespace std::literals;
+#if FMT_USE_USER_DEFINED_LITERALS
+using namespace fmt::literals;
+#endif
+} // namespace emlsp
 
 #else // not C++
 
 # include <assert.h>
 # include <ctype.h>
 # include <errno.h>
-# include <fcntl.h>
 # include <inttypes.h>
 # include <limits.h>
 # include <stdarg.h>
@@ -36,10 +62,11 @@ using std::operator""s; //NOLINT
 # include <fcntl.h>
 # include <sys/stat.h>
 
-# if defined DOSISH
+# if defined _WIN32
 #  define WIN32_LEAN_AND_MEAN 1
+#  include <sal.h>
 #  include <Windows.h>
-#  include <winsock2.h>
+#  include <WinSock2.h>
 
 #  include <afunix.h>
 #  include <direct.h>
@@ -54,25 +81,17 @@ using std::operator""s; //NOLINT
 #  include <unistd.h>
 # endif
 
+#include "util/c/types.h"
+#include "util/c/macros.h"
+
 #endif // defined __cplusplus
 
 /*--------------------------------------------------------------------------------------*/
 
-#ifdef HAVE_THREADS_H
-# include <threads.h>
-#else
-# include <tinycthread.h>
-#endif
+#include "util/c/initializer.h"
+#include "util/c/myerr.h"
+#include "util/c/debug_trap.h"
 
-#include "util/types.h"
-
-#ifdef __cplusplus
-# include "util/util.hh"
-#else
-#endif
-
-#include "util/initializer_hack.h"
-#include "util/myerr.h"
 
 /****************************************************************************************/
 #endif // Common.hh

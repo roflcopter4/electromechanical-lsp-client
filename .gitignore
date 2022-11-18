@@ -33,9 +33,24 @@
 
 # Etc
 *~
+*.bak
 compile_commands.json
-build/
+
+# Directories
+BAK/
 MSVC/
+build/
 out/
-.vs/
 .cache/
+.vs/
+
+# Temporary!
+make_rpc/
+Vim/
+contrib/detours/
+contrib/libunistring/
+*.hint
+*.supp
+Folder.DotSettings
+CMakeSettings.json
+dump.py

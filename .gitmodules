@@ -1,3 +1,9 @@
 [submodule "cmake/gnome-cmake"]
 	path = cmake/gnome-cmake
 	url = https://github.com/nemequ/gnome-cmake
+[submodule "contrib/rapidjson"]
+	path = contrib/rapidjson
+	url = https://github.com/Tencent/rapidjson
+[submodule "contrib/fmt"]
+	path = contrib/fmt
+	url = https://github.com/fmtlib/fmt
