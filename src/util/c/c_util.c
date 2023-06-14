@@ -12,8 +12,9 @@
 # endif
 
 int
-asprintf(_Outptr_result_z_             char      **restrict destp,
-         _In_z_ _Printf_format_string_ char const *restrict fmt,
+asprintf(_Outptr_result_z_ char **__restrict destp,
+         _In_z_ _Printf_format_string_
+         char const *__restrict fmt,
          ...)
 {
       int     len;
@@ -30,7 +31,7 @@ asprintf(_Outptr_result_z_             char      **restrict destp,
       *destp = malloc(len + SIZE_C(1));
       if (!*destp)
             err("malloc()");
-      vsprintf(*destp, fmt, ap1);
+      (void)vsprintf(*destp, fmt, ap1);
       va_end(ap1);
 
       return len;
@@ -38,17 +39,6 @@ asprintf(_Outptr_result_z_             char      **restrict destp,
 #endif
 
 /****************************************************************************************/
-
-#if defined __GNUC__
-  /* This also works with clang. */
-# pragma GCC diagnostic push
-# pragma GCC diagnostic error "-Wint-conversion"
-# define DIAG_POP() _Pragma("GCC diagnostic pop")
-#else
-# define DIAG_POP()
-#endif
-PRAGMA_GCC("GCC diagnostic push")
-PRAGMA_GCC("GCC diagnostic error \"-Wint-conversion\"")
 
 _Check_return_ char const *
 my_strerror(_In_                 errno_t errval,
@@ -58,7 +48,7 @@ my_strerror(_In_                 errno_t errval,
       char const *estr;
 
 #if defined HAVE_STRERROR_S || defined _MSC_VER
-      strerror_s(buf, buflen, errval);
+      (void)strerror_s(buf, buflen, errval);
       estr = buf;
 #elif defined HAVE_STRERROR_R
 # if defined __GLIBC__ && defined _GNU_SOURCE && defined __USE_GNU
@@ -75,18 +65,15 @@ my_strerror(_In_                 errno_t errval,
       return estr;
 }
 
-PRAGMA_GCC("GCC diagnostic pop")
-DIAG_POP()
-
 /****************************************************************************************/
 
 #ifndef HAVE_STRLCPY
 size_t
-emlsp_strlcpy(_Out_writes_z_(size) char       *restrict dst,
-              _In_z_               char const *restrict src,
-              _In_                 size_t const         size)
+emlsp_strlcpy(_Out_writes_z_(size) char       *__restrict dst,
+              _In_z_               char const *__restrict src,
+              _In_                 size_t const           size)
 {
-      /* Do it the stupid way. It's, frankly, probably faster anyway. */
+      /* Do it the stupid way. Frankly it's probably faster anyway. */
       size_t const slen = strlen(src);
 
       if (size) {
@@ -110,8 +97,8 @@ vdprintf(_In_ int const fd,
          _In_ va_list ap)
 {
       FILE     *fp  = fdopen(fd, "wb");
-      int const ret = vfprintf(fp, format, ap);
-      fclose(fp);
+      int const ret = vfprintf(fp, format, ap);  // NOLINT(clang-diagnostic-format-nonliteral)
+      (void)fclose(fp);
       return ret;
 }
 
@@ -144,15 +131,15 @@ dprintf(_In_ int const fd,
 _Check_return_
 DWORD getppid(void)
 {
-      bool           found     = false;
-      DWORD          ppid      = 0;
-      void *const    hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+      void *const hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 
       if (hSnapshot && hSnapshot == INVALID_HANDLE_VALUE)
       {
-            PROCESSENTRY32 pe32 = {.dwSize = sizeof pe32};
-            DWORD const    pid  = GetCurrentProcessId();
-            BOOL           ok   = Process32First(hSnapshot, &pe32);
+            DWORD          ppid  = 0;
+            bool           found = false;
+            PROCESSENTRY32 pe32  = {.dwSize = sizeof pe32};
+            DWORD const    pid   = GetCurrentProcessId();
+            BOOL           ok    = Process32First(hSnapshot, &pe32);
 
             while (ok) {
                   if (pid == pe32.th32ProcessID) {
@@ -179,8 +166,9 @@ DWORD getppid(void)
 _Success_(return == 0)
 int fsync(_In_ int const descriptor)
 {
-      return (FlushFileBuffers((HANDLE)(uintptr_t)_get_osfhandle(descriptor)) == 0)
-                 ? -1
-                 :  0;
+      HANDLE const os_descriptor = (HANDLE)(uintptr_t)_get_osfhandle(descriptor);
+      return FlushFileBuffers(os_descriptor) == 0
+                ? -1 /* failure */
+                :  0 /* success */;
 }
 #endif

@@ -13,13 +13,6 @@
 # include <DbgHelp.h>
 #endif
 
-#if defined HAVE_MKDTEMP
-#  define MKDTEMP(x) ::mkdtemp(x)
-#else
-#  include <glib.h>
-#  define MKDTEMP(x) ::g_mkdtemp(x)
-#endif
-
 #ifndef _MSC_VER
 #  define _Printf_format_string_
 #endif
@@ -42,7 +35,7 @@
 
 /****************************************************************************************/
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 
 namespace constants {
@@ -211,37 +204,57 @@ cleanup_sighandler(int const signum)
 
 /*--------------------------------------------------------------------------------------*/
 
-static __inline std::filesystem::path
-do_mkdtemp(std::filesystem::path const &dir)
+namespace win32 {
+static void
+mkdtemp()
 {
-      char        buf[PATH_MAX + 1];
-      auto const &dir_str = dir.string();
-      size_t      size    = dir_str.size();
+
+}
+} // namespace win32
+
+
+static __inline std::filesystem::path
+do_mkdtemp(std::filesystem::path const &dir, char const *prefix)
+{
+#ifdef HAVE_MKDTEMP
+      char       buf[PATH_MAX];
+      auto const dir_str = dir.string() + prefix;
+      size_t     size    = dir_str.size();
 
       memcpy(buf, dir_str.data(), size); // NOLINT(bugprone-not-null-terminated-result)
       memcpy(buf + size, "XXXXXX", SIZE_C(7));
       size += SIZE_C(6);
 
       errno = 0;
-      char const *str = MKDTEMP(buf);
+      char const *str = mkdtemp(buf);
       if (!str)
-            err_nothrow("g_mkdtemp");
+            err_nothrow("mkdtemp");
 
       return { std::string_view{str, size} };
+#else
+      for (;;) {
+            wchar_t      buf[PATH_MAX];
+            size_t const len =
+                ::braindead_wide_tempname(buf, (LR"(\\?\)"s + dir.wstring()).c_str(), util::recode<wchar_t>(prefix).c_str(), nullptr);
+            auto const   ret = std::filesystem::path{std::wstring_view{buf, len}};
+            if (::CreateDirectoryW(ret.c_str(), nullptr))
+                  return ret;
+            DWORD const e = GetLastError();
+            if (e != ERROR_ALREADY_EXISTS)
+                  win32::error_exit_explicit(fmt::format(L"Unexpected file system error while trying to create directory '{}'", ret.wstring()).c_str(), e);
+      }
+#endif
 }
 
 std::filesystem::path
 get_temporary_directory(char const *prefix)
 {
-      auto tmp_dir = std::filesystem::temp_directory_path();
-      if (prefix)
-            tmp_dir /= prefix;
+      using std::filesystem::path, std::filesystem::perms, std::filesystem::perm_options;
 
-      auto ret = do_mkdtemp(tmp_dir);
-
-      /* Paranoia; justified paranoia: on Windows g_mkdtemp doesn't set any
-       * permissions at all. */
-      permissions(ret, std::filesystem::perms::owner_all);
+      path tmp_dir = std::filesystem::temp_directory_path();
+      path ret     = do_mkdtemp(tmp_dir, prefix);
+      /* This probably doesn't accomplish anything, but it shouldn't hurt? */
+      permissions(ret, perms::owner_all, perm_options::replace);
 
       cleanup.push(ret);
       return ret;
@@ -688,7 +701,7 @@ close_descriptor(SOCKET &fd) noexcept
 void
 close_descriptor(intptr_t &fd) noexcept
 {
-      if (fd > 0)
+      if (fd >= 0)
             ::closesocket(fd);
       fd = -1;
 }
@@ -900,14 +913,14 @@ myCtrlHandler(DWORD const type) noexcept
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 
 
 #ifdef _WIN32
 extern "C" NORETURN void
 emlsp_win32_error_exit_message_w(_In_z_ wchar_t const *msg)
 {
-      ::emlsp::util::win32::error_exit_message(msg);
+      ::MAIN_PACKAGE_NAMESPACE::util::win32::error_exit_message(msg);
 }
 
 extern "C" void

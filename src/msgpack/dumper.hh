@@ -4,7 +4,7 @@
 
 #include <msgpack.hpp>
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::mpack {
 
 namespace concepts {
@@ -36,14 +36,14 @@ class dumper
       void dump(msgpack::object_map const *dict);
 
     public:
-      template <typename Object> REQUIRES(concepts::ValidMsgpack<Object>)
+      template <typename Object> requires concepts::ValidMsgpack<Object>
       explicit dumper(Object const *value, std::ostream &out = std::cout)
             : strm_(out)
       {
             dump(value);
       }
 
-      template <typename Object> REQUIRES(concepts::ValidMsgpack<Object>)
+      template <typename Object> requires concepts::ValidMsgpack<Object>
       explicit dumper(Object const &value, std::ostream &out = std::cout)
             : strm_(out)
       {
@@ -52,4 +52,4 @@ class dumper
 };
 
 } // namespace util::mpack
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

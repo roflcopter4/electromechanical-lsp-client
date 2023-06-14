@@ -337,6 +337,26 @@ class spawner_connection : public detail::spawner_connection
             return status;
       }
 
+      void open()
+      {
+            impl_.open();
+      }
+
+#ifdef _WIN32
+      void resume_and_accept()
+      {
+            if (!socket_impl_)
+                  throw std::logic_error("Function 'resume_and_accept' is only valid for socket-based connections.");
+            ::ResumeThread(pid().hThread);
+            socket_impl_->accept();
+# ifdef _DEBUG
+            util::eprint(FC("Accepted connection!\n"));
+# endif
+      }
+#else
+      void resume_and_accept() const {}
+#endif
+
       ND constexpr base::socket_connection_base_impl *impl_socket() final
       {
             return socket_impl_;

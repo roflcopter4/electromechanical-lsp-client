@@ -5,7 +5,7 @@
 
 #include "Common.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::socket {
 /****************************************************************************************/
 
@@ -37,7 +37,7 @@ __forceinline void init_sockaddr_un(::sockaddr_un &addr, char const *const path)
 }
 
 template <typename Container>
-    REQUIRES (util::concepts::Integral<typename Container::value_type>)
+    requires util::concepts::Integral<typename Container::value_type>
 __forceinline void
 init_sockaddr_un(::sockaddr_un &addr, Container const &path)
 {
@@ -47,6 +47,6 @@ init_sockaddr_un(::sockaddr_un &addr, Container const &path)
 
 /****************************************************************************************/
 } // namespace util::socket
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif
 // vim: ft=cpp

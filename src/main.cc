@@ -8,7 +8,7 @@
 
 /****************************************************************************************/
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 
  namespace testing {
   NOINLINE void foo02();
@@ -21,21 +21,21 @@ inline namespace emlsp {
   NOINLINE int  foo100();
   NOINLINE void foo101();
  } // namespace testing
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 
 /****************************************************************************************/
 
 static void init_locale() noexcept
 {
       // FIXME: Change this at some point. Obviously.
-      static constexpr char    locale_name[] = "en_US.UTF8";
+      static constexpr char locale_name[] = "en_US.UTF8";
 
-      ::setlocale(LC_ALL,      locale_name);
-      ::setlocale(LC_COLLATE,  locale_name);
-      ::setlocale(LC_CTYPE,    locale_name);
-      ::setlocale(LC_MONETARY, locale_name);
-      ::setlocale(LC_NUMERIC,  locale_name);
-      ::setlocale(LC_TIME,     locale_name);
+      (void)::setlocale(LC_ALL,      locale_name);
+      (void)::setlocale(LC_COLLATE,  locale_name);
+      (void)::setlocale(LC_CTYPE,    locale_name);
+      (void)::setlocale(LC_MONETARY, locale_name);
+      (void)::setlocale(LC_NUMERIC,  locale_name);
+      (void)::setlocale(LC_TIME,     locale_name);
 #ifdef LC_MESSAGES
       ::setlocale(LC_MESSAGES, locale_name);
 #endif
@@ -82,7 +82,7 @@ static void init_crt_debugging()
 #endif
 
 NOINLINE static void
-call_initializers(UU int &argc, UU char **&argv)
+call_initializers(UU int const argc, UU char **argv)
 {
       init_crt_debugging();
       init_locale();
@@ -104,7 +104,7 @@ call_initializers(UU int &argc, UU char **&argv)
 /*--------------------------------------------------------------------------------------*/
 
 static int
-do_main(int argc, char *argv[])
+do_main(int const argc, char **argv)
 {
       call_initializers(argc, argv);
 
@@ -113,26 +113,13 @@ do_main(int argc, char *argv[])
       if (argc > 2)
             errx_nothrow("ERROR: Too many parameters.\n");
 
-      testing::foo101();
-
-      // util::win32::warning_box_explicit("Die in fire:", WSAENOTSOCK);
-      // util::win32::warning_box_explicit("Die in fire:", WSAECONNREFUSED);
-      // util::win32::warning_box_explicit("Die in fire:", WSAEADDRINUSE);
-      // util::win32::error_exit_explicit("Foo. Bar. Baz.", ENOENT);
-
       testing::foo02();
-      // testing::foo04();
-      // testing::foo05();
-      // testing::foo06();
-      // testing::foo10(argv[1]);
-
-      //testing::foo20();
 
       return 0;
 }
 
 int
-main(int argc, char *argv[])
+main(int const argc, char *argv[])
 {
       int r = 1;
 

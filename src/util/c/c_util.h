@@ -24,6 +24,9 @@
 #  define _Printf_format_string_
 # endif
 #endif
+#ifndef __attr_access
+# define __attr_access(x)
+#endif
 #define PFSAL _Printf_format_string_
 
 #if !defined restrict && (defined __cplusplus || defined __RESHARPER__)
@@ -44,18 +47,19 @@ my_strerror(_In_                 errno_t errval,
 
 /**
  * \brief
- * Creates a pseudorandom filename. The buffer should be empty; no template is required.
- * Instead, provide the desired directory for the file and it a name will be created
- * there. Optionally, a prefix and/or suffix may be provided for the filename.
+ * Creates a pseudorandom filename. The buffer should be empty; no template is
+ * required nor would one be used if provided. Instead, provide the desired
+ * directory for the file and it a name will be created there. Optionally, a
+ * prefix and/or suffix may be provided for the filename.
  *
+ * \note
  * NOT FOR USE IN GENERATING FILENAMES TO BE USED DIRECTLY IN A WORLD WRITABLE
  * TEMPORARY DIRECTORY SUCH AS '/tmp`!
+ * It is safe only if the directory you provide has been created securely by a
+ * function like mkdtemp, or otherwise guarantee that the file you're creating
+ * can not be created by something else before you do it.
  *
- * It is safe only if the directory you provide has been created securely by a function
- * like mkdtemp, or otherwise guarantee that the file you're creating can not be
- * created * by something else before you do it.
- *
- * \param buf An empty char buffer which should be of size <code>PATH_MAX + 1</code>.
+ * \param buf An empty char buffer which should be of size <code>PATH_MAX</code> or <code>MAX_PATH</code> on Windows.
  * \param dir The base directory for the file. May <b>not</b> be <code>NULL</code>.
  *            May be an empty string.
  * \param prefix Optional prefix for the filename. May be <code>NULL</code>.
@@ -70,6 +74,38 @@ extern size_t braindead_tempname(_Out_ _Post_z_ char       *__restrict buf,
     __attr_access((__write_only__, 1)) __attr_access((__read_only__, 2))
     __attr_access((__read_only__,  3)) __attr_access((__read_only__, 4));
 
+#ifdef _WIN32
+/**
+ * \brief
+ * Creates a pseudorandom wide character filename. The buffer should be empty;
+ * no template is required nor would one be used if provided. Instead, provide
+ * the desired directory for the file and it a name will be created there.
+ * Optionally, a prefix and/or suffix may be provided for the filename.
+ *
+ * NOT FOR USE IN GENERATING FILENAMES TO BE USED DIRECTLY IN A WORLD WRITABLE
+ * TEMPORARY DIRECTORY SUCH AS '/tmp`!
+ *
+ * It is safe only if the directory you provide has been created securely by a
+ * function like mkdtemp, or otherwise guarantee that the file you're creating
+ * can not be created by something else before you do it.
+ *
+ * \param buf An empty char buffer which should be of size <code>PATH_MAX</code>,
+ *            or <code>MAX_PATH</code> on Windows, or up to <code>32,767</code>
+ *            on Windows if prefixed by the string <code>LR"(\\?\)"</code>.
+ * \param dir The base directory for the file. May <b>not</b> be <code>NULL</code>.
+ *            May be an empty string.
+ * \param prefix Optional prefix for the filename. May be <code>NULL</code>.
+ * \param suffix Optional suffix for the filename. May be <code>NULL</code>.
+ * \return Length of the generated filename.
+ */
+extern size_t braindead_wide_tempname(_Out_ _Post_z_ wchar_t       *__restrict buf,
+                                      _In_z_         wchar_t const *__restrict dir,
+                                      _In_opt_z_     wchar_t const *__restrict prefix,
+                                      _In_opt_z_     wchar_t const *__restrict suffix)
+    __attribute__((__nonnull__(1, 2)))
+    __attr_access((__write_only__, 1)) __attr_access((__read_only__, 2))
+    __attr_access((__read_only__,  3)) __attr_access((__read_only__, 4));
+#endif
 
 #ifndef HAVE_ASPRINTF
 /**
@@ -111,15 +147,15 @@ extern size_t emlsp_strlcpy(_Out_writes_z_(size) char       *__restrict dst,
 #endif
 
 #ifndef HAVE_DPRINTF
-extern int vdprintf(_In_ int fd,
-                    _In_z_ _Printf_format_string_
-                    char const *__restrict format,
-                    _In_ va_list ap);
 extern int dprintf(_In_ int fd,
                    _In_z_ _Printf_format_string_
                    char const *__restrict format,
                    ...)
       ATTRIBUTE_PRINTF(2, 3);
+extern int vdprintf(_In_ int fd,
+                    _In_z_ _Printf_format_string_
+                    char const *__restrict format,
+                    _In_ va_list ap);
 #endif
 
 

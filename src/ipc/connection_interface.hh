@@ -5,7 +5,7 @@
 #include "Common.hh"
 #include "ipc/connection_impl.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc {
 /****************************************************************************************/
 

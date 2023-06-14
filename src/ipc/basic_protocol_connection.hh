@@ -5,9 +5,9 @@
 #include "Common.hh"
 
 #include "ipc/basic_sync_thing.hh"
-#include "ipc/ipc_connection.hh"
+#include "ipc/process_connection.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc {
 /****************************************************************************************/
 
@@ -28,7 +28,7 @@ using callback = std::function<void(expected<T>)>;
 
 
 template <typename Value>
-      REQUIRES(false)
+      requires false
 class transport_interface
 {
       using this_type = transport_interface<Value>;
@@ -133,7 +133,7 @@ class transport_interface
 class basic_protocol_interface
       : public basic_sync_thing
 {
-      using procinfo_t = util::detail::procinfo_t;
+      using procinfo_t = :: MAIN_PACKAGE_NAMESPACE ::util::detail::procinfo_t;
 
       base_connection            &con_;
       detail::spawner_connection *spawner_;
@@ -247,7 +247,7 @@ concept ProtocolConnectionVariant = std::derived_from<T, basic_protocol_interfac
 
 
 template <typename Connection, template <class> typename IOWrapper>
-      REQUIRES (BasicConnectionVariant<Connection> &&
+      requires (BasicConnectionVariant<Connection> &&
                 io::WrapperVariant<IOWrapper<Connection>>)
 class basic_protocol_connection
       : public Connection,
@@ -312,5 +312,5 @@ concept ProtocolConnectionInstanceVariant =
 
 /*======================================================================================*/
 } // namespace ipc
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

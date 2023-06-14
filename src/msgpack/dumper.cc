@@ -1,7 +1,7 @@
 #include "Common.hh"
 #include "msgpack/dumper.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::mpack {
 
 using namespace std::string_view_literals;
@@ -98,4 +98,4 @@ void dumper::dump(msgpack::object_map const *dict)
 }
 
 } // namespace util::mpack
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

@@ -5,8 +5,6 @@
 #include "util/c/c_util.h"
 // clang-tidy on
 
-#include <glib.h>
-
 #define SHUTUPGCC __attribute__((__unused__)) \
       ssize_t const P99_PASTE(show_stacktrace_macro_variable_, __COUNTER__, _, __LINE__) =
 
@@ -46,9 +44,6 @@ static CRITICAL_SECTION error_write_mtx;
 
 INITIALIZER_HACK(err_c_mutex_init)
 {
-      fprintf(stderr, "Hello from function %s\n", FUNCTION_NAME);
-      //DWORD nbytes;
-      //WriteFile(GetStdHandle(STD_ERROR_HANDLE), msg, sizeof(msg) - 1, &nbytes, NULL); 
       InitializeCriticalSection(&error_write_mtx);
 }
 

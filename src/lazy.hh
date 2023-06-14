@@ -4,7 +4,7 @@
 
 #include "Common.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace testing::lazy {
 /****************************************************************************************/
 
@@ -20,5 +20,5 @@ UU static constexpr wchar_t const path_raw[]  = LR"(/home/bml/files/projects/FUC
 
 /****************************************************************************************/
 } // namespace testing::lazy
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

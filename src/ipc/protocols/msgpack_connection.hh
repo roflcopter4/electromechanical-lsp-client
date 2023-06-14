@@ -8,13 +8,13 @@
 
 #include "msgpack/dumper.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::protocols::Msgpack {
 /****************************************************************************************/
 
 
 template <typename Connection>
-      REQUIRES(ipc::BasicConnectionVariant<Connection>)
+      requires ipc::BasicConnectionVariant<Connection>
 class connection
     : public ipc::basic_protocol_connection<Connection, ipc::io::msgpack_wrapper>
 {
@@ -123,24 +123,33 @@ class connection
                   return;
             }
 
-            if (events & UV_READABLE && (avail = this->available()) > 0) {
-                  try {
-                        this->just_read();
-                  } catch (std::exception const &e) {
-                        DUMP_EXCEPTION(e);
-                        return;
+            if (events & UV_READABLE) {
+                  if ((avail = this->available()) > 0) {
+                        try {
+                              this->just_read();
+                        } catch (std::exception const &e) {
+                              DUMP_EXCEPTION(e);
+                              return;
+                        }
+
+                        msgpack::object_handle obj;
+
+                        while (get_unpacker().next(obj))
+                              util::mpack::dumper(obj.get(), std::cout);
+                  } else {
+                        char buf[32];
+                        if (recv(this->raw_descriptor(), buf, std::size(buf), MSG_PEEK) <= 0) {
+                              util::eprint(FC("Disconnecting from fd {}, key '{}', after failed read.\n"),
+                                           this->raw_descriptor(), this->get_key());
+                              goto disconnect;
+                        }
                   }
-
-                  msgpack::object_handle obj;
-
-                  while (get_unpacker().next(obj))
-                        util::mpack::dumper(obj.get(), std::cout);
             }
 
             if (events & UV_DISCONNECT) {
                   util::eprint(FC("Got disconnect signal, status {}, for fd {}, key '{}'\n"),
                                status, this->raw_descriptor(), this->get_key());
-
+            disconnect:
                   auto const &key_deleter = cast_deleter(handle->loop->data);
                   this->close();
                   key_deleter(this->get_key(), false);
@@ -218,5 +227,5 @@ class connection
 
 /****************************************************************************************/
 } // namespace ipc::protocols::Msgpack
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

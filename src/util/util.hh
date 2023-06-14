@@ -14,7 +14,7 @@
 
 #define BARE_DECLTYPE(obj) std::remove_cvref_t<decltype(obj)>
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 /****************************************************************************************/
 
@@ -136,7 +136,7 @@ ptr_diff(_Notnull_ T const *ptr1, _Notnull_ T const *ptr2) noexcept
 
 
 template <typename Elem, size_t N>
-      REQUIRES (concepts::Integral<Elem>)
+      requires concepts::Integral<Elem>
 __forceinline size_t
 fwrite(Elem const (&buffer)[N], FILE *dst)
 {
@@ -145,7 +145,7 @@ fwrite(Elem const (&buffer)[N], FILE *dst)
 
 
 template <typename Cont>
-      REQUIRES (concepts::NonTrivial<Cont> &&
+      requires (concepts::NonTrivial<Cont> &&
                 concepts::Integral<typename Cont::value_type>)
 __forceinline size_t
 fwrite(Cont const &container, FILE *dst)
@@ -162,7 +162,7 @@ extern std::string_view const projstr;
 
 
 template <typename S, typename... Args>
-    //REQUIRES (concepts::is_compiled_string_c<S>)
+    //requires concepts::is_compiled_string_c<S>
 NOINLINE void
 eprint(S const &format_str, Args const &...args)
 {
@@ -266,6 +266,113 @@ constexpr auto &operator+=(timespec &lval, std::chrono::duration<Rep, Period> co
 /*======================================================================================*/
 
 
+template <typename>
+inline constexpr bool always_false = false;
+
+
+namespace impl {
+
+
+# if (defined __GNUC__ || defined __clang__ || defined __INTEL_COMPILER) || \
+     (defined __has_builtin && __has_builtin(__builtin_bswap16) &&          \
+      __has_builtin(__builtin_bswap32) && __has_builtin(__builtin_bswap64))
+ND inline uint16_t bswap_native_16(uint16_t const val) { return __builtin_bswap16(val); }
+ND inline uint32_t bswap_native_32(uint32_t const val) { return __builtin_bswap32(val); }
+ND inline uint64_t bswap_native_64(uint64_t const val) { return __builtin_bswap64(val); }
+# elif defined _MSC_VER
+ND inline uint16_t bswap_native_16(uint16_t const val) { return _byteswap_ushort(val); }
+ND inline uint32_t bswap_native_32(uint32_t const val) { return _byteswap_ulong(val); }
+ND inline uint64_t bswap_native_64(uint64_t const val) { return _byteswap_uint64(val); }
+# else
+#  define NO_bswap_SUPPORT
+# endif
+
+ND constexpr uint16_t bswap_16(uint16_t const val) noexcept {
+# ifndef NO_bswap_SUPPORT
+      if (std::is_constant_evaluated())
+# endif
+            return static_cast<unsigned short>((val << 8) | (val >> 8));
+# ifndef NO_bswap_SUPPORT
+      else
+            return bswap_native_16(val);
+# endif
+}
+
+ND constexpr uint32_t bswap_32(uint32_t const val) noexcept
+{
+# ifndef NO_bswap_SUPPORT
+      if (std::is_constant_evaluated())
+# endif
+            return (val << 24) | ((val << 8) & 0x00FF'0000) | ((val >> 8) & 0x0000'FF00) | (val >> 24);
+# ifndef NO_bswap_SUPPORT
+      else
+            return bswap_native_32(val);
+# endif
+}
+
+ND constexpr uint64_t bswap_64(uint64_t const val) noexcept {
+# ifndef NO_bswap_SUPPORT
+      if (std::is_constant_evaluated())
+# endif
+            return (val << 56) |
+                   ((val << 40) & 0x00FF'0000'0000'0000) |
+                   ((val << 24) & 0x0000'FF00'0000'0000) |
+                   ((val << 8) & 0x0000'00FF'0000'0000) |
+                   ((val >> 8) & 0x0000'0000'FF00'0000) |
+                   ((val >> 24) & 0x0000'0000'00FF'0000) |
+                   ((val >> 40) & 0x0000'0000'0000'FF00) |
+                   (val >> 56);
+# ifndef NO_bswap_SUPPORT
+      else
+            return bswap_native_64(val);
+# endif
+}
+
+
+} // namespace impl
+
+
+template <typename T>
+    requires std::is_integral_v<T>
+ND constexpr T bswap(T const val) noexcept
+{
+      if constexpr (sizeof(T) == 1)
+            return val;
+      else if constexpr (sizeof(T) == 2)
+            return static_cast<T>(impl::bswap_16(static_cast<uint16_t>(val)));
+      else if constexpr (sizeof(T) == 4)
+            return static_cast<T>(impl::bswap_32(static_cast<uint32_t>(val)));
+      else if constexpr (sizeof(T) == 8)
+            return static_cast<T>(impl::bswap_64(static_cast<uint64_t>(val)));
+      else 
+            static_assert(always_false<T>, "Unexpected integer size");
+
+      /* NOTREACHED */
+      return -1;
+}
+
+template <typename T>
+ND constexpr T hton(T const val) noexcept
+{
+      if constexpr (std::endian::native == std::endian::little)
+            return bswap(val);
+      else
+            return val;
+}
+
+template <typename T>
+ND constexpr T ntoh(T const val) noexcept
+{
+      if constexpr (std::endian::native == std::endian::little)
+            return bswap(val);
+      else
+            return val;
+}
+
+
+/*======================================================================================*/
+
+
 extern std::string_view const &get_signal_name(int signum);
 extern std::string_view const &get_signal_explanation(int signum);
 
@@ -321,11 +428,11 @@ Proc get_proc_address_module(LPCWSTR const module_name, LPCSTR const proc_name)
 
 using util::operator+=;
 
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 
 
 #ifndef _WIN32
-using emlsp::util::putenv;  //NOLINT(google-global-names-in-headers)
+using MAIN_PACKAGE_NAMESPACE::util::putenv;  //NOLINT(google-global-names-in-headers)
 #endif
 
 #include "util/formatters.hh"

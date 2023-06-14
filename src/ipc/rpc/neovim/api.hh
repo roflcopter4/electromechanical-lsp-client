@@ -5,7 +5,7 @@
 #include "Common.hh"
 #include "ipc/rpc/neovim.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::rpc::neovim {
 /****************************************************************************************/
 
@@ -596,5 +596,5 @@ class nvim_message_handler
 
 /****************************************************************************************/
 } // namespace ipc::rpc::neovim
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

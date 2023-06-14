@@ -8,7 +8,7 @@
 __BEGIN_DECLS
 
 #ifdef _WIN32
-#  define MSG_EOR 0
+# define MSG_EOR 0
 typedef SOCKET socket_t;
 typedef errno_t error_t;
 // Windows doesn't define ssize_t for some inexplicable reason.
@@ -28,15 +28,12 @@ typedef double float64_t;
      __LDBL_MANT_DIG__ != 113
 typedef long double float80_t;
 #endif
-#ifdef __GNUC__
-typedef __float128 float128_t;
-#endif
 
 typedef int const intc;
 
 
 #ifndef SOCK_CLOEXEC
-#  define SOCK_CLOEXEC 0
+# define SOCK_CLOEXEC 0
 #endif
 
 __END_DECLS

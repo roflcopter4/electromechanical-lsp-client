@@ -1,5 +1,4 @@
 // ReSharper disable CppClangTidyCppcoreguidelinesNarrowingConversions
-#include "ipc/ipc_connection.hh"
 #define __STDC_WANT_IEC_60559_TYPES_EXT__ 1
 #include "Common.hh"
 #include "ipc/rpc/lsp.hh"
@@ -27,7 +26,7 @@ namespace asio = boost::asio;
 
 #define AUTOC auto const
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace testing {
 /****************************************************************************************/
 
@@ -128,5 +127,5 @@ NOINLINE void foo06()
 
 /****************************************************************************************/
 } // namespace testing
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

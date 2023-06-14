@@ -8,7 +8,7 @@
 #  pragma comment(lib, "dbghelp.lib")
 #endif
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 /****************************************************************************************/
 
@@ -36,7 +36,7 @@ INITIALIZER_HACK(demangle_setup)
 #endif
 
 
-inline namespace emlsp { namespace util {
+inline namespace MAIN_PACKAGE_NAMESPACE { namespace util {
 
 std::string
 demangle(_In_z_ char const *raw_name)
@@ -77,4 +77,4 @@ demangle(std::type_info const &id)
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

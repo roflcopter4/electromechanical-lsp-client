@@ -1,17 +1,17 @@
 #pragma once
-#ifndef HGUARD__IPC__BASIC_WRAPPER_HH_
-#define HGUARD__IPC__BASIC_WRAPPER_HH_ //NOLINT
+#ifndef HBiVerXewCVqt3Q8Lez4xZtCy2uLrAEB
+#define HBiVerXewCVqt3Q8Lez4xZtCy2uLrAEB
 
 #include "Common.hh"
-#include "ipc/ipc_connection.hh"
+#include "ipc/process_connection.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::io {
 /****************************************************************************************/
 
 
 template <typename Connection, typename Packer, typename Unpacker>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class basic_wrapper
 {
       using this_type       = basic_wrapper;
@@ -25,12 +25,7 @@ class basic_wrapper
       connection_type &con_;
 
     public:
-      explicit basic_wrapper(connection_type &con) : con_(con)
-      {
-            //if (!con || reinterpret_cast<intptr_t>(con) == -1)
-            //      throw std::invalid_argument("Mandatory pointer con is null or invalid");
-            //con_ = con;
-      }
+      explicit basic_wrapper(connection_type &con) : con_(con) {}
       virtual ~basic_wrapper() = default;
 
       basic_wrapper(basic_wrapper const &)                = delete;
@@ -63,19 +58,6 @@ class basic_wrapper
             auto const *operator->() const   noexcept { return pack_; }
             auto const &operator* () const & noexcept { return *pack_; }
             auto const &operator()() const & noexcept { return pack_->pk; }
-
-            //packer_container(packer_container &&other) noexcept
-            //    : pack_(other.pack_)
-            //{
-            //      other.pack_ = nullptr;
-            //}
-
-            //packer_container &operator=(packer_container &&other) noexcept
-            //{
-            //      this->pack_ = other.pack_;
-            //      other.pack_ = nullptr;
-            //      return *this;
-            //}
 
             packer_container(packer_container const &)                     = delete;
             packer_container(packer_container &&other) noexcept            = delete;
@@ -156,5 +138,5 @@ concept WrapperVariant = std::derived_from<T,
 
 /****************************************************************************************/
 } // namespace ipc::io
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

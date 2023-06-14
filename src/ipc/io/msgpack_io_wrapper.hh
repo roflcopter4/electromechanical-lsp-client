@@ -5,24 +5,23 @@
 
 #include "Common.hh"
 #include "ipc/io/basic_io_wrapper.hh"
-#include "ipc/ipc_connection.hh"
 
 #define AUTOC auto const
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::io {
 /****************************************************************************************/
 
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class msgpack_wrapper;
 
 
 namespace detail {
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class msgpack_packer
 {
       std::condition_variable &cond_;
@@ -74,7 +73,7 @@ class msgpack_packer
 
 
 template <typename Connection>
-      REQUIRES(BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class msgpack_wrapper : public basic_wrapper<Connection,
                                              detail::msgpack_packer<Connection>,
                                              msgpack::unpacker>
@@ -127,7 +126,7 @@ class msgpack_wrapper : public basic_wrapper<Connection,
             return total;
       }
 
-      __attribute_error__("Don't use this function. Use `just_read()'.")
+      __attribute__((__error__("Don't use this function. Use `just_read()'.")))
       msgpack::object_handle read_object() override
       {
             assert(0 && "I told you not to use this function.");
@@ -207,5 +206,5 @@ class msgpack_wrapper : public basic_wrapper<Connection,
 
 /****************************************************************************************/
 } // namespace ipc::io
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

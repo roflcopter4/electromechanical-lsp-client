@@ -1,16 +1,20 @@
 // ReSharper disable CppLocalVariableMayBeConst
 // ReSharper disable CppFinalFunctionInFinalClass
 #pragma once
-#ifndef HGUARD__IPC__CONNECTION_IMPL_HH_
-#define HGUARD__IPC__CONNECTION_IMPL_HH_ //NOLINT
+#ifndef MGwXp5ymI4f4ZfI7wWMs4DTNb5s3tKQN
+#define MGwXp5ymI4f4ZfI7wWMs4DTNb5s3tKQN
 
 #include "Common.hh"
 #include "ipc/misc.hh"
 
-/* #undef WIN32_USE_PIPE_IMPL */
-#define WHAT_THE_FUCK() [[maybe_unused]] static constexpr int P99_PASTE(z_VARIABLE_that_IS_not_USED_, __LINE__, _, __COUNTER__, _) = 0
+#ifdef WANT_LIBUV
+#  include <uv.h>
+#endif
+#if defined _MSC_VER && defined WANT_LIBDETOURS
+#  include <detours/detours.h>
+#endif
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::detail::base {
 /****************************************************************************************/
 /* ┏----------------------------------------------------------------------------------┓
@@ -54,7 +58,7 @@ class base_connection_impl_interface
       std::recursive_mutex read_mtx_  = {};
       std::recursive_mutex write_mtx_ = {};
       std::string          err_fname_ = {};
-      err_descriptor_type  err_fd_    = err_descriptor_type(-1); // NOLINT(*cast*)
+      err_descriptor_type  err_fd_    = reinterpret_cast<err_descriptor_type>(-1); 
       sink_type            err_sink_type_ : 2 = sink_type::DEFAULT;
 
     private:
@@ -126,14 +130,28 @@ class base_connection_impl_interface
             return false;
       }
 
-         virtual ssize_t    read (void       *buf, ssize_t nbytes, int flags) = 0;
-         virtual ssize_t    write(void const *buf, ssize_t nbytes, int flags) = 0;
-         virtual ssize_t    writev(iovec *bufs, size_t nbufs, int flags)      = 0;
-         virtual void       open()                                            = 0;
-         virtual void       close() noexcept                                  = 0;
-         virtual procinfo_t do_spawn_connection(size_t argc, char **argv)     = 0;
-      ND virtual DescriptorType fd()        const noexcept                    = 0;
-      ND virtual size_t         available() const                             = 0;
+      ND virtual DescriptorType fd() const noexcept = 0;
+      ND virtual size_t         available() const   = 0;
+
+      virtual ssize_t    read (void       *buf, ssize_t nbytes, int flags) = 0;
+      virtual ssize_t    write(void const *buf, ssize_t nbytes, int flags) = 0;
+      virtual ssize_t    writev(iovec *bufs, size_t nbufs, int flags)      = 0;
+      virtual void       open()                                            = 0;
+      virtual void       close() noexcept                                  = 0;
+      virtual procinfo_t do_spawn_connection(size_t argc, char **argv)     = 0;
+
+      virtual procinfo_t do_spawn_connection(size_t const argc, wchar_t ** wargv)
+      {
+            std::vector<std::string> strings;
+            std::vector<char *>      argv;
+            strings.resize(argc);
+            argv.resize(argc);
+            for (unsigned i = 0; i < argc; ++i) {
+                  strings[i] = ::util::unistring::recode<char>(wargv[i]);
+                  argv[i]    = strings[i].data();
+            }
+            return do_spawn_connection(argc, argv.data());
+      }
 
       //--------------------------------------------------------------------------------
 
@@ -164,8 +182,7 @@ class base_connection_impl_interface
 
 
 template <typename T>
-concept ConnectionImplVariant =
-    std::derived_from<T, base_connection_impl_interface>;
+concept ConnectionImplVariant = std::derived_from<T, base_connection_impl_interface>;
 
 
 /****************************************************************************************/
@@ -194,7 +211,6 @@ class socket_connection_base_impl
 {
       using this_type = socket_connection_base_impl;
       using base_type = base_connection_impl_interface;
-      // using AddrType  = sockaddr_storage;
 
 #ifdef _WIN32
       using sock_int_type = int;
@@ -205,8 +221,12 @@ class socket_connection_base_impl
 
       bool should_open_listener_  : 1 = true;
       bool should_close_listener_ : 1 = true;
-      bool should_connect_        : 1 = true;
       bool use_dual_sockets_      : 1 = false;
+#ifdef _WIN32
+      bool should_connect_        : 1 = false;
+#else
+      bool should_connect_        : 1 = true;
+#endif
 
     protected:
       socket_t  listener_  = invalid_socket;
@@ -214,7 +234,6 @@ class socket_connection_base_impl
       socket_t  con_write_ = invalid_socket;
       socket_t  acc_read_  = invalid_socket;
       socket_t  acc_write_ = invalid_socket;
-      // AddrType  addr_      = {};
 
     public:
       using addr_type = sockaddr;
@@ -382,8 +401,9 @@ class socketpair_connection_impl final
 
 
 template <typename AddrType>
-      REQUIRES (IsInetSockaddr<AddrType> ||
-                std::same_as<AddrType, sockaddr *>)
+    requires std::same_as<AddrType, sockaddr_in> ||
+             std::same_as<AddrType, sockaddr_in6> ||
+             std::same_as<AddrType, sockaddr *>
 class inet_socket_connection_base_impl : public socket_connection_base_impl
 {
       using this_type = inet_socket_connection_base_impl;
@@ -403,15 +423,6 @@ class inet_socket_connection_base_impl : public socket_connection_base_impl
       DELETE_ALL_CTORS(inet_socket_connection_base_impl);
 
       //--------------------------------------------------------------------------------
-
-#if 0
-      void set_listener(socket_t const sock, sockaddr const &addr) noexcept override
-      {
-            this->should_close_listnener(true);
-            this->listener_ = sock;
-            this->addr_     = addr;
-      }
-#endif
 
       socket_t connect() final
       {
@@ -495,7 +506,7 @@ class inet_any_socket_connection_impl final
       using this_type = inet_any_socket_connection_impl;
       using base_type = socket_connection_base_impl;
 
-      int       family_        = AF_UNSPEC;
+      int       family_      = AF_UNSPEC;
       socklen_t addr_length_ = 0;
 
     public:
@@ -556,7 +567,6 @@ class inet_ipv4_socket_connection_impl final
       {
             return reinterpret_cast<sockaddr const *>(&addr_);
       }
-      // ND socklen_t get_socklen() const final { return sizeof(sockaddr_in); }
 
       ND constexpr int get_type() const final { return AF_INET; }
 };
@@ -568,7 +578,7 @@ class inet_ipv6_socket_connection_impl final
     : public inet_socket_connection_base_impl<sockaddr_in6>
 {
       using this_type = inet_ipv6_socket_connection_impl;
-      using base_type = socket_connection_base_impl; //<addr_type>;
+      using base_type = socket_connection_base_impl;
 
     public:
       inet_ipv6_socket_connection_impl()        = default;
@@ -589,18 +599,17 @@ class inet_ipv6_socket_connection_impl final
       {
             return reinterpret_cast<sockaddr const *>(&addr_);
       }
-      // ND socklen_t get_socklen() const final { return sizeof(sockaddr_in6); }
 
       ND constexpr int get_type() const final { return AF_INET6; }
 };
 
 
 /****************************************************************************************/
-/* ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+/* ┏----------------------------------------------------------------------------------┓
    ┃  ┌────────────────────────────────────────────────────────┐                      ┃
    ┃  │Derivative interface for fd or HANDLE based connections.│                      ┃
    ┃  └────────────────────────────────────────────────────────┘                      ┃
-   ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛ */
+   ┗----------------------------------------------------------------------------------┛ */
 
 class fd_connection_impl;
 
@@ -612,6 +621,7 @@ class pipe_connection_impl : public base_connection_impl_interface
       using this_type = pipe_connection_impl;
       using base_type = base_connection_impl_interface;
       friend class fd_connection_impl;
+      friend class passthru_connection_impl;
 
       int read_  = (-1);
       int write_ = (-1);
@@ -643,6 +653,8 @@ class pipe_connection_impl : public base_connection_impl_interface
       ND descriptor_type fd()   const noexcept final { return read_; }
       ND virtual int read_fd()  const noexcept { return read_; }
       ND virtual int write_fd() const noexcept { return write_; }
+
+      void set_descriptors(int readfd, int writefd) noexcept;
 };
 
 /*--------------------------------------------------------------------------------------*/
@@ -672,15 +684,13 @@ class fd_connection_impl final : public pipe_connection_impl
       //--------------------------------------------------------------------------------
 
     private:
-      __attribute_error__(ERRMSG)
+      __attribute__((__error__(ERRMSG)))
       procinfo_t do_spawn_connection(size_t /*argc*/, char ** /*argv*/) final
       {
             throw std::logic_error(ERRMSG);
       }
 
     public:
-      void set_descriptors(int readfd, int writefd);
-
       static fd_connection_impl make_from_std_handles() { return {0, 1}; }
 
 #undef ERRMSG
@@ -692,7 +702,7 @@ class fd_connection_impl final : public pipe_connection_impl
 
 #ifdef _WIN32
 
-class pipe_handle_connection_impl final : public base_connection_impl_interface
+class pipe_handle_connection_impl : public base_connection_impl_interface
 {
       using this_type = pipe_connection_impl;
       using base_type = base_connection_impl_interface;
@@ -703,7 +713,10 @@ class pipe_handle_connection_impl final : public base_connection_impl_interface
 
     public:
       pipe_handle_connection_impl() = default;
-      ~pipe_handle_connection_impl() final
+      pipe_handle_connection_impl(HANDLE const read_hand, HANDLE const write_hand)
+          : read_(read_hand), write_(write_hand)
+      {}
+      ~pipe_handle_connection_impl() override
       {
             close();
       }
@@ -722,7 +735,8 @@ class pipe_handle_connection_impl final : public base_connection_impl_interface
 
       void       open() final { /* Do nothing. This method makes no sense for pipes. */ }
       void       close() noexcept final;
-      procinfo_t do_spawn_connection(size_t argc, char **argv) final;
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+      procinfo_t do_spawn_connection(size_t argc, wchar_t **argv) override;
 
       ND descriptor_type fd() const noexcept final { return reinterpret_cast<descriptor_type>(read_); }
       ND size_t available() const final { return util::available_in_fd(read_); }
@@ -730,12 +744,35 @@ class pipe_handle_connection_impl final : public base_connection_impl_interface
       ND HANDLE read_fd()  const noexcept { return read_; }
       ND HANDLE write_fd() const noexcept { return write_; }
 
-      void set_descriptors(HANDLE const readfd, HANDLE const writefd) noexcept
-      {
-            set_initialized(1);
-            read_  = readfd;
-            write_ = writefd;
-      }
+      void set_descriptors(HANDLE readfd, HANDLE writefd) noexcept;
+
+    private:
+      virtual procinfo_t really_do_spawn_connection(std::wstring const &cmdline);
+};
+
+
+class passthru_connection_impl final : public pipe_handle_connection_impl
+{
+      using this_type = passthru_connection_impl;
+      using base_type = pipe_handle_connection_impl;
+
+    public:
+      explicit passthru_connection_impl(
+          HANDLE const read_hand  = ::GetStdHandle(STD_OUTPUT_HANDLE),
+          HANDLE const write_hand = ::GetStdHandle(STD_INPUT_HANDLE))
+          : base_type(read_hand, write_hand)
+      {}
+      ~passthru_connection_impl() override = default;
+
+      DELETE_ALL_CTORS(passthru_connection_impl);
+
+      //--------------------------------------------------------------------------------
+
+      procinfo_t do_spawn_connection(size_t argc, char **argv) override;
+      procinfo_t do_spawn_connection(size_t argc, wchar_t **argv) override;
+
+    private:
+      procinfo_t really_do_spawn_connection(std::wstring const &cmdline) override;
 };
 
 #endif
@@ -805,6 +842,7 @@ class win32_named_pipe_impl final : public base_connection_impl_interface
 
 /****************************************************************************************/
 
+#ifdef WANT_LIBUV
 
 class libuv_pipe_handle_impl final
     : public base_connection_impl_interface
@@ -877,6 +915,7 @@ class libuv_pipe_handle_impl final
       static void uvwrite_callback(uv_write_t *req, int status);
 };
 
+#endif
 
 /****************************************************************************************/
 /****************************************************************************************/
@@ -979,33 +1018,15 @@ extern ssize_t socket_send_impl(socket_t sock, void const *buf, size_t nbytes, i
 extern ssize_t socket_writev_impl(socket_t sock, iovec const *, size_t nbufs, int flags);
 
 
-//template <typename File, size_t (*WriteFn)(File, iovec const *, size_t, int)>
 inline ssize_t
-writev_all(socket_t fd, iovec *buf_vec, size_t nbufs, int const flags)
+writev_all(socket_t const fd, iovec *buf_vec, size_t nbufs, int const flags)
 {
+      /* Just why in the name of god Microsoft chose to rename these members is a
+       * mystery man was never meant to understand. */
 #ifdef _WIN32
 # define iov_len  len
 # define iov_base buf
 #endif
-
-//#if defined __GNUC__ || defined __clang__
-//      iovec vec_cpy_vla[nbufs + SIZE_C(1)];
-//      iovec *vec_cpy = vec_cpy_vla;
-//#else
-//      auto *vec_cpy  = static_cast<iovec *>(alloca((nbufs + SIZE_C(1)) * sizeof(iovec)));
-//#endif
-//      auto  *vec_cpy = static_cast<iovec *>(::malloc((nbufs + SIZE_C(1)) * sizeof(iovec)));
-
-      //static constexpr size_t max_iovecs = 32;
-      //if (nbufs > max_iovecs)
-      //      throw std::invalid_argument("Too many iovecs");
-      //iovec vec_cpy_array[max_iovecs];
-      //iovec *vec_cpy = vec_cpy_array;
-
-      //size_t total   = 0;
-      //init_iovec(vec_cpy[nbufs], nullptr, 0);
-      //memcpy(vec_cpy, buf_vec, nbufs * sizeof(iovec));
-
       ssize_t total = 0;
 
       while (nbufs > 0 && buf_vec[0].iov_len > 0) {
@@ -1023,9 +1044,7 @@ writev_all(socket_t fd, iovec *buf_vec, size_t nbufs, int const flags)
             }
       }
 
-      //::free(vec_cpy);
       return total;
-
 #undef iov_len
 #undef iov_base
 }
@@ -1073,5 +1092,5 @@ socket_connection_base_impl::writev(iovec  *bufs,
 
 /****************************************************************************************/
 } // namespace ipc::detail::base
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

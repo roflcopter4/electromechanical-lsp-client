@@ -7,7 +7,7 @@
 # define GETPID_() ::getpid()
 #endif
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::lsp::data {
 
 /*
@@ -177,4 +177,4 @@ R"({
 
 
 } // namespace ipc::lsp::data
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

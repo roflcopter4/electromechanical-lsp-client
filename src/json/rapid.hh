@@ -31,7 +31,7 @@
 #include <rapidjson/schema.h>
 #include <rapidjson/writer.h>
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::json {
 /****************************************************************************************/
 
@@ -89,28 +89,28 @@ class rapid_doc
       }
 
       template <typename T>
-            REQUIRES (util::concepts::Integral<T>)
+            requires util::concepts::Integral<T>
       __forceinline constexpr void add_member(StringRef &&key, char const *str, T const len)
       {
             cur_->AddMember((key), rapidjson::Value(str, static_cast<rapidjson::SizeType>(len)), al_);
       }
 
       template <typename T>
-            REQUIRES (NonStringRef<T> && !util::concepts::StringVariant<T>)
+            requires NonStringRef<T> && !util::concepts::StringVariant<T>
       __forceinline constexpr void add_member(StringRef &&key, T &&val)
       {
             cur_->AddMember(key, rapidjson::Value(std::forward<T>(val)), al_);
       }
 
       template <typename T>
-            REQUIRES (NonStringRef<T> && !util::concepts::StringVariant<T>)
+            requires NonStringRef<T> && !util::concepts::StringVariant<T>
       __forceinline constexpr void add_member(StringRef &&key, T &val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
       template <typename T = std::string_view>
-            REQUIRES (std::same_as<T, std::string_view>)
+            requires std::same_as<T, std::string_view>
       __forceinline constexpr void add_member(StringRef &&key, T const &val)
       {
             cur_->AddMember(key, rapidjson::Value(
@@ -118,14 +118,14 @@ class rapid_doc
       }
 
       template <typename T = std::string>
-            REQUIRES (std::same_as<T, std::string>)
+            requires std::same_as<T, std::string>
       __forceinline constexpr void add_member(StringRef &&key, T const &val)
       {
             cur_->AddMember(key, val, al_);
       }
 
       template <typename T>
-            REQUIRES(
+            requires (
                   NonStringRef<T> &&
                   std::same_as<T, char *> &&
                   !util::concepts::Const<T> &&
@@ -136,15 +136,13 @@ class rapid_doc
             cur_->AddMember(key, rapidjson::Value(val, ::strlen(val)), al_);
       }
 
-      template <typename T>
-            REQUIRES (NonStringRef<T>)
+      template <NonStringRef T>
       __forceinline void add_member(T &key, StringRef &&val)
       {
             cur_->AddMember(key, rapidjson::Value(val), al_);
       }
 
-      template <typename T>
-            REQUIRES (NonStringRef<T>)
+      template <NonStringRef T>
       __forceinline void add_member(T &&key, StringRef &&val)
       {
             cur_->AddMember(key, (val), al_);
@@ -173,15 +171,13 @@ class rapid_doc
             cur_->PushBack((val), al_);
       }
 
-      template <typename T>
-            REQUIRES(NonStringRef<T>)
+      template <NonStringRef T>
       __forceinline constexpr void add_value(T &val)
       {
             cur_->PushBack(val, al_);
       }
 
-      template <typename T>
-            REQUIRES (NonStringRef<T>)
+      template <NonStringRef T>
       __forceinline constexpr void add_value(T &&val)
       {
             cur_->PushBack(val, al_);
@@ -196,8 +192,7 @@ class rapid_doc
             cur_ = &cur_->AddMember((key), rapidjson::Value(ty), al_);
       }
 
-      template <typename T>
-            REQUIRES (NonStringRef<T>)
+      template <NonStringRef T>
       __forceinline constexpr void set_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             // cur_->AddMember(key, rapidjson::Value(ty), al_);
@@ -220,8 +215,7 @@ class rapid_doc
             cur_ = &cur_->FindMember(key)->value;
       }
 
-      template <typename T>
-            REQUIRES (NonStringRef<T>)
+      template <NonStringRef T>
       void push_member(T &&key, rapidjson::Type const ty = rapidjson::Type::kObjectType)
       {
             cur_->AddMember(key, rapidjson::Value(ty), al_);
@@ -259,5 +253,5 @@ class rapid_doc
 
 /****************************************************************************************/
 } // namespace ipc::json
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

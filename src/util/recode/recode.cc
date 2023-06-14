@@ -19,7 +19,7 @@
 # error "Impossible?!"
 #endif
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::unistring {
 /****************************************************************************************/
 
@@ -588,4 +588,4 @@ recode<char32_t, char32_t>(char32_t const *orig, size_t const length)
 
 /****************************************************************************************/
 } // namespace util::unistring
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

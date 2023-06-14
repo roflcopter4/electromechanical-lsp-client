@@ -8,19 +8,19 @@
 
 #define AUTOC auto const
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::io {
 /****************************************************************************************/
 
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class ms_jsonrpc_wrapper;
 
 namespace detail {
 
 template <typename Connection>
-      REQUIRES (BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class ms_jsonrpc_packer
 {
       std::condition_variable &cond_;
@@ -73,7 +73,7 @@ class ms_jsonrpc_packer
 
 
 template <typename Connection>
-      REQUIRES(BasicConnectionVariant<Connection>)
+      requires BasicConnectionVariant<Connection>
 class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
                                                 detail::ms_jsonrpc_packer<Connection>,
                                                 rapidjson::Document>
@@ -342,6 +342,6 @@ class ms_jsonrpc_wrapper : public basic_wrapper<Connection,
 
 /****************************************************************************************/
 } // namespace ipc::io
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #undef AUTOC
 #endif

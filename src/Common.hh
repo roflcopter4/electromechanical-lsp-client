@@ -27,6 +27,10 @@
 #endif
 //#define __USE_MINGW_ANSI_STDIO 0
 
+#ifdef __RESHARPER__
+#  define _CRT_INTERNAL_NONSTDC_NAMES 1
+#endif
+
 /*--------------------------------------------------------------------------------------*/
 
 #ifdef __cplusplus
@@ -37,12 +41,12 @@
 # include <assert.h> //NOLINT
 # include "pch.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 using namespace std::literals;
 #if FMT_USE_USER_DEFINED_LITERALS
 using namespace fmt::literals;
 #endif
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 
 #else // not C++
 

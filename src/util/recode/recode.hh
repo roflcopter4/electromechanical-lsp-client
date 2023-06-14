@@ -1,12 +1,12 @@
 ﻿#pragma once
-#ifndef HGUARD__UTIL__RECODE__RECODE_HH_
-#define HGUARD__UTIL__RECODE__RECODE_HH_ //NOLINT
+#ifndef Bna4wNG8ApsASwIVJYgIi72g5LcfdZ0e
+#define Bna4wNG8ApsASwIVJYgIi72g5LcfdZ0e
 /****************************************************************************************/
 
 #include "recode_private.hh"
 #include "strlen.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 namespace unistring {
 /****************************************************************************************/
@@ -72,7 +72,7 @@ recode(_In_z_bytecount_(N) From (&orig)[N])
  * \return The appropriate type of std::basic_string.
  */
 template <typename To, class Container>
-      REQUIRES (concepts::Integral<typename Container::value_type>)
+      requires (concepts::Integral<typename Container::value_type>)
 ND std::basic_string<To>
 recode(Container const &orig)
 {
@@ -90,12 +90,12 @@ recode(Container const &orig)
  * -# 'char' is assumed to be valid UTF-8, and neither 'signed char' nor 'unsigned char'
  * are supported. Those types should be considered 8-bit integers.
  * \tparam To Desired output char type. Must be given explicitly.
- * \tparam From Input char type (typically deduced).
+ * \tparam From Input pointer type (typically deduced).
  * \param orig The NUL terminated string to convert.
  * \return The appropriate type of std::basic_string.
  */
 template <typename To, typename From>
-      REQUIRES (concepts::Pointer<From> && !concepts::Reference<From>)
+      requires (concepts::Pointer<From> && !concepts::Reference<From>)
 ND std::basic_string<To>
 recode(From const orig)
 {
@@ -165,7 +165,7 @@ ND inline size_t mbsnlen (char32_t const *str, csize_t size) noexcept { return :
 
 
 template <typename Container>
-    REQUIRES (concepts::Integral<typename Container::value_type>)
+    requires (concepts::Integral<typename Container::value_type>)
 ND size_t
 mbsnlen(Container const &orig) noexcept
 {
@@ -173,23 +173,23 @@ mbsnlen(Container const &orig) noexcept
 }
 
 template <typename T, size_t N>
-    REQUIRES (!util::concepts::Pointer<T> && util::concepts::Integral<T>)
+    requires (!util::concepts::Pointer<T> && util::concepts::Integral<T>)
 ND size_t mbsnlen(T const (&str)[N]) noexcept
 {
       return impl::mbsnlen(str, N - SIZE_C(1));
 }
 
 template <typename T>
-    REQUIRES (!util::concepts::Pointer<T> && util::concepts::Integral<T>)
+    requires (!util::concepts::Pointer<T> && util::concepts::Integral<T>)
 ND size_t mbsnlen(T const *str, size_t const size) noexcept
 {
       return impl::mbsnlen(str, size);
 }
 
 template <typename T>
-    REQUIRES (util::concepts::Pointer<T> &&
-              requires (T x) {{*x} -> util::concepts::Integral;})
-ND size_t mbsnlen(std::remove_pointer_t<std::remove_cv_t<T>> const *str) noexcept
+    requires (util::concepts::Pointer<T> &&
+              requires (T x) {{*x} -> concepts::Integral;})
+ND size_t mbsnlen(std::remove_pointer_t<std::remove_cv_t<T>> const * str) noexcept
 {
       return impl::mbsnlen(str, strlen(str));
 }
@@ -214,5 +214,5 @@ using unistring::mbsnlen;
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

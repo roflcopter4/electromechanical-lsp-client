@@ -2,7 +2,7 @@
 #include "util/util.hh"
 
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 /****************************************************************************************/
 
@@ -128,4 +128,4 @@ get_signal_explanation(int const signum)
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

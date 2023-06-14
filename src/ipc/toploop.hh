@@ -6,7 +6,7 @@
 #include "Common.hh"
 #include "ipc/basic_protocol_connection.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::loop {
 /****************************************************************************************/
 
@@ -21,13 +21,12 @@ class bad_wait final : public std::runtime_error
       explicit bad_wait(T const &arg) : base_type(arg) {}
 };
 
+} // namespace detail
 
 template <typename Ptr>
 concept ProtocolConnectionVariantPointer =
       util::concepts::SmartPointer<Ptr> &&
       ipc::ProtocolConnectionVariant<typename Ptr::element_type>;
-
-} // namespace detail
 
 
 //========================================================================================
@@ -168,7 +167,7 @@ class main_loop final
       template <ProtocolConnectionVariant T>
       ::uv_poll_t *open_poll_handle_fd(std::string const &name, int const fd, T *connection)
       {
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             auto *hand = new ::uv_poll_t;
             memset(hand, 0, sizeof *hand);
             my_uv_variant var;
@@ -235,7 +234,7 @@ class main_loop final
             return open_poll_handle(name, &connection);
       }
 
-      template <detail::ProtocolConnectionVariantPointer Ptr>
+      template <ProtocolConnectionVariantPointer Ptr>
       ::uv_poll_t *open_poll_handle(std::string const &name, Ptr &connection)
       {
             return open_poll_handle(name, connection.get());
@@ -248,24 +247,17 @@ class main_loop final
 #if 0
             the_cb_ = callback;
 #else
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             ::uv_poll_start(handles_[key].poll, UV_READABLE | UV_PRIORITIZED | UV_DISCONNECT, callback);
 #endif
       }
 
-      template <ProtocolConnectionVariant T>
-      void start_poll_handle(std::string const &key, T const *connection)
+      void start_poll_handle(std::string const &key, basic_protocol_interface const *connection)
       {
             start_poll_handle(key, connection->poll_callback());
       }
 
-      template <ProtocolConnectionVariant T>
-      void start_poll_handle(std::string const &key, T const &connection)
-      {
-            start_poll_handle(key, connection.poll_callback());
-      }
-
-      template <detail::ProtocolConnectionVariantPointer Ptr>
+      template <ProtocolConnectionVariantPointer Ptr>
       void start_poll_handle(std::string const &key, Ptr &connection)
       {
             start_poll_handle(key, connection->poll_callback());
@@ -277,7 +269,7 @@ class main_loop final
                                     ::uv_file const           fd,
                                     basic_protocol_interface *connection)
       {
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             auto *hand = new ::uv_pipe_t;
             memset(hand, 0, sizeof *hand);
             my_uv_variant var{.pipe = hand};
@@ -304,7 +296,7 @@ class main_loop final
             return it->second.pipe;
       }
 
-      template <detail::ProtocolConnectionVariantPointer Ptr>
+      template <ProtocolConnectionVariantPointer Ptr>
       ::uv_pipe_t *use_pipe_handle(std::string const &name, Ptr const &connection)
       {
             return use_pipe_handle(name, connection->impl_libuv()->get_uv_handle(),
@@ -317,7 +309,7 @@ class main_loop final
                              ::uv_alloc_cb const alloc_callback,
                              ::uv_read_cb const  read_callback)
       {
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             ::uv_read_start(handles_[key].stream,
                             alloc_callback, read_callback);
       }
@@ -325,14 +317,14 @@ class main_loop final
       void start_pipe_handle(std::string const              &key,
                              basic_protocol_interface const *connection)
       {
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             ::uv_read_start(handles_[key].stream,
                             connection->pipe_alloc_callback(),
                             connection->pipe_read_callback());
       }
 
-      template <ProtocolConnectionVariant T>
-      void start_pipe_handle(std::string const &key, std::unique_ptr<T> const &connection)
+      template <ProtocolConnectionVariantPointer T>
+      void start_pipe_handle(std::string const &key, T &connection)
       {
             start_pipe_handle(key, connection.get());
       }
@@ -341,7 +333,7 @@ class main_loop final
 
       void loop_start_async()
       {
-            std::lock_guard<std::mutex> lock(base_mtx_);
+            std::lock_guard lock(base_mtx_);
             if (started_.load())
                   throw std::logic_error("Attempt to loop_start loop twice!");
 
@@ -530,7 +522,7 @@ class main_loop final
       errno_t do_timed_wait(DWORD const dwtimeout) noexcept
       {
             try {
-                  std::lock_guard<std::recursive_mutex> lock(loop_waiter_mtx_);
+                  std::lock_guard lock(loop_waiter_mtx_);
                   auto const ret = ::WaitForSingleObjectEx(thrd_, dwtimeout, true);
                   if (ret == 0 && thrd_ != INVALID_HANDLE_VALUE) {
                         ::CloseHandle(thrd_);
@@ -564,7 +556,7 @@ class main_loop final
 
       void force_stop_loop_thread(int const wait_e)
       {
-            std::lock_guard<std::recursive_mutex> lock(loop_waiter_mtx_);
+            std::lock_guard lock(loop_waiter_mtx_);
 
             if (wait_e == WAIT_TIMEOUT) {
                   util::eprint(FC("Resorting to crying a lot after timeout.\n"));
@@ -722,7 +714,7 @@ class main_loop final
 
       void callback_callback(std::string const &key, UU bool const stop)
       {
-            std::lock_guard<std::recursive_mutex> lock(loop_waiter_mtx_);
+            std::lock_guard lock(loop_waiter_mtx_);
             if (!key.empty()) {
                   delete_handle(handles_[key]);
                   handles_.erase(key);
@@ -738,5 +730,5 @@ class main_loop final
 
 /****************************************************************************************/
 } // namespace ipc::loop
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

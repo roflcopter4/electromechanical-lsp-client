@@ -1,6 +1,6 @@
 #include "Common.hh"
 
-#include "ipc/ipc_connection.hh"
+#include "ipc/process_connection.hh"
 
 #include "ipc/rpc/lsp.hh"
 #include "ipc/rpc/lsp/static-data.hh"
@@ -14,7 +14,7 @@
 
 #define AUTOC auto const
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace testing {
 /****************************************************************************************/
 
@@ -247,4 +247,4 @@ NOINLINE void foo101()
 
 /****************************************************************************************/
 } // namespace testing
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

@@ -9,22 +9,11 @@
 # include <limits.h>
 #endif
 
-#if !defined __GNUC__ && !defined __clang__ && !defined __attribute__
+#if !defined __GNUC__ && !defined __clang__ && !defined __INTEL_LLVM_COMPILER && !defined __attribute__
 # define __attribute__(x)
 #endif
-#ifndef __attr_access
-# define __attr_access(x)
-#endif
-//#if !defined __declspec && !defined _MSC_VER
-//# define __declspec(...)
-//#endif
 #ifndef __has_include
 # define __has_include(x)
-#endif
-#if defined __GNUC__ && (defined __clang_major__ && __clang_major__ >= 14)
-# define __attribute_error__(x) __attribute__((__error__(x)))
-#else
-# define __attribute_error__(x) DEPRECATED_MSG(x)
 #endif
 
 #ifdef __cplusplus
@@ -71,9 +60,9 @@
 #endif
 
 #if defined __GNUC__ || defined __clang__
-# define UNREACHABLE __builtin_unreachable()
+# define UNREACHABLE() __builtin_unreachable()
 #elif defined _MSC_VER
-# define UNREACHABLE __assume(0)
+# define UNREACHABLE() __assume(0)
 #else
 # define UNREACHABLE() ((void)0)
 #endif
@@ -109,20 +98,14 @@
 #define DUMP_EXCEPTION(e)                                                            \
       do {                                                                           \
             FILE *const stderr_file_ = stderr;                                       \
-            fflush(stderr_file_);                                                    \
-            fprintf(                                                                 \
+            (void)fflush(stderr_file_);                                              \
+            (void)fprintf(                                                           \
                 stderr_file_,                                                        \
                 "\nCaught exception in function '%s', at line %d "                   \
                 "'%s'\n\033[1;32mWhat <<_EOF_\033[0m\n%s\n\033[1;32m_EOF_\033[0m\n", \
                 FUNCTION_NAME, __LINE__, __FILE__, (e).what());                      \
-            fflush(stderr_file_);                                                    \
+            (void)fflush(stderr_file_);                                              \
       } while (0)
-
-# ifdef __TAG_HIGHLIGHT__
-#  define REQUIRES(...)
-# else
-#  define REQUIRES(...) requires (__VA_ARGS__)
-# endif
 
 # ifndef NO_OBNOXIOUS_TWO_LETTER_CONVENIENCE_MACROS_PLEASE
 #  define FC(str) FMT_COMPILE(str)
@@ -177,10 +160,10 @@
 #if defined __GNUC__ || defined __clang__
 # define NOINLINE __attribute__((__noinline__))
 # ifndef __always_inline
-#  define __always_inline __attribute__((__always_inline__)) __inline
+#  define __always_inline __attribute__((__always_inline__)) __inline  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # endif
 # ifndef __forceinline
-#  define __forceinline __always_inline
+#  define __forceinline __always_inline  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # endif
 #elif defined _MSC_VER
 # define NOINLINE __declspec(noinline)
@@ -216,11 +199,11 @@
 
 #ifndef __WORDSIZE
 # if SIZE_MAX == ULLONG_MAX
-#  define __WORDSIZE 64
+#  define __WORDSIZE 64  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # elif SIZE_MAX == UINT_MAX
-#  define __WORDSIZE 32
+#  define __WORDSIZE 32  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # elif SIZE_MAX == SHRT_MAX
-#  define __WORDSIZE 16
+#  define __WORDSIZE 16  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # else
 #  error "I have no useful warning message to give here. You know what you did."
 # endif
@@ -262,11 +245,11 @@
 
 #if !defined __BEGIN_DECLS || !defined __END_DECLS
 # ifdef __cplusplus
-#  define __BEGIN_DECLS extern "C" {
-#  define __END_DECLS   }
+#  define __BEGIN_DECLS extern "C" {  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
+#  define __END_DECLS   }             // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # else
-#  define __BEGIN_DECLS
-#  define __END_DECLS
+#  define __BEGIN_DECLS  // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
+#  define __END_DECLS    // NOLINT(clang-diagnostic-reserved-macro-identifier, bugprone-reserved-identifier)
 # endif
 #endif
 

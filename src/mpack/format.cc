@@ -15,7 +15,7 @@
  * This file very hastily converted from C. Perhaps I shouldn't have even bothered.
  */
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::mpack {
 
 typedef unsigned char uchar;
@@ -387,4 +387,4 @@ encode_fmt(unsigned const size_hint, char const *const __restrict fmt, ...)
 }
 
 } // namespace ipc::mpack
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

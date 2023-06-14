@@ -24,7 +24,7 @@
 /****************************************************************************************/
 #if defined __cplusplus
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 
 NORETURN extern void
@@ -39,10 +39,10 @@ my_err_throw(
 
 
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 
-#define err(...)  ::emlsp::util::my_err_throw(true,  __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
-#define errx(...) ::emlsp::util::my_err_throw(false, __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
+#define err(...)  ::MAIN_PACKAGE_NAMESPACE::util::my_err_throw(true,  __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
+#define errx(...) ::MAIN_PACKAGE_NAMESPACE::util::my_err_throw(false, __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
 
 #define err_nothrow(...)  ::emlsp_my_err_(true,  __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)
 #define errx_nothrow(...) ::emlsp_my_err_(false, __FILE__, __LINE__, FUNCTION_NAME, ##__VA_ARGS__)

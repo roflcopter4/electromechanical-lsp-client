@@ -7,7 +7,7 @@
 #include "ipc/toploop.hh"
 #include <ipc/protocols/msgpack_connection.hh>
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::rpc {
 /****************************************************************************************/
 
@@ -22,8 +22,8 @@ class basic_rpc_interface
 
 
 template <typename ConnectionType, template <class> typename ProtocolType>
-      REQUIRES (BasicConnectionVariant<ConnectionType> &&
-                ProtocolConnectionVariant<ProtocolType<ConnectionType>>)
+    requires BasicConnectionVariant<ConnectionType> &&
+             ProtocolConnectionVariant<ProtocolType<ConnectionType>>
 class alignas(4096) basic_rpc_connection final
       : public ProtocolType<ConnectionType>
 {
@@ -41,9 +41,8 @@ class alignas(4096) basic_rpc_connection final
 
       DELETE_ALL_CTORS(basic_rpc_connection);
 
-      NOINLINE static auto new_unique() { return std::unique_ptr<this_type>(new this_type); }
-      NOINLINE static auto new_shared() { return std::shared_ptr<this_type>(new this_type); }
-
+      static auto new_unique() { return std::unique_ptr<this_type>(new this_type); }
+      static auto new_shared() { return std::shared_ptr<this_type>(new this_type); }
 
       /*------------------------------------------------------------------------------*/
 };
@@ -51,5 +50,5 @@ class alignas(4096) basic_rpc_connection final
 
 /****************************************************************************************/
 } // namespace ipc::rpc
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

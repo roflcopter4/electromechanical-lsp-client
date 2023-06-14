@@ -6,13 +6,13 @@
 #include "Common.hh"
 #include "util/util.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util {
 /****************************************************************************************/
 
 
 template <typename V>
-      REQUIRES (concepts::NotAnyPointer<V>)
+      requires concepts::NotAnyPointer<V>
 void resize_vector_hack(V &vec, size_t const new_size)
 {
       struct do_nothing {
@@ -64,7 +64,7 @@ concept StdStringDerived =
 
 /* Resize a standard string without zeroing any memory. */
 template <typename T>
-      REQUIRES (impl::StdStringDerived<T>)
+      requires impl::StdStringDerived<T>
 void resize_string_hack(T &str, size_t const new_size)
 {
       using value_type   = typename T::value_type;
@@ -72,14 +72,12 @@ void resize_string_hack(T &str, size_t const new_size)
       using allocator    = typename alloc_traits::template rebind_alloc<value_type>;
       using char_traits  = impl::my_char_traits<value_type>;
 
-      reinterpret_cast<
-          std::basic_string<value_type, char_traits, allocator> &
-      >(str).resize(new_size);
+      reinterpret_cast<std::basic_string<value_type, char_traits, allocator> &>(str).resize(new_size);
 }
 
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif
 // vim: ft=cpp

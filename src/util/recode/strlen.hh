@@ -5,7 +5,7 @@
 
 #include "recode_private.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::unistring {
 /****************************************************************************************/
 
@@ -71,7 +71,7 @@ ND constexpr size_t strlen(T const (&str)[N]) noexcept
 }
 
 template <typename T>
-    REQUIRES (
+    requires (
           concepts::Pointer<T> &&
           !concepts::Reference<T> &&
           !concepts::Array<T> &&
@@ -85,5 +85,5 @@ ND size_t strlen(T str) noexcept
 
 /****************************************************************************************/
 } // namespace util::unistring
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

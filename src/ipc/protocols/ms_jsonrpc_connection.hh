@@ -6,7 +6,7 @@
 #include "Common.hh"
 #include "ipc/basic_protocol_connection.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::protocols::MsJsonrpc {
 /****************************************************************************************/
 
@@ -62,32 +62,37 @@ class read_buffer final
 
       ND constexpr char *end() const __attribute__((__pure__))
       {
-            assert(used_ < max_);
+            if (!(used_ < max_))
+                  __debugbreak();
             return buf_ + used_;
       }
 
       ND constexpr size_t avail() const __attribute__((__pure__))
       {
-            assert(max_ >= used_);
+            if (!(max_ >= used_))
+                  __debugbreak();
             return max_ - used_;
       }
 
       ND constexpr char *unparsed_start() const __attribute__((__pure__))
       {
-            assert(max_ >= offset_);
+            if (!(max_ >= offset_))
+                  __debugbreak();
             return buf_ + offset_;
       }
 
       ND constexpr size_t unparsed_size() const __attribute__((__pure__))
       {
-            assert(used_ >= offset_);
+            if (!(used_ >= offset_))
+                  __debugbreak();
             return used_ - offset_;
       }
 
       void consume(size_t const delta)
       {
             used_ += delta;
-            assert(used_ < max_);
+            if (!(used_ < max_))
+                  __debugbreak();
       }
 
       void release(size_t const delta)
@@ -125,11 +130,11 @@ class read_buffer final
 
 
 template <typename Connection>
-      REQUIRES(ipc::BasicConnectionVariant<Connection>)
+      requires ipc::BasicConnectionVariant<Connection>
 class connection
     : public ipc::basic_protocol_connection<Connection, ipc::io::ms_jsonrpc_wrapper>
 {
-      std::mutex          read_mtx_;
+      std::mutex          read_mtx_{};
       detail::read_buffer rdbuf_{};
 
     public:
@@ -155,14 +160,15 @@ class connection
 
       //-------------------------------------------------------------------------------
 
-      static std::unique_ptr<connection<Connection>> new_unique()
+      static std::unique_ptr<connection> new_unique()
       {
-            return std::unique_ptr<connection<Connection>>(new connection<Connection>());
+            return std::unique_ptr<connection>(new connection());
       }
 
-      static std::shared_ptr<connection<Connection>> new_shared()
+      static std::shared_ptr<connection> new_shared()
       {
-            return std::shared_ptr<connection<Connection>>(new connection<Connection>());
+            // ReSharper disable once CppSmartPointerVsMakeFunction
+            return std::shared_ptr<connection>(new connection());
       }
 
       //-------------------------------------------------------------------------------
@@ -227,7 +233,6 @@ class connection
       real_poll_callback(UU uv_poll_t *handle, intc status, intc events)
       {
             std::lock_guard lock{read_mtx_};
-
             util::eprint(
                 FC("real_poll_callback called for descriptor {} (tag: {}) -- ({}, {})\n"),
                 this->raw_descriptor(), this->get_key(), status, events);
@@ -242,47 +247,56 @@ class connection
                   fflush(stderr);
             }
 
-            if (events & UV_READABLE && this->available() > 0) {
-                  try {
-                        while (auto rd = this->available() > 0) {
-                              if (rdbuf_.avail() == 0)
-                                    rdbuf_.reserve(rdbuf_.max() + rd);
-                              size_t const nread = this->raw_read(rdbuf_.end(), rdbuf_.avail(), 0);
-                              rdbuf_.consume(nread);
+            if (events & UV_READABLE) {
+                  if (this->available() > 0) {
+                        try {
+                              while (auto rd = this->available() > 0) {
+                                    if (rdbuf_.avail() == 0)
+                                          rdbuf_.reserve(rdbuf_.max() + rd);
+                                    size_t const nread = this->raw_read(rdbuf_.end(), rdbuf_.avail(), 0);
+                                    rdbuf_.consume(nread);
+                              }
+                        } catch (std::exception const &e) {
+                              DUMP_EXCEPTION(e);
+                              return;
                         }
-                  } catch (std::exception const &e) {
-                        DUMP_EXCEPTION(e);
-                        return;
-                  }
 
-                  while (rdbuf_.unparsed_size() > 20) {
-                        std::unique_ptr<rapidjson::Document> doc = true_read_callback_helper();
-                        if (!doc)
-                              break;
+                        while (rdbuf_.unparsed_size() > 20) {
+                              std::unique_ptr<rapidjson::Document> doc = true_read_callback_helper();
+                              if (!doc)
+                                    break;
 
-                        this->notify_all();
+                              this->notify_all();
 
-                        auto sb = rapidjson::GenericStringBuffer<
-                            rapidjson::UTF8<>,
-                            std::remove_reference_t<decltype(doc->GetAllocator())>>{
-                            &doc->GetAllocator()};
-                        auto writer = rapidjson::Writer{sb};
-                        doc->Accept(writer);
+                              auto sb = rapidjson::GenericStringBuffer<
+                                  rapidjson::UTF8<>,
+                                  std::remove_reference_t<decltype(doc->GetAllocator())>>
+                              { &doc->GetAllocator() };
+                              auto writer = rapidjson::Writer{sb};
+                              doc->Accept(writer);
 
-                        _lock_file(stderr);
-                        fmt::print(FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n"
-                                      "\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
-                                   sb.GetSize(),
-                                   std::string_view{sb.GetString(), sb.GetSize()});
-                        fflush(stdout);
-                        _unlock_file(stderr);
+                              _lock_file(stderr);
+                              fmt::print(FC("\n\n\033[1;35mRead {} bytes <<_EOF_\n"
+                                            "\033[0;33m{}\n\033[1;35m_EOF_\033[0m\n\n"),
+                                         sb.GetSize(),
+                                         std::string_view{sb.GetString(), sb.GetSize()});
+                              fflush(stdout);
+                              _unlock_file(stderr);
+                        }
+                  } else {
+                        char buf[32];
+                        if (recv(this->raw_descriptor(), buf, std::size(buf), MSG_PEEK) <= 0) {
+                              util::eprint(FC("Disconnecting from fd {}, key '{}', after failed read.\n"),
+                                           this->raw_descriptor(), this->get_key());
+                              goto disconnect;
+                        }
                   }
             }
 
             if (events & UV_DISCONNECT) {
                   util::eprint(FC("Got disconnect signal, status {}, for fd {}, key '{}'\n"),
                                status, this->raw_descriptor(), this->get_key());
-
+            disconnect:
                   if (!handle->loop)
                         return;
                   auto const &key_deleter = cast_deleter(handle->loop->data);
@@ -306,7 +320,6 @@ class connection
       true_read_callback(uv_stream_t *handle, ssize_t nread, UU uv_buf_t const *buf)
       {
             std::lock_guard lock{read_mtx_};
-
             if (nread == 0)
                   return;
             if (nread < 0) {
@@ -390,5 +403,5 @@ class connection
 
 /****************************************************************************************/
 } // namespace ipc::protocols::MsJsonrpc
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

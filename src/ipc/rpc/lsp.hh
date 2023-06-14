@@ -7,7 +7,7 @@
 
 #include "ipc/rpc/lsp/static-data.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc::rpc {
 /****************************************************************************************/
 
@@ -15,5 +15,5 @@ namespace ipc::rpc {
 
 /****************************************************************************************/
 } // namespace ipc::rpc
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

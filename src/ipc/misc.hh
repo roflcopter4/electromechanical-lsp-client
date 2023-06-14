@@ -8,7 +8,7 @@
 #  include <netinet/in.h>
 #endif
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace ipc {  //NOLINT(modernize-concat-nested-namespaces)
 /****************************************************************************************/
 
@@ -41,11 +41,7 @@ class connection_closed final : public std::runtime_error
 
 namespace detail {
 
-template<typename T>
-concept IsInetSockaddr = std::same_as<T, sockaddr_in> ||
-                         std::same_as<T, sockaddr_in6>;
-
-using ::emlsp::util::detail::procinfo_t;
+using ::MAIN_PACKAGE_NAMESPACE::util::detail::procinfo_t;
 
 #ifdef _WIN32
 
@@ -133,5 +129,5 @@ constexpr auto invalid_socket = static_cast<socket_t>(-1);
 
 /****************************************************************************************/
 } // namespace ipc
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif // misc.hh

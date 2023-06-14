@@ -1,6 +1,6 @@
 #pragma once
-#ifndef HGUARD__CONTRIB__INITIALIZER_H_
-#define HGUARD__CONTRIB__INITIALIZER_H_
+#ifndef DifjH06fS5Ajp1j6TuRQH1wGXywLMlYN
+#define DifjH06fS5Ajp1j6TuRQH1wGXywLMlYN
 
 // Initializer/finalizer sample for MSVC and GCC/Clang.
 // 2010-2016 Joe Lowe. Released into the public domain.
@@ -12,7 +12,7 @@
  */
 
 /*--------------------------------------------------------------------------------------*/
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__GNUC__) || defined(__clang__) || defined(__INTEL_LLVM_COMPILER)
 # ifdef __attribute__
 #  error "__attribute__ was defined?"
 # endif
@@ -54,10 +54,10 @@
 # else
 #  define HELP_INITIALIZER_HACK_EXTERN_C_
 # endif
-# pragma section(".CRT$XCU", read)
+# pragma section(".CRT$XCV", read)
 # define HELP_INITIALIZER_HACK_2_(fn, symb)                            \
       static void fn(void);                                            \
-      HELP_INITIALIZER_HACK_EXTERN_C_ __declspec(allocate(".CRT$XCU")) \
+      HELP_INITIALIZER_HACK_EXTERN_C_ __declspec(allocate(".CRT$XCV")) \
           void (*symb)(void) = fn;                                     \
       __pragma(comment(linker, "/include:" #symb))                     \
       __pragma(message("Warning: ensure that any function used by this initializer hack is globally unique!")) \
@@ -77,7 +77,7 @@
 
 #define INITIALIZER_HACK(FN) HELP_INITIALIZER_HACK_1_(initializer_hack_##FN, 0)
 
-#if (defined(__GNUC__) || defined(__clang__))
+#if defined(__GNUC__) || defined(__clang__) || defined(__INTEL_LLVM_COMPILER)
 //# define HELP_INITIALIZER_HACK_N_02_(FN, N, CNT, LN) HELP_INITIALIZER_HACK_N_1_(FN, N, CNT ## _ ## LN)
 //# define HELP_INITIALIZER_HACK_N_01_(FN, N, CNT, LN) HELP_INITIALIZER_HACK_N_02_(FN, N, CNT, LN)
 //# define INITIALIZER_HACK_N(FN, N)                   HELP_INITIALIZER_HACK_N_01_(FN, N, __COUNTER__, __LINE__)

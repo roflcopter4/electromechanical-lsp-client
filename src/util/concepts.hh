@@ -2,7 +2,7 @@
 #include "Common.hh"
 #include "util/util.hh"
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::concepts {
 
 template <typename T> concept Const     = std::is_const_v<std::remove_reference_t<T>>;
@@ -55,6 +55,14 @@ template <typename T> concept StringLiteral = requires {
       std::convertible_to<T, char const *(&&)>;
 };
 
+template <typename T> concept WideStringLiteral = requires {
+    requires std::is_reference_v<T>;
+    requires std::is_array_v<std::remove_reference_t<T>>;
+    requires std::convertible_to<std::remove_reference_t<T>, wchar_t const *> ||
+             std::convertible_to<T, wchar_t const *(&)> ||
+             std::convertible_to<T, wchar_t const *(&&)>;
+};
+
 template <typename T> concept NonStringable    = !Stringable<T>;
 template <typename T> concept NonStringLiteral = requires(T x) {
     requires !StringLiteral<T>;
@@ -68,4 +76,4 @@ concept is_compiled_string_c = fmt::detail::is_compiled_string<T>::value;
 
 
 } // namespace util::concepts
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE

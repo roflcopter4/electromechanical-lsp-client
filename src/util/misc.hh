@@ -4,14 +4,16 @@
 
 #include "Common.hh"
 
-#include <glib.h> //NOLINT
-#include <gio/gio.h>
+#ifdef WANT_GLIB
+# include <glib.h> //NOLINT
+# include <gio/gio.h>
+#endif
 
 /*
  * This file is for stuff that is pretty much overtly awful garbage.
  */
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 using namespace std::literals;
 namespace util {
 /****************************************************************************************/
@@ -27,7 +29,7 @@ class libc_free_deleter
       constexpr libc_free_deleter() noexcept = default;
 
       template <typename T2>
-            REQUIRES (std::convertible_to<T2 *, T1 *>)
+            requires std::convertible_to<T2 *, T1 *>
       libc_free_deleter(libc_free_deleter<T2> const &) noexcept
       {}
 
@@ -74,7 +76,7 @@ constexpr void free_all() {}
 /* I can't lie; the primary reason this exists is to silence clang's whining about
  * calling free. */
 template <typename T, typename ...Pack>
-      REQUIRES(util::concepts::GenericPointer<T>)
+      requires util::concepts::GenericPointer<T>
 constexpr void free_all(T arg, Pack ...pack)
 {
       // NOLINTNEXTLINE(hicpp-no-malloc,cppcoreguidelines-no-malloc)
@@ -84,6 +86,7 @@ constexpr void free_all(T arg, Pack ...pack)
 
 /*-------------------------------------------------------------------------------------*/
 
+#ifdef WANT_GLIB
 namespace glib {
 
 template <typename T>
@@ -109,6 +112,7 @@ inline unique_ptr_glib<gchar> filename_to_uri(std::string_view const &fname)
 }
 
 } // namespace glib
+#endif
 
 /*-------------------------------------------------------------------------------------*/
 
@@ -154,5 +158,5 @@ class not_implemented final : public std::logic_error
 
 /****************************************************************************************/
 } // namespace util
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
 #endif

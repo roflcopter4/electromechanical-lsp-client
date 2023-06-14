@@ -34,7 +34,7 @@
 #endif
 
 
-inline namespace emlsp {
+inline namespace MAIN_PACKAGE_NAMESPACE {
 namespace util::socket {
 /****************************************************************************************/
 
@@ -240,4 +240,4 @@ resolve_addr(char const *server, char const *port, int const type)
 
 /****************************************************************************************/
 } // namespace util::socket
-} // namespace emlsp
+} // namespace MAIN_PACKAGE_NAMESPACE
